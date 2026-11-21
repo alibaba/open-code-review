@@ -386,6 +386,17 @@ func (fs *FileSession) AppendTaskRecord(taskType TaskType, messages []llm.Messag
 	return rec
 }
 
+// ToolResults returns a snapshot of the evidence retrieved for a task.
+func (fs *FileSession) ToolResults(taskType TaskType) []ToolResultRecord {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	var results []ToolResultRecord
+	for _, rec := range fs.TaskRecords[taskType] {
+		results = append(results, rec.ToolResults...)
+	}
+	return results
+}
+
 // copyMessages returns a deep copy of a messages slice so that future mutations
 // don't corrupt stored records.
 func copyMessages(msgs []llm.Message) []llm.Message {
@@ -565,6 +576,10 @@ func (tr *TaskRecord) AddToolFailure(toolName, arguments, result string, duratio
 }
 
 func (tr *TaskRecord) addToolResult(toolName, arguments, result string, ok bool, duration time.Duration) {
+	if tr.fileSession != nil {
+		tr.fileSession.mu.Lock()
+		defer tr.fileSession.mu.Unlock()
+	}
 	tr.ToolResults = append(tr.ToolResults, ToolResultRecord{
 		ToolName:  toolName,
 		Arguments: arguments,
