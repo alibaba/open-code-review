@@ -47,7 +47,7 @@ Copilot CLI's installer warns that direct installs (repo/path/URL) are
 deprecated in favor of `plugin@marketplace`; once this repository's marketplace
 index points at the plugin root, `copilot plugin install <name>@open-code-review`
 becomes the recommended form.
-Remove it with `copilot plugin uninstall open-code-review`. See the
+Remove it with `copilot plugin uninstall open-code-review-codex`. See the
 [Copilot CLI guide](https://open-codereview.ai/docs/copilot-cli) for usage and
 manual installation.
 

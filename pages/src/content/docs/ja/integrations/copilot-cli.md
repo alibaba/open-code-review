@@ -25,7 +25,7 @@ Copilot CLI は標準的な場所からも skill を読み込むため、skill �
 copilot plugin install alibaba/open-code-review:plugins/open-code-review
 ```
 
-`open-code-review` と `open-code-review-delegate` の skill がインストールされます。削除するには `copilot plugin uninstall open-code-review` を実行します。
+`open-code-review` と `open-code-review-delegate` の skill がインストールされます。削除するには `copilot plugin uninstall open-code-review-codex` を実行します。
 
 Copilot CLI のインストーラーは現在、直接のプラグインインストール（repo/path/URL）が非推奨であり、marketplace 経由のインストールが推奨される、と警告しています。将来 marketplace のエントリにより `plugin@open-code-review` が推奨形式になる可能性があります。
 

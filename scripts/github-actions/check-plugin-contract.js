@@ -115,6 +115,13 @@ const MARKETPLACES = [
           value: typeof p.source.path === "string" ? p.source.path : null,
         })),
     requiredManifest: ".codex-plugin/plugin.json",
+    // A plugin directory may also carry a root Agent Plugins 1.0 manifest.
+    // Codex reads that manifest first and requires its `name` to equal the
+    // marketplace entry name: a directory whose root manifest names a
+    // different plugin fails to install even though the host manifest is
+    // present. A directory without one is not an error (Codex falls back to
+    // the host manifest alone).
+    rootManifest: "plugin.json",
   },
 ];
 
@@ -125,6 +132,34 @@ const MARKETPLACES = [
 function pluginEntries(json) {
   if (!json || !Array.isArray(json.plugins)) return [];
   return json.plugins.filter((p) => p && typeof p === "object");
+}
+
+// A marketplace entry and the root Agent Plugins 1.0 manifest of the plugin
+// directory it points at must agree on the plugin name: the host reads the
+// root manifest first and rejects the install when the names differ, even
+// though the host-specific manifest is present. `entryName` is the marketplace
+// entry name, `dir` the repo-relative plugin directory, `rootManifest` the
+// file name inside it, and `readJson` a (repo-relative file) -> object | null
+// reader. Returns { errors }: empty when the names agree, when the directory
+// carries no root manifest, or when the root manifest declares no string
+// `name` to compare (its own identity check reports that separately).
+function checkMarketplaceRootName(entryName, dir, rootManifest, readJson) {
+  const errors = [];
+  const file = `${dir}/${rootManifest}`;
+  const json = readJson(file);
+  if (json === null) return { errors };
+  if (typeof json.name !== "string" || json.name === "") return { errors };
+  if (json.name !== entryName) {
+    errors.push({
+      file,
+      message:
+        `${file} declares \`name: "${json.name}"\`, which does not match ` +
+        `marketplace plugin name "${entryName}". The host reads the root ` +
+        `manifest first and rejects the install on a mismatch; rename the ` +
+        `manifest or the entry so they agree.`,
+    });
+  }
+  return { errors };
 }
 
 // Path-declaring fields inside the plugin manifests themselves.
@@ -998,6 +1033,12 @@ function runManifestsCheck({ repoRoot = process.cwd() } = {}) {
             `\`${mp.requiredManifest}\`. ${mp.host} would not recognise it as a plugin.`,
         });
       }
+      if (mp.rootManifest) {
+        const rootName = checkMarketplaceRootName(src.name, dir, mp.rootManifest, (file) =>
+          readJsonOrNull(repoRoot, file)
+        );
+        errors.push(...rootName.errors);
+      }
     }
   }
 
@@ -1156,6 +1197,7 @@ module.exports = {
   validateAgentPluginManifest,
   checkAgentPluginManifests,
   pluginEntries,
+  checkMarketplaceRootName,
   listEntries,
   readFileOrNull,
   runLinksCheck,
