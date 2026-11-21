@@ -19,6 +19,8 @@ on:
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
       - '.github/workflows/pr-commit-policy.yml'
+      - '.github/workflows/ocr-review.yml'
+      - '.github/pr-admission.json'
       - '.github/workflows/release.yml'
   pull_request:
     branches: [main]
@@ -33,6 +35,8 @@ on:
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
       - '.github/workflows/pr-commit-policy.yml'
+      - '.github/workflows/ocr-review.yml'
+      - '.github/pr-admission.json'
       - '.github/workflows/release.yml'
 
 permissions:

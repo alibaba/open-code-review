@@ -61,6 +61,20 @@ This ensures any CRLF is converted to LF on commit, preventing line-ending issue
 
 ## Development Workflow
 
+### Open Pull Request Limit
+
+Each contributor may have up to **10 open pull requests**, including drafts,
+across all target branches. New or reopened PRs over the limit are automatically
+closed with an explanation before automated AI review starts. Please finish
+existing PRs, or close those you no longer need, then reopen your PR when a slot
+is available. Existing PRs are not bulk-closed when this policy is introduced.
+
+This is a review-capacity limit, not a judgment about patch quality or AI use.
+Discussion stays open; accounts are not blocked. The rule applies to maintainers
+as well as other contributors, with an explicit exception for the repository's
+Dependabot automation. See the [PR moderation policy](.github/PR_MODERATION.md)
+for counting, recovery, and automation details.
+
 ### Branching
 
 Create a feature branch from `main`:
