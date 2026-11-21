@@ -584,6 +584,9 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	warnLimit := PromptTokenLimit(maxAllowed)
 
 	r.tryApplyPendingCompression(st, messages)
+	if st.compressionBlocked(*messages) {
+		return StopCompression
+	}
 	compress := func() error {
 		r.cancelPendingCompression(st)
 		var err error
