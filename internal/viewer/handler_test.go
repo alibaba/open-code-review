@@ -35,6 +35,32 @@ func TestHandleRepos_Success(t *testing.T) {
 	}
 }
 
+func TestReportTabsShareHeader(t *testing.T) {
+	root := sessionFixture(t, `{"type":"session_start","reviewMode":"range","model":"example","analysis":{"enabled":true}}`, fixtureEnd)
+	mux := newMux(root)
+	parts := func(tab string) (string, string) {
+		t.Helper()
+		out := httptest.NewRecorder()
+		mux.ServeHTTP(out, httptest.NewRequest("GET", "/r/repo/sess1?tab="+tab, nil))
+		header, panel, ok := strings.Cut(out.Body.String(), "</header>")
+		active := `href="?tab=` + tab + `" aria-current="page"`
+		if out.Code != http.StatusOK || !ok || !strings.Contains(header, active) || strings.Count(header, `aria-current="page"`) != 1 {
+			t.Fatalf("%s: missing report header or incorrect current link", tab)
+		}
+		return strings.Replace(header, ` aria-current="page"`, "", 1), panel
+	}
+	reviewHeader, review := parts("review")
+	analysisHeader, analysis := parts("analysis")
+	if reviewHeader != analysisHeader {
+		t.Error("the breadcrumb, report context and navigation must match across tabs")
+	}
+	for _, label := range []string{"Status:", "Files:", "Duration:"} {
+		if strings.Contains(reviewHeader, label) || !strings.Contains(review, label) || strings.Contains(analysis, label) {
+			t.Errorf("%q should only appear in the review panel", label)
+		}
+	}
+}
+
 func TestCombinedReportViews(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")

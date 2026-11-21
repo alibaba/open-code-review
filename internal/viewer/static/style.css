@@ -817,9 +817,50 @@ h3 {
     letter-spacing: 0.01em;
 }
 .badge-model { background: var(--badge-model-bg); color: var(--badge-model-fg); }
-.report-tabs { display: flex; gap: 1.5rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; }
-.report-tabs a { padding: .65rem .2rem; color: var(--text-secondary); border-bottom: 3px solid transparent; text-decoration: none; }
-.report-tabs a[aria-current="page"] { border-color: var(--accent); color: var(--text-strong); font-weight: 600; }
+.report-page {
+    scrollbar-gutter: stable;
+}
+.report-page main {
+    animation: none;
+}
+.report-tabs {
+    display: flex;
+    gap: var(--space-1);
+    margin-top: var(--space-4);
+    border-bottom: 1px solid var(--border);
+}
+.report-tabs a {
+    min-width: 6rem;
+    padding: .65rem 1rem;
+    border-bottom: 3px solid transparent;
+    color: var(--text-secondary);
+    font-size: .9rem;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+}
+.report-tabs a:hover { background: var(--hover-row); }
+.report-tabs a[aria-current="page"] {
+    color: var(--text-strong);
+    border-color: var(--accent);
+}
+@media (forced-colors: active) {
+    .report-tabs a[aria-current="page"] {
+        text-decoration: underline;
+    }
+}
+.report-tabs a:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: -2px;
+}
+.review-outcome {
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-5);
+    background: var(--surface-alt);
+    border-radius: var(--radius-sm);
+    font-variant-numeric: tabular-nums;
+}
+.report-page :is(#review, #analysis) { scroll-margin-top: 4.25rem; }
 .analysis-report { max-width: 80ch; margin: 1.5rem auto; overflow-wrap: anywhere; }
 .analysis-facts { display: flex; flex-wrap: wrap; gap: .65rem 1.5rem; margin: 1rem 0; }
 .analysis-facts dt { color: var(--text-muted); font-size: .85rem; }
