@@ -4,19 +4,103 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+func TestScanPathSelectionE2E(t *testing.T) {
+	if os.Getenv("OCR_TEST_SCAN_PATH_SELECTION") == "1" {
+		rootCmd.SetArgs(os.Args[3:])
+		os.Exit(run())
+	}
+	freshOCRHome(t)
+	repo := initTestGitRepo(t)
+	gitCommitFile(t, repo, "one.go", "package example\n", "add one.go")
+	gitCommitFile(t, repo, "two.go", "package example\n", "add two.go")
+
+	tests := []struct {
+		name      string
+		args      []string
+		wantPaths []string
+		invalid   bool
+	}{
+		{name: "omitted", wantPaths: []string{"one.go", "two.go"}},
+		{name: "valid", args: []string{"--path", "one.go"}, wantPaths: []string{"one.go"}},
+		{name: "mixed", args: []string{"--path", ",one.go,"}, wantPaths: []string{"one.go"}},
+		{name: "empty", args: []string{"--path", ""}, invalid: true},
+		{name: "whitespace", args: []string{"--path", "   "}, invalid: true},
+		{name: "separators", args: []string{"--path", " , , "}, invalid: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{"-test.run=^TestScanPathSelectionE2E$", "--", "scan", "--repo", repo, "--preview", "--format", "json"}
+			args = append(args, tt.args...)
+			const sentinel = "keep\n"
+			var outputPath string
+			if tt.invalid {
+				outputPath = filepath.Join(t.TempDir(), "preview.json")
+				if err := os.WriteFile(outputPath, []byte(sentinel), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				args = append(args, "--output", outputPath)
+			}
+			cmd := exec.CommandContext(t.Context(), os.Args[0], args...)
+			cmd.Dir = repo
+			cmd.Env = append(os.Environ(), "OCR_TEST_SCAN_PATH_SELECTION=1", "OCR_NO_UPDATE=1", "OCR_ENABLE_TELEMETRY=0")
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			out, err := cmd.Output()
+			if tt.invalid {
+				if _, ok := errors.AsType[*exec.ExitError](err); !ok {
+					t.Errorf("scan %q error = %v, want nonzero exit status", tt.args, err)
+				}
+				if !strings.Contains(stderr.String(), "--path requires at least one file or directory") {
+					t.Errorf("scan %q stderr = %q, want path validation error", tt.args, stderr.String())
+				}
+				data, err := os.ReadFile(outputPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(data) != sentinel {
+					t.Errorf("scan %q output file = %q, want %q", tt.args, data, sentinel)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("scan %q: %v\n%s", tt.args, err, stderr.String())
+			}
+			var preview model.Preview
+			if err := json.Unmarshal(out, &preview); err != nil {
+				t.Fatalf("decode scan preview: %v\n%s", err, out)
+			}
+			var paths []string
+			for _, entry := range preview.Entries {
+				if entry.WillReview {
+					paths = append(paths, entry.Path)
+				}
+			}
+			slices.Sort(paths)
+			if !slices.Equal(paths, tt.wantPaths) {
+				t.Errorf("scan %q selected %v, want %v", tt.args, paths, tt.wantPaths)
+			}
+		})
+	}
+}
 
 func TestExecuteScanRejectsFileReadDiff(t *testing.T) {
 	freshOCRHome(t)
