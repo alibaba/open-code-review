@@ -207,6 +207,7 @@ AI가 개발 과정에 관여했다면 아래 규칙을 따라 주세요.
 | `docs/i18n/README.ja-JP.md` | Japanese translation |
 | `docs/i18n/README.ko-KR.md` | Korean translation |
 | `docs/i18n/README.tr-TR.md` | 튀르키예어 번역 |
+| `docs/i18n/README.fr-FR.md` | 프랑스어 번역 |
 | `CONTRIBUTING.md` | contribution guide (English) |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | contribution guide (Chinese) |
 | `docs/i18n/CONTRIBUTING.ja-JP.md` | contribution guide (Japanese) |

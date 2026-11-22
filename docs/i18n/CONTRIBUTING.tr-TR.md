@@ -213,6 +213,7 @@ Belgeler OpenCodeReview'ın önemli bir parçasıdır. README dosyalarını, kod
 | `docs/i18n/README.ko-KR.md` | Korece çeviri |
 | `docs/i18n/README.ru-RU.md` | Rusça çeviri |
 | `docs/i18n/README.tr-TR.md` | Türkçe çeviri |
+| `docs/i18n/README.fr-FR.md` | Fransızca çeviri |
 | `CONTRIBUTING.md` | Katkı kılavuzu (İngilizce) |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | Katkı kılavuzu (Çince) |
 | `docs/i18n/CONTRIBUTING.ja-JP.md` | Katkı kılavuzu (Japonca) |
