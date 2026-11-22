@@ -26,8 +26,11 @@ if sys.argv[1:3] == ['config', 'get']:
 assert sys.argv[1:4] == ['pr', 'view', '42'], sys.argv
 if '--repo' in sys.argv:
     assert sys.argv[sys.argv.index('--repo') + 1] == 'github.com/team/project'
+    assert 'GH_REPO' not in os.environ
 else:
     assert Path.cwd() == Path(os.environ['SOURCE'])
+    if os.environ.get('EXPECT_GH_REPO'):
+        assert os.environ.get('GH_REPO') == 'team/project'
 data = json.loads(os.environ['METADATA'])
 if Path('review.json').exists():
     assert '--repo' in sys.argv
@@ -39,12 +42,21 @@ print(json.dumps(data))
 """
 
 OCR = """
-import json, os, sys, time
+import json, os, subprocess, sys, time
 from pathlib import Path
 args = sys.argv[1:]
 with open('calls.jsonl', 'a') as log:
     log.write(json.dumps(args) + '\\n')
 mode = os.environ.get('MODE')
+if mode == 'policy':
+    tree = Path(args[args.index('--repo') + 1])
+    head = args[args.index('--to') + 1]
+    assert not (tree / '.opencodereview').exists()
+    assert subprocess.check_output(['git', '-C', str(tree), 'show', head + ':.opencodereview/rule.json']).strip() == b'not a rule document'
+    if os.environ.get('PR_TEST_NATIVE_OCR'):
+        preview = subprocess.check_output([os.environ['PR_TEST_NATIVE_OCR'], 'review', '--preview', '--format', 'json',
+                                           '--repo', str(tree), '--from', args[args.index('--from') + 1], '--to', head])
+        assert any(entry['path'] == 'change.go' and entry['will_review'] for entry in json.loads(preview)['files'])
 if mode == 'wait':
     while not Path('resume').exists():
         time.sleep(0.02)
@@ -100,8 +112,8 @@ class Standalone(unittest.TestCase):
     def git(self, *args):
         return subprocess.check_output(["git", *args], cwd=self.source, env=self.env, text=True).strip()
 
-    def commit(self, name):
-        (self.source / name).write_text(name)
+    def commit(self, name, content=None):
+        (self.source / name).write_text(name if content is None else content)
         self.git("add", name)
         self.git("commit", "-qm", name)
         return self.git("rev-parse", "HEAD")
@@ -151,6 +163,53 @@ class Standalone(unittest.TestCase):
         _, run = self.finish(self.start("42"))
         self.assertEqual(run["url"], URL)
         self.assertEqual(run["freshness"], "current")
+
+    def test_gh_repo_applies_only_to_initial_number_lookup(self):
+        _, run = self.finish(self.start("42", GH_REPO="team/project", EXPECT_GH_REPO="1"))
+        self.assertEqual(run["url"], URL)
+        self.assertEqual(run["freshness"], "current")
+
+    def test_head_policy_is_evidence_only(self):
+        self.git("switch", "-q", "topic")
+        policy = self.source / ".opencodereview" / "rule.json"
+        policy.parent.mkdir()
+        policy.write_text("not a rule document")
+        self.git("add", ".opencodereview/rule.json")
+        head = self.commit("change.go", "package example\n")
+        self.git("update-ref", "refs/pull/42/head", head)
+        self.git("switch", "-q", "release")
+        _, run = self.finish(self.start("42", MODE="policy", METADATA=json.dumps(dict(self.metadata, headRefOid=head))))
+        self.assertEqual(run["cleanup"], "complete")
+
+    def test_configured_mcp_stops_before_ocr(self):
+        config = self.root / ".opencodereview" / "config.json"
+        config.parent.mkdir()
+        for server in ({"command": "not-installed"}, {"type": "remote", "url": "https://example.invalid"}):
+            with self.subTest(server=server):
+                data = {"MCP_SERVERS": {"example": server}}
+                config.write_text(json.dumps(data))
+                folder, run = self.finish(self.start("42"), code=1)
+                self.assertEqual(run["failed_step"], "policy")
+                self.assertIn("MCP", run["error"])
+                self.assertFalse((folder / "calls.jsonl").exists())
+                self.assertEqual(json.loads(config.read_text()), data)
+
+    def test_changed_git_policy_requires_independent_review(self):
+        self.git("switch", "-q", "topic")
+        for name in (".gitignore", "nested/.gitattributes", ".gitmodules"):
+            with self.subTest(name=name):
+                self.git("reset", "--hard", self.head)
+                (self.source / name).parent.mkdir(parents=True, exist_ok=True)
+                content = "# Policy fixture\n"
+                if name == ".gitmodules":
+                    self.git("update-index", "--add", "--cacheinfo", f"160000,{self.common},vendor/lib")
+                    content = '[submodule "lib"]\n\tpath = vendor/lib\n'
+                head = self.commit(name, content)
+                self.git("update-ref", "refs/pull/42/head", head)
+                folder, run = self.finish(self.start("42", METADATA=json.dumps(dict(self.metadata, headRefOid=head))), code=1)
+                self.assertEqual(run["failed_step"], "policy")
+                self.assertIn(name, run["error"])
+                self.assertFalse((folder / "calls.jsonl").exists())
 
     def test_explicit_identity_and_freshness(self):
         for delta, expected in (({"baseRefName": "main"}, "stale"), ({"baseRefOid": self.common}, "stale"),

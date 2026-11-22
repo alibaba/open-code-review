@@ -60,6 +60,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  installed-pr-helper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test installed PR review helpers
+        run: python3 scripts/github-actions/test_review_pr.py
+
   plugin-contract:
     runs-on: self-hosted
     timeout-minutes: 10
@@ -77,9 +87,6 @@ jobs:
       # Validate the guardrail script itself (plain Node, no deps).
       - name: Test plugin-contract guardrail
         run: node scripts/github-actions/check-plugin-contract.test.js
-
-      - name: Test installed PR review helpers
-        run: python3 scripts/github-actions/test_review_pr.py
 
       # BLOCKING: no doc or README may link to a path that no longer exists.
       - name: Check in-repo path links

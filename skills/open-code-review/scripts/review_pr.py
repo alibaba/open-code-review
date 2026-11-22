@@ -102,6 +102,26 @@ def release(folder, head, env):
         shutil.rmtree(store)
 
 
+def prepare_review_policy(tree, base, head, env):
+    config = Path.home() / ".opencodereview" / "config.json"
+    try:
+        settings = json.loads(config.read_bytes(), object_pairs_hook=tuple)
+    except FileNotFoundError:
+        settings = ()
+    if not isinstance(settings, tuple):
+        raise ValueError("expected an OCR configuration object")
+    if any(key.casefold() == "mcp_servers" and value not in (None, ()) for key, value in settings):
+        raise ValueError("PR mode requires an OCR configuration without MCP servers; no review started")
+    changed = command("git", "diff-tree", "-r", "--no-commit-id", "--name-only", "--no-renames", base, head, "--",
+                      ":(top,icase).gitignore", ":(top,icase).gitmodules", ":(top,glob,icase)**/.gitattributes",
+                      cwd=tree, env=env)
+    if changed:
+        raise ValueError(f"PR changes Git filtering or diff policy; independent review required: {changed}")
+    command("git", "sparse-checkout", "set", "--no-cone", "--", "/*", "!/.opencodereview", cwd=tree, env=env)
+    if os.path.lexists(tree / ".opencodereview"):
+        raise ValueError("project review policy is still present in the worktree; no review started")
+
+
 def review(folder, base, head, background, env):
     args = ["ocr", "review", "--repo", str(folder / "worktree"), "--from", base, "--to", head,
             "--audience", "agent", "--analysis", "--format", "json", "--output", str(folder / "review.json")]
@@ -145,11 +165,15 @@ def run(number, repo, background):
     step = "lookup"
     code = 1
     try:
-        repo, snapshot = lookup(number, repo, None, env)
+        initial_env = dict(env, GH_REPO=os.environ["GH_REPO"]) if not repo and os.environ.get("GH_REPO") else env
+        repo, snapshot = lookup(number, repo, None, initial_env)
         summary.update(url=f"https://github.com/{repo}/pull/{number}", snapshot=snapshot)
         step = "freeze"
         base = freeze(folder, repo, number, snapshot, env, offline)
         summary["merge_base"] = base
+        step = "policy"
+        prepare_review_policy(folder / "worktree", base, snapshot["head"], offline)
+        summary["policy"] = {"project_rules": "omitted", "mcp_config": "checked_empty"}
         save(manifest, summary)
         step = "review"
         summary["ocr_exit"] = review(folder, base, snapshot["head"], background, offline)
