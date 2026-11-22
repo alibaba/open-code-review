@@ -698,9 +698,9 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Effort = string(e)
 	case "llm.url", "llm.URL":
-		// Same treatment as providers.<name>.url: an untrimmed or scheme-less
-		// value is accepted verbatim here and only surfaces later as an opaque
-		// "unsupported protocol scheme" from the LLM request.
+		// Same treatment as providers.<name>.url, so a scheme-less or padded
+		// value is refused here rather than surfacing as an opaque
+		// "unsupported protocol scheme" on the first LLM request.
 		trimmedURL := strings.TrimSpace(value)
 		if trimmedURL != "" {
 			if err := validateBaseURL(trimmedURL); err != nil {

@@ -107,9 +107,8 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	if result.model == "" {
 		return fmt.Errorf("model is required for manual configuration")
 	}
-	// The other writer of llm.url (ocr config set) validates the same way; a
-	// scheme-less or padded value here would be saved and only fail later as an
-	// opaque "unsupported protocol scheme" from the LLM request.
+	// The other writer of llm.url (ocr config set) validates the same way, so
+	// the two cannot disagree about what a valid value is.
 	baseURL := strings.TrimSpace(result.url)
 	if err := validateBaseURL(baseURL); err != nil {
 		return fmt.Errorf("invalid URL for manual configuration: %w", err)
