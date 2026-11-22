@@ -233,7 +233,7 @@ Tüm belgeler **[open-codereview.ai/docs](https://open-codereview.ai/docs)** adr
 
 ## Katkıda bulunma
 
-Bu proje katkı veren herkes sayesinde var. Geliştirme kurulumu, kodlama kuralları ve PR gönderimi için [CONTRIBUTING.md](../../CONTRIBUTING.md) dosyasına bakın.
+Bu proje katkı veren herkes sayesinde var. Geliştirme ortamını kurmak, kodlama kurallarını öğrenmek ve PR göndermek için [katkı kılavuzuna](CONTRIBUTING.tr-TR.md) bakın.
 
 <a href="https://github.com/alibaba/open-code-review/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />

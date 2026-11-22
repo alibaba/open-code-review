@@ -4,7 +4,7 @@ sidebar:
   order: 13
 ---
 
-OCR, Apache-2.0 lisanslı açık kaynak bir projedir. Hata bildirimleri, belge düzeltmeleri ve kod katkıları memnuniyetle karşılanır. Bu sayfa kısa başvurudur; esas sürüm [`CONTRIBUTING.md`](https://github.com/alibaba/open-code-review/blob/main/CONTRIBUTING.md) dosyasındadır.
+OCR, Apache-2.0 lisanslı açık kaynak bir projedir. Hata bildirimleri, belge düzeltmeleri ve kod katkıları memnuniyetle karşılanır. Bu sayfa kısa bir özettir. Katkı kılavuzunun tamamı için [Türkçe çeviriye](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/CONTRIBUTING.tr-TR.md) veya [İngilizce aslına](https://github.com/alibaba/open-code-review/blob/main/CONTRIBUTING.md) bakın.
 
 ## Katkı yolları {#ways-to-contribute}
 
@@ -238,4 +238,4 @@ Proje Alibaba Open Source CLA gerektirir. İlk PR'da bot bağlantı gönderir; e
 
 - [Mimari](../architecture/) — `internal/agent/` üzerinde çalışmadan önce gereken genel bakış.
 - [Araçlar](../tools/) — mevcut araçların yapısı.
-- Tam katkı kılavuzu: [CONTRIBUTING.md](https://github.com/alibaba/open-code-review/blob/main/CONTRIBUTING.md)
+- [Türkçe katkı kılavuzunun tamamı](https://github.com/alibaba/open-code-review/blob/main/docs/i18n/CONTRIBUTING.tr-TR.md)
