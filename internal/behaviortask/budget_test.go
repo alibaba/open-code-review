@@ -135,7 +135,7 @@ func TestBudgetToolDefinitionEstimation(test *testing.T) {
 				calls++
 				return &llm.ChatResponse{}, nil
 			})
-			for round := 0; round < 2; round++ {
+			for range 2 {
 				response, err := budget.wrap(client).CompletionsWithCtx(test.Context(), request)
 				if err != nil {
 					test.Fatal(err)

@@ -67,7 +67,7 @@ func TestLargeDeniedInventory(test *testing.T) {
 	input := fixture(test)
 	blob := git(test, input.RepoDir, "rev-parse", "HEAD:main.go")
 	var entries strings.Builder
-	for index := 0; index < 12000; index++ {
+	for index := range 12000 {
 		fmt.Fprintf(&entries, "100644 %s\tvendor/%s%05d.go\n", blob, strings.Repeat("dependency-", 10), index)
 	}
 	command := exec.Command("git", "update-index", "--index-info")

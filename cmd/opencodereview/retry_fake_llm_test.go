@@ -57,9 +57,7 @@ type fakeLLM struct {
 // file. rateLimitOnce and hardFail are set by the caller before use.
 func newFakeLLM() *fakeLLM {
 	fileMarkers := make(map[string]string, len(markers))
-	for marker, name := range markers {
-		fileMarkers[marker] = name
-	}
+	maps.Copy(fileMarkers, markers)
 	return &fakeLLM{
 		mainInputTokens: 10,
 		attemptsByFile:  map[string]int{},
