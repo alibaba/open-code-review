@@ -72,7 +72,7 @@ func (p *FileReadProvider) execute(ctx context.Context, args map[string]any) (st
 
 	lines, totalLines, err := p.FileReader.ReadLines(ctx, filePath, int(startLine), maxLines)
 	if err != nil {
-		return "", fmt.Errorf("file %q not found: %w", filePath, err)
+		return "", fmt.Errorf("read file %q: %w", filePath, err)
 	}
 
 	if totalLines > 0 && int(startLine)-1 >= totalLines {

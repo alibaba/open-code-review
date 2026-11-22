@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/pathutil"
@@ -91,6 +92,13 @@ func (fr *FileReader) readFromDisk(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read file %q: %w", path, err)
 	}
+	return sourceText(path, content)
+}
+
+func sourceText(path string, content []byte) (string, error) {
+	if !utf8.Valid(content) {
+		return "", fmt.Errorf("file %q contains invalid UTF-8", path)
+	}
 	return string(content), nil
 }
 
@@ -128,7 +136,7 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 		if err != nil {
 			return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
 		}
-		return string(output), nil
+		return sourceText(path, output)
 	}
 
 	cmd := exec.CommandContext(ctx, "git", args...)
@@ -137,7 +145,7 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 	if err != nil {
 		return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
 	}
-	return string(output), nil
+	return sourceText(path, output)
 }
 
 // ReadLines returns a window of lines from the file plus the total line count.
@@ -169,6 +177,9 @@ func scanLines(r io.Reader, startLine, maxLines int) ([]string, int, error) {
 	for {
 		line, err := br.ReadString('\n')
 		if len(line) > 0 {
+			if !utf8.ValidString(line) {
+				return nil, 0, fmt.Errorf("invalid UTF-8 on line %d", lineNum+1)
+			}
 			lineNum++
 			lastHadNewline = line[len(line)-1] == '\n'
 			trimmed := strings.TrimSuffix(line, "\n")

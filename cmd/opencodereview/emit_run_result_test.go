@@ -790,3 +790,19 @@ func TestEmitRunResult_TextReportWithWarnings(t *testing.T) {
 		t.Errorf("report emitted more than once: %s", got)
 	}
 }
+
+func TestEmitRunResultAllInvalidUTF8(t *testing.T) {
+	ag := &mockResultProvider{warnings: []agent.AgentWarning{{File: "legacy.go", Type: "invalid_utf8", Message: "Skipped file containing invalid UTF-8."}}}
+	var out bytes.Buffer
+	err := emitRunResult(t.Context(), ag, nil, time.Now(), "json", "developer", nil, nil, &out, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result jsonOutput
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "skipped" || result.Comments == nil || len(result.Comments) != 0 || !slices.Equal(result.Warnings, ag.warnings) {
+		t.Fatalf("unexpected skipped result: %s", out.String())
+	}
+}

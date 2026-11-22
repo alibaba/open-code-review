@@ -47,6 +47,8 @@ func (a *Agent) selectFiles(diffs []model.Diff) []fileDecision {
 		dec := fileDecision{Diff: d, Reason: a.whyExcluded(d)}
 		switch {
 		case dec.Reason != ExcludeNone:
+		case d.InvalidUTF8:
+			dec.Reason = model.ExcludeInvalidUTF8
 		case d.IsDeleted:
 			dec.Reason = ExcludeDeleted
 		case limit > 0:
@@ -103,8 +105,9 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 
 // selectionCounts is the run-level rollup of one selection pass.
 type selectionCounts struct {
-	Selected int // files that enter the selected set
-	TooLarge int // files dropped by the per-file diff-size ceiling
+	Selected    int // files that enter the selected set
+	InvalidUTF8 int // files dropped because their source contains invalid UTF-8
+	TooLarge    int // files dropped by the per-file diff-size ceiling
 }
 
 // summarizeSelection returns the diffs the run keeps working with, plus the
@@ -119,6 +122,8 @@ func summarizeSelection(decisions []fileDecision) ([]model.Diff, selectionCounts
 		switch {
 		case dec.selected():
 			counts.Selected++
+		case dec.Reason == model.ExcludeInvalidUTF8:
+			counts.InvalidUTF8++
 		case dec.Reason == ExcludeTooLarge:
 			counts.TooLarge++
 		}

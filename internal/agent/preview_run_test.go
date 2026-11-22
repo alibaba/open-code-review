@@ -16,7 +16,9 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/tool"
 )
 
 func initPreviewRepo(t *testing.T) string {
@@ -301,6 +303,7 @@ func TestPreviewMatchesRunSelectedCoverage(t *testing.T) {
 	}
 	write("main.go", "package main\n")
 	write("notes.md", "# notes\n")
+	write("legacy.go", "// \xc4\xe3\xba\xc3\n")
 	write("huge.go", strings.Repeat("token ", 2000))
 	if err := os.Remove(filepath.Join(dir, "gone.go")); err != nil {
 		t.Fatalf("remove gone.go: %v", err)
@@ -343,9 +346,10 @@ func TestPreviewMatchesRunSelectedCoverage(t *testing.T) {
 	// Pin the fixture itself: the comparison below is only meaningful while each
 	// exclusion path is actually represented.
 	for path, want := range map[string]ExcludeReason{
-		"notes.md": ExcludeExtension,
-		"gone.go":  ExcludeDeleted,
-		"huge.go":  ExcludeTooLarge,
+		"notes.md":  ExcludeExtension,
+		"legacy.go": model.ExcludeInvalidUTF8,
+		"gone.go":   ExcludeDeleted,
+		"huge.go":   ExcludeTooLarge,
 	} {
 		if got := byPath[path].ExcludeReason; got != want {
 			t.Fatalf("%s exclude_reason = %q, want %q", path, got, want)
@@ -377,8 +381,8 @@ func TestPreviewMatchesRunSelectedCoverage(t *testing.T) {
 	for _, item := range manifest.Coverage.Excluded {
 		excluded[item.Path] = item.ExcludeReason
 	}
-	if len(excluded) != 3 {
-		t.Errorf("run excluded = %v, want notes.md, gone.go and huge.go", excluded)
+	if len(excluded) != 4 {
+		t.Errorf("run excluded = %v, want notes.md, gone.go, huge.go and legacy.go", excluded)
 	}
 	for path, got := range excluded {
 		if want := byPath[path].ExcludeReason; got != want {
@@ -406,5 +410,32 @@ func TestPreviewEmptyEntriesNotNil(t *testing.T) {
 	}
 	if preview.Entries == nil {
 		t.Error("Entries is nil; JSON output would emit \"files\":null")
+	}
+}
+
+func TestReviewSkippedInvalidUTF8(t *testing.T) {
+	dir := initPreviewRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "legacy.go"), []byte("// \xff\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	reader := tool.NewFileReadDiff(tool.NewDiffMap(nil))
+	reg.Register(reader)
+	a := New(Args{RepoDir: dir, Tools: reg})
+	comments, err := a.Run(t.Context())
+	if err != nil || len(comments) != 0 {
+		t.Fatalf("Run returned %v, %v", comments, err)
+	}
+	m := a.RunManifest()
+	if m.TerminalState != session.StateSkipped || len(m.Coverage.Selected) != 0 || len(m.Coverage.Excluded) != 1 || m.Coverage.Excluded[0].ExcludeReason != model.ExcludeInvalidUTF8 {
+		t.Fatalf("unexpected manifest: %+v", m)
+	}
+	got, err := reader.Execute(t.Context(), map[string]any{"path_array": []any{"legacy.go"}})
+	if err != nil || !strings.Contains(got, "diff not found for: legacy.go") {
+		t.Fatalf("file_read_diff: %q, %v", got, err)
+	}
+	w := a.Warnings()
+	if len(w) != 1 || w[0].Type != "invalid_utf8" || w[0].File != "legacy.go" {
+		t.Fatalf("unexpected warnings: %+v", w)
 	}
 }

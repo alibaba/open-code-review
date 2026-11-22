@@ -97,6 +97,14 @@ func hasReviewLimitWarning(warnings []agent.AgentWarning) bool {
 	return false
 }
 
+const encodingSkipMessage = "Files containing invalid UTF-8 were skipped."
+
+func hasEncodingSkip(warnings []agent.AgentWarning) bool {
+	return slices.ContainsFunc(warnings, func(w agent.AgentWarning) bool {
+		return w.Type == string(model.ExcludeInvalidUTF8)
+	})
+}
+
 func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning, manifest *session.RunManifest, out io.Writer) {
 	if manifest != nil {
 		fmt.Fprintln(out, manifestMessage(manifest, len(comments)))
@@ -109,6 +117,8 @@ func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			fmt.Fprintln(out, "Some files could not be reviewed due to errors (see warnings below).")
 		case hasReviewLimitWarning(warnings):
 			fmt.Fprintln(out, "A review limit was reached before finishing; some findings may be missing (see warnings below).")
+		case hasEncodingSkip(warnings):
+			fmt.Fprintln(out, encodingSkipMessage)
 		default:
 			fmt.Fprintln(out, "No comments generated. Looks good to me.")
 		}
@@ -429,6 +439,8 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			payload.Message = "Some files could not be reviewed due to errors."
 		case hasReviewLimitWarning(warnings):
 			payload.Message = "A review limit was reached before finishing; some findings may be missing."
+		case hasEncodingSkip(warnings):
+			payload.Message = encodingSkipMessage
 		default:
 			payload.Message = "No comments generated. Looks good to me."
 		}
@@ -681,7 +693,7 @@ func manifestMessage(manifest *session.RunManifest, findings int) string {
 	}
 }
 
-func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, out io.Writer) error {
+func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, warnings []agent.AgentWarning, out io.Writer) error {
 	payload := jsonOutput{
 		Status:    "skipped",
 		LLM:       llmIdentity,
@@ -689,6 +701,10 @@ func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, out io.Writ
 		Message:   "No supported files changed.",
 		Comments:  []model.LlmComment{},
 		ToolCalls: newJSONToolCalls(nil, nil),
+		Warnings:  warnings,
+	}
+	if hasEncodingSkip(warnings) {
+		payload.Message = encodingSkipMessage
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")

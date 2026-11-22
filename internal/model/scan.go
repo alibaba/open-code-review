@@ -8,10 +8,11 @@ package model
 // entire file content because scan reviews whole files with no diff
 // context.
 type ScanItem struct {
-	Path      string `json:"path"`
-	Content   string `json:"content"`
-	IsBinary  bool   `json:"is_binary,omitempty"`
-	LineCount int    `json:"line_count,omitempty"`
+	Path        string `json:"path"`
+	Content     string `json:"content"`
+	InvalidUTF8 bool   `json:"-"`
+	IsBinary    bool   `json:"is_binary,omitempty"`
+	LineCount   int    `json:"line_count,omitempty"`
 }
 
 // AsDiff returns a Diff suitable for handing to code that expects the

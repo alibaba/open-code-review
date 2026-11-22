@@ -432,7 +432,7 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	os.Stdout = w
 
 	identity := &jsonLLMIdentity{Provider: "anthropic", Model: "claude-opus-4-6"}
-	err := outputJSONNoFiles("test-trace-id-456", identity, os.Stdout)
+	err := outputJSONNoFiles("test-trace-id-456", identity, nil, os.Stdout)
 
 	_ = w.Close()
 	os.Stdout = old

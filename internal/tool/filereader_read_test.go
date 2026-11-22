@@ -274,3 +274,29 @@ func TestFileReader_Read_CommitMode_MonorepoSubdirPath(t *testing.T) {
 		t.Errorf("workspace-mode Read = %q, want %q", gotDisk, content)
 	}
 }
+
+func TestFileReadRejectsInvalidUTF8OutsideWindow(t *testing.T) {
+	dir := setupTestRepo(t)
+	const name = "hello.go"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("first\r\n"+strings.Repeat("x", fileReadMaxLineBytes+1)+"\xff"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "commit", "-am", "invalid source").CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v: %s", err, out)
+	}
+	for _, fr := range []FileReader{
+		{RepoDir: dir, Mode: ModeWorkspace},
+		{RepoDir: dir, Mode: ModeRange, Ref: "HEAD"},
+		{RepoDir: dir, Mode: ModeCommit, Ref: "HEAD", Runner: gitcmd.New(1)},
+	} {
+		if got, err := fr.Read(t.Context(), name); got != "" || err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
+			t.Errorf("Read: %q, %v", got, err)
+		}
+		for _, line := range []float64{1, 2} {
+			got, err := NewFileRead(&fr).Execute(t.Context(), map[string]any{"file_path": name, "start_line": line, "end_line": line})
+			if got != "" || err == nil || !strings.Contains(err.Error(), name) || !strings.HasSuffix(err.Error(), "invalid UTF-8 on line 2") {
+				t.Errorf("file_read line %.0f: %q, %v; want an invalid UTF-8 error on line 2", line, got, err)
+			}
+		}
+	}
+}

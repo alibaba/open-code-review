@@ -342,6 +342,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	if counts.Selected == 0 {
 		skipReason := "no_supported_files"
 		switch {
+		case counts.InvalidUTF8 > 0:
+			skipReason = string(model.ExcludeInvalidUTF8)
 		case counts.TooLarge > 0:
 			skipReason = "too_large"
 		case len(kept) > 0:
@@ -357,7 +359,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// no.files.changed keeps firing for the case it always covered, so existing
 		// consumers are unaffected; it stayed silent when the size gate emptied the
 		// set, which is the reading review.skipped adds.
-		if counts.TooLarge > 0 {
+		if counts.InvalidUTF8 > 0 {
+			fmt.Fprintln(stdout.Writer(), "[ocr] No reviewable files remain after exclusions. Skipping review.")
+		} else if counts.TooLarge > 0 {
 			fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) exceeded the token size limit; nothing left to review. Skipping review.\n", counts.TooLarge)
 		} else {
 			fmt.Fprintln(stdout.Writer(), "[ocr] No supported files changed. Skipping review.")
@@ -620,7 +624,9 @@ func (a *Agent) injectDiffMap() {
 	m := make(map[string]string, len(a.diffs))
 	for i := range a.diffs {
 		d := &a.diffs[i]
-		m[effectivePath(*d)] = d.Diff
+		if !d.InvalidUTF8 {
+			m[effectivePath(*d)] = d.Diff
+		}
 	}
 	dm := tool.NewDiffMap(m)
 	if p, ok := a.args.Tools.Get(tool.FileReadDiff.Name()); ok {
@@ -2054,6 +2060,9 @@ func (a *Agent) logExclusions(decisions []fileDecision) {
 		// Listed exhaustively rather than defaulted, so a reason added later
 		// cannot silently inherit the path/extension wording.
 		switch dec.Reason {
+		case model.ExcludeInvalidUTF8:
+			a.recordWarning(string(dec.Reason), effectivePath(dec.Diff), "Skipped file containing invalid UTF-8.")
+			continue
 		case ExcludeBinary:
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", effectivePath(dec.Diff))
 		case ExcludeSecret:

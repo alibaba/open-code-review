@@ -9,6 +9,7 @@ type Diff struct {
 	NewPath        string `json:"new_path"`
 	Diff           string `json:"diff"`
 	NewFileContent string `json:"new_file_content"`
+	InvalidUTF8    bool   `json:"-"`
 	IsBinary       bool   `json:"is_binary"`
 	IsDeleted      bool   `json:"is_deleted"`
 	IsNew          bool   `json:"is_new"`
