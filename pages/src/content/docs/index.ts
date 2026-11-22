@@ -143,12 +143,15 @@ function turkishSearchPattern(query: string): RegExp {
   return new RegExp(literal.replace(/[i\u0131]/gu, letter => `[${letter}I]`));
 }
 
+declare const __ENGLISH_DOC_IDENTIFIERS__: string[];
+const englishDocIdentifiers = new Set(__ENGLISH_DOC_IDENTIFIERS__);
+
 function foldTurkishDocument(content: string): string {
-  const englishIdentifier = /^(?:AI|ANSI|API|CI|CLI|ID|IDE|IDEA|SARIF|TUI|UI|URI|UUID|[a-z0-9]+_[a-z0-9_]+)$/i;
+  const englishIdentifier = /^(?:AI|ANSI|API|CI|CLI|ID|IDE|IDEA|Intel|Linux|SARIF|TUI|UI|URI|UUID|Windows)$/i;
   return content.replace(/[\p{L}\p{M}\p{N}_]+/gu, word => {
     if (!/[Ii\u0130]/u.test(word)) return word.toLowerCase();
-    const isCamelCaseName = /^[a-zA-Z0-9]+$/.test(word) && /[a-z][A-Z]/.test(word);
-    if (isCamelCaseName || englishIdentifier.test(word)) return word.toLowerCase().replace(/i/g, 'I');
+    const lower = word.toLowerCase();
+    if (englishDocIdentifiers.has(lower) || englishIdentifier.test(word)) return lower.replace(/i/g, 'I');
     return word.toLocaleLowerCase('tr');
   });
 }
