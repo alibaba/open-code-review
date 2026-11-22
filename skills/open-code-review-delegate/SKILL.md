@@ -111,7 +111,7 @@ Use `(path, status)` as the checklist identity. Workspace mode can report the sa
 
 For large changes, review in bounded batches grouped by shared rules and diff size. Do not stop after finding the first high-severity issue.
 
-While reading each diff, ask which existing caller or user workflow, if any, behaves differently. Reuse the same evidence; follow a caller, contract, or test only when it helps establish a concrete before/after scenario. Compare the sides selected in Step 3 (the new side in workspace mode is the live working tree). This is part of the host's review, not a separate `ocr review --analysis` run or a flag to pass to `delegate`.
+While reading each diff, ask which existing caller or user workflow, if any, behaves differently. Reuse the same evidence; follow a caller, contract, or test only when it helps establish a concrete before/after scenario. Compare the sides selected in Step 3 (the new side in workspace mode is the live working tree). Assess behavior changes as you review the diff. Do not run `ocr review --analysis` or pass `--analysis` to `ocr delegate`.
 
 A removed interface may matter even when there are no new lines to review. If preview excludes a file solely as `deleted`, use its old side as context when needed, without counting it as reviewed. Respect all other exclusions when following evidence.
 
