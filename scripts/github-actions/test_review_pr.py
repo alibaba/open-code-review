@@ -145,6 +145,13 @@ class Standalone(unittest.TestCase):
         self.assertEqual(self.git("symbolic-ref", "--short", "HEAD"), "release")
         self.assertEqual(self.git("status", "--porcelain").splitlines(), ['M initial', 'A  staged', '?? untracked'])
 
+    def test_bare_number_uses_upstream_default_in_fork(self):
+        self.git("remote", "rename", "origin", "upstream")
+        self.git("remote", "add", "origin", "https://github.com/contributor/project.git")
+        _, run = self.finish(self.start("42"))
+        self.assertEqual(run["url"], URL)
+        self.assertEqual(run["freshness"], "current")
+
     def test_explicit_identity_and_freshness(self):
         for delta, expected in (({"baseRefName": "main"}, "stale"), ({"baseRefOid": self.common}, "stale"),
                                 ({"headRefOid": self.base}, "stale"), (None, "unverified")):

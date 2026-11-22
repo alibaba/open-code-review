@@ -30,7 +30,7 @@ Analyze the review target (commits, branch, or changes) to extract concise busin
 
 ### Step 2: Run Code Review
 
-**GitHub PR mode:** A bare positive number (e.g. `42`) means PR #42 in the current repository; the `pr` prefix is optional. For a PR number or GitHub PR URL, run `python3 "$SKILL_DIR/scripts/review_pr.py" <id-or-url>` once, resolving `SKILL_DIR` from this installed skill. Forward an explicit `--repo OWNER/REPO` or `--background`. Read the printed `run.json` and its result file; report the reviewed revisions, freshness, and artifact path with Step 3. On failure report the failed step, not a fallback branch review. Only PR mode needs Python 3 and authenticated `gh`.
+**GitHub PR mode:** A bare positive number (e.g. `42`) selects a PR in the GitHub CLI's default repository for this checkout, which can be upstream of a fork. The `pr` prefix is optional. For a PR number or GitHub PR URL, run `python3 "$SKILL_DIR/scripts/review_pr.py" <id-or-url>` once, resolving `SKILL_DIR` from this installed skill. Forward an explicit `--repo OWNER/REPO` or `--background`. Read the printed `run.json` and its result file; report the resolved PR URL, reviewed revisions, freshness, and artifact path with Step 3. On failure report the failed step, not a fallback branch review. Only PR mode needs Python 3 and authenticated `gh`.
 
 **Otherwise run `ocr review` directly.** Do not probe with `command -v ocr` or `ocr --version` first; that adds an unnecessary tool call on the normal path.
 

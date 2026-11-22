@@ -192,7 +192,7 @@ def interrupt(signum, frame):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Review one pinned GitHub pull request using native OCR.")
-    parser.add_argument("pr", help="Current repository PR number or full GitHub PR URL")
+    parser.add_argument("pr", help="PR number in the checkout's default gh repository, or a full GitHub PR URL")
     parser.add_argument("--repo", help="GitHub repository (OWNER/REPO)")
     parser.add_argument("--background", help="Business context for the review")
     args = parser.parse_args()

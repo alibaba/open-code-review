@@ -4,7 +4,7 @@
 
 ## User interface
 
-A bare positive integer selects PR mode in the [native skill](../../skills/open-code-review/SKILL.md): `42` and `pr 42` both review PR 42 in the current checkout's GitHub repository. `42 --repo owner/repo` selects a different repository; a GitHub PR URL selects the same mode without needing `--repo`. If the repository cannot be resolved unambiguously or the URL conflicts with `--repo`, report the error rather than guessing. This is skill input, not a new `ocr` CLI command. Local workspace, commit, and branch reviews keep their existing behavior and dependencies.
+A bare positive integer selects PR mode in the [native skill](../../skills/open-code-review/SKILL.md): `42` and `pr 42` both review PR 42 in the GitHub CLI's default repository for this checkout. In a fork this can be the upstream repository rather than `origin`. Report the resolved PR URL so the target is visible. `42 --repo owner/repo` selects a different repository; a GitHub PR URL selects the same mode without needing `--repo`. If the repository cannot be resolved or the URL conflicts with `--repo`, report the error rather than guessing. This is skill input, not a new `ocr` CLI command. Local workspace, commit, and branch reviews keep their existing behavior and dependencies.
 
 ## The entire PR-specific skill instruction
 
@@ -28,7 +28,7 @@ The script prints the absolute path to `run.json`. It records the frozen identit
 
 Use real local Git fixtures, stub GitHub responses and a recording OCR executable. Test the installed script as a process, not just its internal functions.
 
-- **Routing:** A numeric ID uses the current repository; an override or URL selects the stated repository from an unrelated checkout. Conflicting inputs stop before fetch. Non-PR reviews work without `gh` or Python.
+- **Routing:** A numeric ID follows the GitHub CLI's repository selection, including an upstream default in a fork checkout. An override or URL selects the stated repository from an unrelated checkout. Conflicting inputs stop before fetch. Non-PR reviews work without `gh` or Python.
 - **Revision identity:** A fork PR targets a non-default branch that has advanced since divergence. Assert exactly one OCR call, from the merge-base rather than the target tip, to the advertised head. A mismatch during fetch or a non-unique merge-base yields zero calls.
 - **Isolation and cleanup:** Start two reviews of one PR from a dirty checkout; fail or interrupt one. Confirm independent refs, worktrees, and artifacts, an unchanged source HEAD/index/files, and that one run cannot clean the other. A modified review worktree is left intact and reported.
 - **Freshness:** Exercise unchanged, retargeted, advanced-base, changed-head, and unavailable responses. Assert the reported state, retained result, and absence of an automatic rerun.
