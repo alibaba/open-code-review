@@ -1207,59 +1207,88 @@ func TestOpenAIResponsesClient_ExtraBodyPromptCacheKeyOverridesSessionID(t *test
 	}
 }
 
-// TestNewLLMClientResponsesOptInStreams follows the opt in from a real config
-// file through resolution and NewLLMClient to the wire: the server sees
-// stream true even though extra_body explicitly carries stream false.
+// TestNewLLMClientResponsesOptInStreams pins the public JSON key and both
+// directions of the opt-in gate from a raw config through NewLLMClient.
 func TestNewLLMClientResponsesOptInStreams(t *testing.T) {
-	clearAllEnv(t)
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Errorf("read request body: %v", err)
-			return
-		}
-		if err := json.Unmarshal(raw, &gotBody); err != nil {
-			t.Errorf("decode request body: %v", err)
-			http.Error(w, "invalid request body", http.StatusBadRequest)
-			return
-		}
-		if gotBody["stream"] != true {
-			t.Errorf("stream = %v, want true", gotBody["stream"])
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_opt_in","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}}`+"\n\n")
-		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp_opt_in","object":"response","model":"gpt-6.1-terra","status":"completed","output":[]}}`+"\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	}))
-	defer server.Close()
-
 	const providerName = "terra-bifrost"
-	path, _ := writeResolverConfig(t, configFile{
-		Provider: providerName,
-		CustomProviders: map[string]providerEntryConfig{
-			providerName: {
-				APIKey:            "fixture-key",
-				URL:               server.URL + "/v1",
-				Protocol:          "openai-responses",
-				Model:             "gpt-6.1-terra",
-				ExtraBody:         map[string]any{"stream": false, "reasoning_effort": "medium"},
-				RequiresStreaming: true,
-			},
+	tests := []struct {
+		name       string
+		raw        string
+		wantStream bool
+	}{
+		{
+			name:       "custom opt in",
+			raw:        `{"provider":"terra-bifrost","custom_providers":{"terra-bifrost":{"api_key":"fixture-key","url":"URL","protocol":"openai-responses","model":"gpt-6.1-terra","extra_body":{"stream":false,"reasoning_effort":"medium"},"requires_streaming":true}}}`,
+			wantStream: true,
 		},
-	})
-	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
-	if err != nil {
-		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+		{
+			name:       "custom opt out",
+			raw:        `{"provider":"terra-bifrost","custom_providers":{"terra-bifrost":{"api_key":"fixture-key","url":"URL","protocol":"openai-responses","model":"gpt-6.1-terra","extra_body":{"stream":false,"reasoning_effort":"medium"}}}}`,
+			wantStream: false,
+		},
+		{
+			name:       "preset key ignored",
+			raw:        `{"provider":"openai-responses","providers":{"openai-responses":{"api_key":"fixture-key","url":"URL","model":"gpt-6.1-terra","extra_body":{"stream":false},"requires_streaming":true}}}`,
+			wantStream: false,
+		},
 	}
-	client := NewLLMClient(ep, nil, nil)
-	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}},
-	})
-	if err != nil {
-		t.Fatalf("CompletionsWithCtx: %v", err)
-	}
-	if resp.Content() != "ok" {
-		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			clearAllEnv(t)
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("read request body: %v", err)
+					return
+				}
+				if err := json.Unmarshal(raw, &gotBody); err != nil {
+					t.Errorf("decode request body: %v", err)
+					http.Error(w, "invalid request body", http.StatusBadRequest)
+					return
+				}
+				if testCase.wantStream {
+					if gotBody["stream"] != true {
+						t.Errorf("stream = %v, want true", gotBody["stream"])
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_opt_in","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}}`+"\n\n")
+					_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp_opt_in","object":"response","model":"gpt-6.1-terra","status":"completed","output":[]}}`+"\n\n")
+					_, _ = io.WriteString(w, "data: [DONE]\n\n")
+					return
+				}
+				if gotBody["stream"] == true {
+					t.Errorf("stream = true, want no streaming flag")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"resp_no_stream","object":"response","model":"gpt-6.1-terra","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+			}))
+			defer server.Close()
+
+			provider := providerName
+			if testCase.name == "preset key ignored" {
+				provider = "openai-responses"
+			}
+			raw := strings.ReplaceAll(testCase.raw, "URL", server.URL+"/v1")
+			path := writeRawResolverConfig(t, raw)
+			ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+			if err != nil {
+				t.Fatalf("ResolveEndpointWithOptions: %v", err)
+			}
+			if provider != providerName && ep.RequiresStreaming {
+				t.Fatal("preset entry carried requires_streaming into the resolved endpoint")
+			}
+			client := NewLLMClient(ep, nil, nil)
+			resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("CompletionsWithCtx: %v", err)
+			}
+			if resp.Content() != "ok" {
+				t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+			}
+		})
 	}
 }
