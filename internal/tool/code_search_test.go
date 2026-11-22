@@ -232,6 +232,14 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 						t.Errorf("expected note to report %q, got:\n%s", want, got)
 					}
 				}
+				if tc.name == "binary_only" {
+					// Every hit is in a binary file. The tool must still answer
+					// with its documented no-match string rather than an empty
+					// result, which the tool-use loop reads as a failed call.
+					if got != "No matches found" {
+						t.Errorf("binary-only search = %q, want %q", got, "No matches found")
+					}
+				}
 				if tc.name == "across_files" {
 					if !strings.Contains(got, "File: a.go\nMatch lines: 60\n") || !strings.Contains(got, "File: b.go\nMatch lines: 40\n") {
 						t.Errorf("expected the first 100 matches in file order, got:\n%s", got)

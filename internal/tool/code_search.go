@@ -69,7 +69,12 @@ func (p *CodeSearchProvider) execute(ctx context.Context, args map[string]any) (
 func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string) []string {
 	// core.quotepath=false reports non-ASCII paths literally instead of as
 	// quoted octal escapes, which file_read cannot open.
-	cmdArgs := []string{"--no-pager", "-c", "core.quotepath=false", "grep"}
+	//
+	// -I keeps binary files out of the match set. Without it git answers a
+	// binary hit with "Binary file <path> matches", a line with no line number
+	// that the parser below drops, so a search whose hits are all binary would
+	// return an empty result instead of the documented no-match string.
+	cmdArgs := []string{"--no-pager", "-c", "core.quotepath=false", "grep", "-I"}
 
 	if noIndex {
 		// Non-git directory: search the working tree directly while still
