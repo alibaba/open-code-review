@@ -93,11 +93,15 @@ pipeline {
                     // `current` default would retarget comments if a new
                     // patchset landed mid-pipeline. GERRIT_CHANGE_NUMBER and
                     // GERRIT_URL/GERRIT_CHANGE_URL come from the environment.
+                    // Capture the poster's exit code too, so a posting
+                    // failure still fails the build without relying on
+                    // `sh -e`, and the review's code takes precedence.
                     sh '''
+                        POST_EXIT_CODE=0
                         if [ -s result.json ]; then
                           python3 examples/gerrit_ci/post_review.py \
                             --input result.json \
-                            --revision "$GERRIT_PATCHSET_REVISION"
+                            --revision "$GERRIT_PATCHSET_REVISION" || POST_EXIT_CODE=$?
                         else
                           echo "OCR review produced no output, skipping post."
                         fi
@@ -105,6 +109,7 @@ pipeline {
                           echo "ocr review exited with code $(cat ocr-exit-code); failing the build."
                           exit "$(cat ocr-exit-code)"
                         fi
+                        exit "$POST_EXIT_CODE"
                     '''
                 }
             }
