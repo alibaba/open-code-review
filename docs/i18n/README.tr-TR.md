@@ -26,9 +26,9 @@
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
-  <a href="../../README.md#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
-  <a href="../../README.md#supported-platforms"><img alt="macOS" src="https://img.shields.io/badge/macOS-supported-blue.svg" /></a>
-  <a href="../../README.md#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="macOS" src="https://img.shields.io/badge/macOS-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
@@ -102,8 +102,11 @@ Ajanın güçlü yanları, dinamik kararlar ve dinamik bağlam getirme üzerinde
 
 ## Kullanım
 
+<a id="supported-platforms"></a>
+
 ### Gereksinimler
 
+- **İşletim sistemi:** Windows, macOS veya Linux.
 - **Git >= 2.41** — Open Code Review, fark oluşturma, kod arama ve depo işlemleri için Git kullanır.
 
 <a id="supported-agents"></a>
@@ -124,14 +127,14 @@ Beceriler, ortam izinlerine bağlı olarak eksikse `ocr` kurması için ajanın�
 
 #### 2. İnceleme modunu seçin
 
-| | Yerel OCR modu | Delege modu |
+| | Yerel OCR modu | Görev devri modu |
 |---|---|---|
 | Beceri | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
 | Kim inceler? | OCR'ın uzman inceleme ajanı ve işlem hattı | OCR'ın işlem hattı ve kurallarını izleyen mevcut kodlama ajanınız |
 | Model ve kimlik doğrulama | OCR'ın kendi sağlayıcı ayarları | Ajan ortamınızın mevcut modeli ve kimlik doğrulaması |
 | Ne zaman seçilmeli? | OCR için model uç noktanız varsa ve tam inceleme hattını istiyorsanız | Ayrı API anahtarınız yoksa veya mevcut ajan aboneliğinizi/kurulumunuzu kullanmak istiyorsanız |
 
-**Ayrı anahtarınız yok mu? Delege moduyla başlayın.** Bu mod OCR sağlayıcı kurulumunu atlar; ajan ortamının kimlik doğrulamasını, kullanım sınırlarını veya maliyetlerini kaldırmaz. Ajan aboneliği, yerel OCR modu için otomatik olarak API kimlik bilgisi sayılmaz. Delege modunda CLI ve beceri birlikte dosya seçimi, kural çözümleme, kapsam gereksinimleri ve yapılandırılmış raporlama sağlar. Analiz, konumlandırma ve raporlamayı bu akış içinde mevcut ajan yapar; OCR'ın tam yerel işlem hattı çalışmaz.
+**Ayrı anahtarınız yok mu? Görev devri moduyla başlayın.** Bu mod OCR sağlayıcı kurulumunu atlar; ajan ortamının kimlik doğrulamasını, kullanım sınırlarını veya maliyetlerini kaldırmaz. Ajan aboneliği, yerel OCR modu için otomatik olarak API kimlik bilgisi sayılmaz. Görev devri modunda CLI ve beceri birlikte dosya seçimi, kural çözümleme, kapsam gereksinimleri ve yapılandırılmış raporlama sağlar. Analiz, konumlandırma ve raporlamayı bu akış içinde mevcut ajan yapar; OCR'ın tam yerel işlem hattı çalışmaz.
 
 Yerel OCR modu için `ocr config provider` ve `ocr config model` ile bir kez sağlayıcı ayarlayın. Kimlik doğrulama sağlayıcıya bağlıdır; [Yapılandırma](https://open-codereview.ai/docs/configuration) bölümüne bakın.
 
@@ -143,7 +146,7 @@ Yerel OCR modu için `ocr config provider` ve `ocr config model` ile bir kez sa�
 npm install -g @alibaba-group/open-code-review
 ```
 
-Kurulumdan sonra `ocr` komutu genel olarak kullanılabilir.
+Kurulumdan sonra `ocr` komutunu herhangi bir dizinde çalıştırabilirsiniz.
 
 Diğer kurulum yolları (kurulum betiği, GitHub Release ikili dosyası, kaynaktan derleme) için [Kurulum](https://open-codereview.ai/docs/installation) bölümüne bakın.
 
@@ -151,7 +154,7 @@ Diğer kurulum yolları (kurulum betiği, GitHub Release ikili dosyası, kaynakt
 
 **1. LLM yapılandırması**
 
-[Delege modunu](https://open-codereview.ai/docs/delegate) kullanmıyorsanız kod incelemeden önce bir LLM yapılandırmalısınız.
+[Görev devri modunu](https://open-codereview.ai/docs/delegate) kullanmıyorsanız kod incelemeden önce bir LLM yapılandırmalısınız.
 
 - **Modeli OCR çağırır:** `ocr review`, `/open-code-review:review` komutu ve `open-code-review` becerisi, Claude Code Team/Pro abonelik girişinizi değil OCR'ın kendi sağlayıcı ayarlarını kullanır. Kimlik doğrulama gereksinimleri sağlayıcıya bağlıdır; [Yapılandırma](https://open-codereview.ai/docs/configuration) bölümüne bakın.
 - **Modeli mevcut ajan çağırır:** `/open-code-review:delegate-review` komutu ve `open-code-review-delegate` becerisi, ajan ortamının modelini ve kimlik doğrulamasını kullanır. OCR'da ayrı LLM ayarı veya kimlik bilgisi gerekmez. [Claude Code kurulumuna](../../plugins/open-code-review/README.md#claude-code) bakın.
@@ -196,8 +199,8 @@ ocr scan --resume <session-id>   # resume an interrupted full-file scan
 # Save results to a file (recommended for AI host agents)
 ocr review --format json --output result.json
 
-# Delegation mode — let your AI coding agent perform the review itself
-# OCR handles file selection and rule resolution; no LLM configuration needed
+# Görev devri modu — incelemeyi kodlama ajanınız yürütür
+# OCR dosyaları seçer ve kuralları belirler; LLM yapılandırması gerekmez
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
 ```
@@ -218,11 +221,11 @@ Tüm belgeler **[open-codereview.ai/docs](https://open-codereview.ai/docs)** adr
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — taşınabilir inceleme becerileri sağlayan eklenti
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — inceleme komutları ve becerileri sağlayan eklenti
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — yerel inceleme araçları ve komutları
-  - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA modeli ve yayıma hazır şablonla delege modu
+  - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA modeli ve yayıma hazır şablonla görev devri modu
   - [Beceri uyumlu ajanlar](https://open-codereview.ai/docs/agent-skill) — taşınabilir ajan becerisini kurma
 - İnceleme yürütme modları — entegrasyondan sonra modeli kimin çağıracağını seçin
   - [Varsayılan (OCR yönetiminde)](https://open-codereview.ai/docs/configuration) — incelemeyi OCR, yapılandırılmış LLM ile yürütür
-  - [Delege modu](https://open-codereview.ai/docs/delegate) — incelemeyi kodlama ajanınız kendi LLM'iyle yürütür; OCR API anahtarı gerekmez
+  - [Görev devri modu](https://open-codereview.ai/docs/delegate) — incelemeyi kodlama ajanınız kendi LLM'iyle yürütür; OCR API anahtarı gerekmez
 - [CI/CD entegrasyonu](https://open-codereview.ai/docs/cicd) — GitHub Actions, GitLab CI, GitFlic CI ve Gerrit
 - [Oturum görüntüleyici](https://open-codereview.ai/docs/viewer) — tarayıcıda oturumları inceleyip yeniden oynatma; yorumları düzeltildi veya yok sayıldı olarak işaretleyip bulguları ele alırken gizleme
 - [Telemetri](https://open-codereview.ai/docs/telemetry) — gözlemlenebilirlik için OpenTelemetry entegrasyonu

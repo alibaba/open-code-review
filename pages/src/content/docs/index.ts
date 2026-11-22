@@ -138,6 +138,20 @@ export function getDocTitle(slug: DocSlug, loaded: LoadedDocContent): string {
   return slug;
 }
 
+function turkishSearchPattern(query: string): RegExp {
+  const literal = query.normalize().toLocaleLowerCase('tr').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(literal.replace(/[i\u0131]/gu, letter => `[${letter}I]`));
+}
+
+function foldTurkishDocument(content: string): string {
+  const englishIdentifier = /^(?:AI|ANSI|API|CI|CLI|ID|IDE|SARIF|TUI|UI|URI|UUID|[a-z0-9]+_[a-z0-9_]+)$/i;
+  return content.replace(/[\p{L}\p{M}\p{N}_]+/gu, word => {
+    if (!/[Ii\u0130]/u.test(word)) return word.toLowerCase();
+    if (englishIdentifier.test(word)) return word.toLowerCase().replace(/i/g, 'I');
+    return word.toLocaleLowerCase('tr');
+  });
+}
+
 /**
  * Search the loaded language docs for a query string. Returns matching slugs
  * with context. Iterates the canonical slug order so partial locales with
@@ -148,12 +162,14 @@ export function searchDocs(query: string, loaded: LoadedDocContent): DocSearchRe
   if (!query.trim()) return [];
   const results: DocSearchResult[] = [];
   const lowerQuery = query.toLowerCase();
+  const turkishPattern = loaded.language === 'tr' ? turkishSearchPattern(query) : undefined;
   for (const slug of DOC_SLUG_ORDER) {
     const raw = rawFor(slug, loaded);
     if (!raw) continue;
-    const content = stripFrontmatter(raw);
-    const lowerContent = content.toLowerCase();
-    const idx = lowerContent.indexOf(lowerQuery);
+    const isTurkish = turkishPattern !== undefined && loaded.docs[slug] !== undefined;
+    const body = stripFrontmatter(raw);
+    const content = isTurkish ? body.normalize() : body;
+    const idx = isTurkish ? foldTurkishDocument(content).search(turkishPattern) : content.toLowerCase().indexOf(lowerQuery);
     if (idx !== -1) {
       // Extract snippet around match
       const start = Math.max(0, idx - 30);

@@ -1,16 +1,16 @@
 ---
-title: Yetkilendirme modu
+title: Görev devri modu
 sidebar:
   order: 5
 ---
 
 OCR deterministik mühendislik işlemlerini (dosya seçimi, kural çözümleme) yürütürken asıl kod incelemesini ana ajan kendi LLM yetenekleriyle yapar. OCR tarafında LLM uç noktası gerekmez.
 
-## Yetkilendirme modu ne zaman kullanılır? {#when-to-use-delegation-mode}
+## Görev devri modu ne zaman kullanılır? {#when-to-use-delegation-mode}
 
 Bu mod Claude Code, Codex, Cursor, Open Code, Qoder gibi, LLM aboneliğinin ana ajanla birlikte sunulduğu abonelik tabanlı yapay zekâ kodlama ajanları için tasarlanmıştır. OCR'ye ayrı model uç noktası yapılandırmak yerine inceleme için ana ajanın mevcut abonelik kotasını kullanırsınız.
 
-Şu durumlarda yetkilendirme modunu kullanın:
+Şu durumlarda görev devri modunu kullanın:
 
 1. Kodlama ajanınız abonelikle çalışıyor ve bu kotayı kod incelemesinde kullanmak istiyorsunuz; ek API anahtarı veya model yapılandırması gerekmez.
 2. OCR'yi yalnızca dosya filtreleme, kural çözümleme ve dışlama mantığı için kullanmak, tüm LLM akıl yürütmesini ana ajana bırakmak istiyorsunuz.
@@ -24,7 +24,7 @@ Bu mod Claude Code, Codex, Cursor, Open Code, Qoder gibi, LLM aboneliğinin ana 
 which ocr || npm install -g @alibaba-group/open-code-review
 ```
 
-LLM yapılandırması (`ocr config set …` veya ortam değişkenleri) gerekmez; yetkilendirme modu OCR tarafında hiçbir LLM çağrısı yapmaz.
+LLM yapılandırması (`ocr config set …` veya ortam değişkenleri) gerekmez; görev devri modunda OCR hiçbir LLM çağrısı yapmaz.
 
 ## Beceri / komut yükleme {#install-the-skill-command}
 
@@ -167,7 +167,7 @@ Her iki alt komut da `--from main` ifadesini `--from main --to HEAD` kısaltmas�
 |------|-------------------|----------|
 | [Ajan becerisi](../agent-skill/) | OCR | Ajan `ocr review` çağırır; tüm incelemeyi OCR yürütür |
 | [Komut (Claude Code)](../claude-code/) | OCR | Claude Code içinde eğik çizgi komutu; incelemeyi OCR yürütür |
-| **Yetkilendirme modu** | Ana ajan | OCR altyapıyı sağlar; incelemeyi ajan yürütür |
+| **Görev devri modu** | Ana ajan | OCR altyapıyı sağlar; incelemeyi ajan yürütür |
 
 ## Ayrıca bakın {#see-also}
 

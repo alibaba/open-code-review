@@ -58,7 +58,7 @@ Beceriyi `/open-code-review` ile açıkça belirtin veya görevi anlatın; Copil
 | “bu PR'ı incele” | `ocr review --from main --to <branch>` |
 | “abc123 commit'ini incele” | `ocr review --commit abc123` |
 
-Beceri, `ocr` aracını kendi yapılandırılmış modeliyle çalıştırır ve bulguları önem derecesine göre gruplandırır. `ocr` için ayrı LLM yapılandırmak istemiyorsanız [Yetkilendirme modu](../delegate/)nu kullanın: modeli ana ajan (Copilot) sağlar; `ocr` yalnızca dosyaları seçer ve kuralları çözümler.
+Beceri, `ocr` aracını kendi yapılandırılmış modeliyle çalıştırır ve bulguları önem derecesine göre gruplandırır. `ocr` için ayrı LLM yapılandırmak istemiyorsanız [görev devri modunu](../delegate/) kullanın: modeli ana ajan (Copilot) sağlar; `ocr` yalnızca dosyaları seçer ve kuralları çözümler.
 
 ### İsteğe bağlı: incelemeyi alışkanlık hâline getirme {#optional-make-review-a-habit}
 

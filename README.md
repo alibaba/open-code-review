@@ -102,8 +102,11 @@ The agent's strengths are concentrated where they matter most — dynamic decisi
 
 ## How to Use
 
+<a id="supported-platforms"></a>
+
 ### Prerequisites
 
+- **Operating system:** Windows, macOS, or Linux.
 - **Git >= 2.41** — Open Code Review relies on Git for diff generation, code search, and repository operations.
 
 <a id="supported-agents"></a>

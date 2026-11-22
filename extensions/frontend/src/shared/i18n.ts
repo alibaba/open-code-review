@@ -250,7 +250,7 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     "view.env.stepLead": "Adımları sırayla tamamlayın. Her adım başarılı olduğunda bir sonrakine geçin.",
     "view.env.nodeHint": "Node.js bulunamadı. nodejs.org adresinden LTS sürümünü yükleyip VS Code'u yeniden başlatın.",
     "view.env.npmHint": "npm bulunamadı. npm genellikle Node.js ile birlikte gelir; Node kurulumunuzu kontrol edin.",
-    "view.env.ocrHint": "Terminalde open-code-review paketini genel olarak yükleyin veya aşağıdaki “Tek tıkla yükle” düğmesine basın.",
+    "view.env.ocrHint": "OCR'yi tüm projeler için yüklemek üzere aşağıdaki npm komutunu terminalde çalıştırın veya “Tek tıkla yükle” düğmesine basın.",
     "view.env.oneClickInstall": "Tek tıkla yükle",
     "view.env.redetect": "Yeniden algıla",
     "view.env.checkingStatus": "Kontrol ediliyor",

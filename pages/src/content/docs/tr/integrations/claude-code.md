@@ -47,7 +47,7 @@ curl -o ~/.claude/commands/open-code-review.md \
 
 Komut dosyası tek bir ön bilgi alanı içeren düz Markdown'dır; Claude Code'a özgü değildir. Ajanınız benzer bir **komut** düzenini destekliyorsa (bir dizindeki Markdown istemlerini çağrılabilir komutlar olarak yüklüyorsa), yukarıdaki kopyalama yöntemiyle yükleyin: `open-code-review.md` dosyasını ajanın komut okuduğu dizine yerleştirip kendi çağırma yöntemiyle çalıştırın. İstem gövdesi ajandan bağımsızdır; modele hangi `ocr` seçeneklerini kullanacağını ve çıktıyı nasıl değerlendireceğini anlatır.
 
-> **İpucu:** Ayrı bir LLM yapılandırmak istemiyorsanız [Yetkilendirme modu](../delegate/)nu deneyin. Modeli ana ajan (Claude Code) sağlar; ek LLM kurulumu gerekmez.
+> **İpucu:** Ayrı bir LLM yapılandırmak istemiyorsanız [görev devri modunu](../delegate/) deneyin. Modeli ana ajan (Claude Code) sağlar; ek LLM kurulumu gerekmez.
 
 ## Kullanım {#use}
 

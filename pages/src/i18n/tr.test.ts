@@ -36,6 +36,43 @@ describe('Turkish localization', () => {
     });
   });
 
+  it('finds Turkish words regardless of case in the published guides', async () => {
+    const docs = await loadLanguageContent('tr');
+    const loaded = { language: 'tr' as const, docs };
+    for (const query of ['incelemeyi çalıştırma', 'İNCELEMEYİ ÇALIŞTIRMA']) {
+      expect(searchDocs(query, loaded)).toEqual(expect.arrayContaining(
+        ['agent-skill', 'claude-code'].map(slug => expect.objectContaining({
+          slug, snippet: expect.stringContaining('İncelemeyi çalıştırma'),
+        })),
+      ));
+    }
+  });
+
+  it('still finds English CLI terms in Turkish documentation', () => {
+    const loaded = { language: 'tr' as const, docs: { quickstart: 'içindeki CLI' } };
+    expect(searchDocs('cli', loaded).map(result => result.slug)).toEqual(['quickstart']);
+    expect(searchDocs('İÇİNDEKİ cli', loaded).map(result => result.slug)).toEqual(['quickstart']);
+    expect(searchDocs('[cli]', loaded)).toEqual([]);
+  });
+
+  it('distinguishes dotted and dotless I in Turkish words', () => {
+    const loaded = { language: 'tr' as const, docs: { quickstart: 'KIR' } };
+    expect(searchDocs('kır', loaded)).toHaveLength(1);
+    expect(searchDocs('kir', loaded)).toEqual([]);
+  });
+
+  it('matches English identifiers and acronym prefixes as users type them', () => {
+    const loaded = { language: 'tr' as const, docs: { quickstart: '`OCR_LLM_TIMEOUT` / SARIF' } };
+    for (const query of ['ocr_llm_timeout', 'SARI', 'sari']) {
+      expect(searchDocs(query, loaded)).toHaveLength(1);
+    }
+  });
+
+  it('keeps the match in the snippet after decomposed dotted letters', () => {
+    const loaded = { language: 'tr' as const, docs: { quickstart: 'I\u0307'.repeat(70) + ' hedef' } };
+    expect(searchDocs('hedef', loaded)[0]?.snippet).toContain('hedef');
+  });
+
   it.each(files)('translates %s with all source sections and stable anchors', path => {
     const source = readFileSync(join(docsRoot, 'en', path), 'utf8').replace(/^---[\s\S]*?---\s*/, '');
     const translated = readFileSync(join(docsRoot, 'tr', path), 'utf8').replace(/^---[\s\S]*?---\s*/, '');

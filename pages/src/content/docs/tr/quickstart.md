@@ -10,7 +10,7 @@ sidebar:
 
 - **Git ≥ 2.41**
 - **Node.js ≥ 18**
-- **LLM API anahtarı** ([Yetkilendirme modu](../integrations/delegate/) kullanılıyorsa gerekmez)
+- **LLM API anahtarı** ([görev devri modunda](../integrations/delegate/) gerekmez)
 
 ## Adım 1 — CLI'yi yükleyin {#step-1-install-the-cli}
 
@@ -26,7 +26,7 @@ ocr version
 
 ## Adım 2 — Bir LLM yapılandırın {#step-2-configure-an-llm}
 
-> [Yetkilendirme modu](../integrations/delegate/) kullanıyorsanız (örneğin Claude Code içinde), modeli ana ajan sağlar; 4. adıma geçin.
+> [Görev devri modunu](../integrations/delegate/) kullanıyorsanız (örneğin Claude Code içinde), modeli ana ajan sağlar; 4. adıma geçin.
 
 ```bash
 ocr config provider

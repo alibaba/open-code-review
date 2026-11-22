@@ -102,8 +102,11 @@ Open Code Reviewのコア哲学は、決定論的エンジニアリングとエ�
 
 ## 使い方
 
+<a id="supported-platforms"></a>
+
 ### 前提条件
 
+- **対応 OS:** Windows、macOS、Linux。
 - **Git >= 2.41** — Open Code Review は diff 生成、コード検索、リポジトリ操作に Git を利用します。
 
 <a id="supported-agents"></a>

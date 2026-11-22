@@ -200,7 +200,7 @@ export const ko: TranslationKeys = {
   'docs.reviewFlag10Desc': '파일당 최대 도구 호출 라운드 수. 템플릿 기본값보다 클 때만 적용됩니다',
   'docs.reviewFlag10Default': '내장',
   'docs.reviewFlag11Desc': '최대 동시 git 서브프로세스 수',
-  'docs.reviewNote': '참고: <code>--from/--to</code>와 <code>--commit</code>은 함께 사용할 수 없습니다. <code>--from</code>을 지정하면 <code>--to</code>도 반드시 지정해야 합니다.',
+  'docs.reviewNote': '참고: <code>--from/--to</code>와 <code>--commit</code>은 함께 사용할 수 없습니다. <code>--from</code>만 지정하면 비교 대상은 <code>HEAD</code>입니다.',
   'docs.scanTitle': 'ocr scan',
   'docs.scanDesc': '<code>ocr scan</code>은 diff가 아니라 파일 전체를 리뷰합니다. Git 히스토리나 의미 있는 diff가 없어도 됩니다. 익숙하지 않은 코드베이스를 감사하거나, 마이그레이션 전에 특정 디렉터리를 훑어보거나, 비교할 대상이 없는 프로젝트를 리뷰할 때 사용하세요.',
   'docs.scanVsTitle': 'ocr scan과 ocr review의 차이',

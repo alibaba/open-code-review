@@ -102,8 +102,11 @@ Open Code Review — это CLI-инструмент для код-ревью н
 
 ## Как использовать
 
+<a id="supported-platforms"></a>
+
 ### Предварительные требования
 
+- **Операционная система:** Windows, macOS или Linux.
 - **Git >= 2.41** — Open Code Review использует Git для генерации diff, поиска по коду и операций с репозиторием.
 
 <a id="supported-agents"></a>
