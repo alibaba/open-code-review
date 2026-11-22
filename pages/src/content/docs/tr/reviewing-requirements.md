@@ -11,13 +11,13 @@ Bir değişikliğin kabul ölçütlerini OCR'ye vererek kod hatalarının yanı 
 Tek bir değişiklik için `docs/requirements/checkout.md` gibi kısa bir yerel Markdown dosyası hazırlayın:
 
 ```markdown
-# Ödeme gereksinimleri
+# Sipariş tamamlama gereksinimleri
 
 Kapsam: src/checkout/**
 Değişiklikleri aşağıdaki ölçütlere göre inceleyin ve bulgularda ilgili gereksinim kimliğini belirtin.
 
-- PAY-1: Sepet boşsa ödeme işlemini reddet.
-- PAY-2: Toplam tutarı sunucuda hesapla; istemcinin gönderdiği toplama güvenme.
+- PAY-1: Sepet boşsa siparişin tamamlanmasına izin verme.
+- PAY-2: Toplam tutarı sunucuda hesapla; istemcinin gönderdiği toplam tutara güvenme.
 - PAY-3: Aynı idempotency anahtarıyla yinelenen bir istek ikinci bir tahsilata yol açmamalı.
 
 Kapsam dışı: İadeler ve abonelik ödemeleri.
@@ -29,11 +29,11 @@ OCR yapılandırıldıktan sonra, `main` dalının bulunduğu deponun kök dizin
 ocr review --from main --to HEAD --background-file docs/requirements/checkout.md
 ```
 
-`--background-file` tüm inceleme için bağlam sağlar. OCR'yi bir alt dizinde çalıştırsanız bile göreli yollar **deponun kök dizinine** göre çözümlenir. Mutlak yollar da kullanılabilir. `--background` seçeneği de verilirse dosya önceliklidir; komut satırındaki metin yok sayılır. Yalnızca gerekli bilgileri ekleyin: OCR, metin temizlendikten sonra 2.000 karakteri aşarsa uyarı verir, 8.000 karakteri aşarsa girdiyi reddeder. Dosya en fazla 1 MiB olmalı ve temizlendikten sonra boş kalmamalıdır.
+`--background-file` tüm inceleme için bağlam sağlar. OCR'yi bir alt dizinde çalıştırsanız bile göreli yollar **deponun kök dizinine** göre çözümlenir. Dosyanın tam konumunu da belirtebilirsiniz. `--background-file` ve `--background` seçeneklerini birlikte kullanırsanız OCR yalnızca dosyadaki metni okur. `--background` ile yazdığınız metni dikkate almaz. Yalnızca gerekli bilgileri ekleyin: OCR, temizlenmiş metin 2.000 karakteri aşarsa uyarı verir; 8.000 karakteri aşarsa girdiyi reddeder. Dosyanın temizleme öncesindeki boyutu en fazla 1 MiB olmalı ve temizleme sonrasında metin boş kalmamalıdır.
 
 ## Kurum içi bilgi tabanındaki gereksinimler {#requirements-from-an-internal-knowledge-base}
 
-İlgili gereksinimleri, kısıtları ve kabul ölçütlerini bilgi tabanından kısa bir yerel Markdown dosyasına aktarın ve `--background-file` ile verin. Bağlam metninde bir dosyanın adını veya bir bağlantıyı belirtmek, OCR'nin o belgeyi yüklemesini ya da bağlantıları izlemesini sağlamaz. Ölçütlerin kendisini ekleyin ve bulguları gereksinim belgesiyle ve testlerle karşılaştırın.
+İlgili gereksinimleri, kısıtları ve kabul ölçütlerini bilgi tabanından kısa bir yerel Markdown dosyasına aktarın ve `--background-file` ile verin. Bağlam metninde bir dosyanın adını veya bir bağlantıyı belirtmek, OCR'nin o belgeyi otomatik olarak yüklemesini ya da bağlantıları kendiliğinden izlemesini sağlamaz. Ölçütlerin kendisini ekleyin ve bulguları gereksinim belgesiyle ve testlerle karşılaştırın.
 
 ## Sınırlamalar {#limitations}
 
