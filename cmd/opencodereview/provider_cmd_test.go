@@ -282,6 +282,34 @@ func TestApplyManualConfig_MissingModel(t *testing.T) {
 	}
 }
 
+func TestApplyManualConfig_InvalidURL(t *testing.T) {
+	for _, value := range []string{"api.example.com/v1", "ftp://gateway.internal/v1"} {
+		t.Run(value, func(t *testing.T) {
+			cfg := &Config{Provider: "openai", Model: "saved-model"}
+			err := applyManualConfig(filepath.Join(t.TempDir(), "config.json"), cfg, providerTUIResult{url: value, model: "some-model"})
+			if err == nil {
+				t.Fatal("expected error for invalid URL")
+			}
+			if cfg.Provider != "openai" || cfg.Model != "saved-model" || cfg.Llm.URL != "" {
+				t.Fatalf("configuration changed after rejected write: %#v", cfg)
+			}
+		})
+	}
+}
+
+func TestApplyManualConfig_TrimsURL(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{}
+
+	result := providerTUIResult{url: "  https://gateway.internal:8000/v1  ", model: "some-model", apiKey: "sk-test", protocol: "anthropic"}
+	if err := applyManualConfig(configPath, cfg, result); err != nil {
+		t.Fatalf("applyManualConfig: %v", err)
+	}
+	if cfg.Llm.URL != "https://gateway.internal:8000/v1" {
+		t.Errorf("llm.url = %q, want the trimmed URL", cfg.Llm.URL)
+	}
+}
+
 func TestApplyCustomProviderConfig_MissingProvider(t *testing.T) {
 	err := applyCustomProviderConfig("", &Config{}, providerTUIResult{provider: "", model: "m"})
 	if err == nil {

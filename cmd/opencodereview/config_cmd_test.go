@@ -1129,6 +1129,43 @@ func TestSetConfigValueLlmURL(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueLlmURLTrimsAndValidates(t *testing.T) {
+	t.Run("trims a valid URL before storing", func(t *testing.T) {
+		cfg := &Config{}
+
+		if err := setConfigValue(cfg, "llm.url", "  https://gateway.internal:8000/v1  "); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+		if got := cfg.Llm.URL; got != "https://gateway.internal:8000/v1" {
+			t.Errorf("URL = %q, want trimmed URL", got)
+		}
+	})
+
+	t.Run("clears with an empty value", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Llm.URL = "https://old.example/v1"
+
+		if err := setConfigValue(cfg, "llm.url", ""); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+		if cfg.Llm.URL != "" {
+			t.Errorf("URL = %q, want empty to clear the key", cfg.Llm.URL)
+		}
+	})
+
+	for _, value := range []string{"api.example.com/v1", "ftp://gateway.internal/v1", "://bad"} {
+		t.Run("rejects "+value, func(t *testing.T) {
+			cfg := &Config{}
+			if err := setConfigValue(cfg, "llm.url", value); err == nil {
+				t.Fatalf("setConfigValue accepted invalid URL %q", value)
+			}
+			if cfg.Llm.URL != "" {
+				t.Errorf("URL = %q, want the rejected value left unset", cfg.Llm.URL)
+			}
+		})
+	}
+}
+
 func TestSetConfigValueLlmAuthToken(t *testing.T) {
 	cfg := &Config{}
 	if err := setConfigValue(cfg, "llm.auth_token", "tok-123"); err != nil {
