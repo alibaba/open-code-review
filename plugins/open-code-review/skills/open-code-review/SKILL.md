@@ -35,7 +35,7 @@ Analyze the review target (commits, branch, or changes) to extract concise busin
 
 ### Step 2: Run Code Review
 
-Run the review directly without checking `command -v ocr` or `ocr --version` first.
+**Run `ocr review` directly.** Do not probe with `command -v ocr` or `ocr --version` first; that adds an unnecessary tool call on the normal path.
 
 For a workspace review, omit revision flags and `--analysis`. **Pass business context via `--background`** when available:
 
