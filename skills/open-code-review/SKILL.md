@@ -131,7 +131,8 @@ When `start_line` and `end_line` are both `0`, the comment failed to locate the 
 1. Read the comment content to understand the issue
 2. Examine the target file mentioned in the comment
 3. Identify the relevant code section based on the comment's context
-4. Apply the fix or suggestion to the correct location
+4. If the exact location cannot be determined with confidence, report the finding at file level
+5. Apply the fix or suggestion to the correct location only when the user has authorized edits under Step 4; in a review-only request, report the finding instead of editing
 
 ## Custom Review Rules
 
