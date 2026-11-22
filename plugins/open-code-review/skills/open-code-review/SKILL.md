@@ -84,12 +84,12 @@ Omit `--analysis` for workspace reviews, `--preview`, `--resume`, or `--format s
 
 ### Step 3: Report
 
-OCR output includes structured `severity` (critical / high / medium / low) and `category` (bug / security / performance / maintainability / test / style / documentation / other) on each comment. Present results grouped by severity, discarding `low` severity items that are likely false positives or nitpicks.
+Show OCR's user-facing report in the reply. Summarize, translate, or filter only if requested. For text output, relay the report as emitted. For JSON output, present the report content rather than dumping internal fields such as `thinking`:
 
-For combined runs, report Review and Analysis separately. Use these fields in `ocr.review-with-analysis/v2` JSON; if the caller requested text, use the Review summary and appended Analysis Report instead:
+- **Review:** present `comments` in their original order, retaining wording, severity, category, file and line range, and any code suggestions. Include low-severity findings. Report coverage from `review_status` and `manifest.coverage` when available; an empty comment list does not prove everything was reviewed.
+- **Analysis (combined runs):** render the `analysis` Markdown directly, not `analysis_raw` or a paraphrase. Preserve its headings, tables (including every row), lists, and caveats. If the original uses prose, keep the prose.
 
-- **Review:** report findings from `comments` and coverage from `review_status` and `manifest.coverage` when available. A zero exit code or empty `comments` does not prove all selected files were reviewed.
-- **Analysis:** summarize the before/after behavior, affected workflows, and any decisions supported by `analysis`. Distinguish `analysis_meta.execution_status` from `analysis_meta.declared_completion` (the model's assessment). For example, `completed` with declared `partial` means the investigation ran but left questions open. If analysis was skipped or failed, say why when known and retain the Review findings; do not infer that behavior is unchanged. If the combined schema or analysis metadata is missing, report analysis as unverified.
+Keep PR snapshot details and any host verification separate from OCR's report. Distinguish `analysis_meta.execution_status` from `analysis_meta.declared_completion`; report skipped, failed, or unverified Analysis without discarding Review. If the report cannot fit in the reply, identify what was omitted and give the full artifact path.
 
 ### Step 4: Fix
 
@@ -104,45 +104,6 @@ When fixing issues and suggestions:
 - Apply fixes directly to the code when safe and well-defined
 - For complex fixes requiring manual intervention, clearly describe what needs to be done
 - Always verify fixes with the user before committing
-
-## Output Format
-
-Each comment in OCR's output contains:
-
-- `path`: File path
-- `content`: Review comment text
-- `start_line` / `end_line`: Line range (both 0 means positioning failed)
-- `category`: Issue category (bug, security, performance, maintainability, test, style, documentation, other)
-- `severity`: Issue severity (critical, high, medium, low)
-- `suggestion_code`: Optional fix suggestion
-- `existing_code`: Optional original code snippet
-- `thinking`: Optional LLM reasoning process
-
-Present results grouped by severity using this template:
-
-```markdown
-## Code Review Results
-
-**Files reviewed**: N
-**Issues found**: X critical, Y high, Z medium
-
-### Critical
-
-- **`path/to/file.java:42`** [bug] — Brief description
-  > Recommendation: How to fix
-
-### High
-
-- **`path/to/file.java:26`** [bug] — Brief description
-  > Recommendation: How to fix
-
-### Medium
-
-- **`path/to/file.ts:88`** [performance] — Brief description
-  > Recommendation: How to fix (if applicable)
-```
-
-Only use "Review complete — no critical, high, or medium issues found in N files" when Review coverage supports it. Otherwise state the known coverage and gaps. For combined runs, also report the Analysis outcome separately.
 
 **Handling mispositioned comments:**
 
