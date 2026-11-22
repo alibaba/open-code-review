@@ -2937,3 +2937,35 @@ func TestResolveEndpointWithOptions_ConfigRequestTimeout(t *testing.T) {
 		t.Fatalf("ep.Timeout = %v, want config's 60s", ep.Timeout)
 	}
 }
+
+// TestResolveEndpointRequiresStreamingOptIn exercises the real config parser:
+// a custom Responses provider that opts in must resolve with the streaming
+// flag set. Built in presets keep their own flag and are unaffected.
+func TestResolveEndpointRequiresStreamingOptIn(t *testing.T) {
+	clearAllEnv(t)
+	const providerName = "terra-bifrost"
+	path, _ := writeResolverConfig(t, configFile{
+		Provider: providerName,
+		CustomProviders: map[string]providerEntryConfig{
+			providerName: {
+				APIKey:            "fixture-key",
+				URL:               "https://gateway.example.com/v1",
+				Protocol:          "openai-responses",
+				Model:             "gpt-6.1-terra",
+				ExtraBody:         map[string]any{"stream": false, "reasoning_effort": "medium"},
+				RequiresStreaming: true,
+			},
+		},
+	})
+
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Protocol != ProtocolOpenAIResponses {
+		t.Fatalf("ep.Protocol = %q, want %q", ep.Protocol, ProtocolOpenAIResponses)
+	}
+	if !ep.RequiresStreaming {
+		t.Fatal("ep.RequiresStreaming = false, want true for a custom provider that opts in")
+	}
+}

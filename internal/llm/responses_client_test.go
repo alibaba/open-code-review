@@ -1206,3 +1206,60 @@ func TestOpenAIResponsesClient_ExtraBodyPromptCacheKeyOverridesSessionID(t *test
 		t.Errorf("prompt_cache_key = %v, want typed SessionID %q", got, "file-session-uuid")
 	}
 }
+
+// TestNewLLMClientResponsesOptInStreams follows the opt in from a real config
+// file through resolution and NewLLMClient to the wire: the server sees
+// stream true even though extra_body explicitly carries stream false.
+func TestNewLLMClientResponsesOptInStreams(t *testing.T) {
+	clearAllEnv(t)
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+			return
+		}
+		if err := json.Unmarshal(raw, &gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if gotBody["stream"] != true {
+			t.Errorf("stream = %v, want true", gotBody["stream"])
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_opt_in","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp_opt_in","object":"response","model":"gpt-6.1-terra","status":"completed","output":[]}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	const providerName = "terra-bifrost"
+	path, _ := writeResolverConfig(t, configFile{
+		Provider: providerName,
+		CustomProviders: map[string]providerEntryConfig{
+			providerName: {
+				APIKey:            "fixture-key",
+				URL:               server.URL + "/v1",
+				Protocol:          "openai-responses",
+				Model:             "gpt-6.1-terra",
+				ExtraBody:         map[string]any{"stream": false, "reasoning_effort": "medium"},
+				RequiresStreaming: true,
+			},
+		},
+	})
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	client := NewLLMClient(ep, nil, nil)
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Content() != "ok" {
+		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+	}
+}

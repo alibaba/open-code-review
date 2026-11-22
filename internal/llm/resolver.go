@@ -357,6 +357,10 @@ type providerEntryConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	// RequiresStreaming opts a custom provider into SSE on the Responses
+	// protocol. Built in presets keep their own flag; the resolver gates this
+	// field to custom provider entries.
+	RequiresStreaming bool `json:"requires_streaming,omitempty"`
 
 	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
 	// SigV4 (currently bedrock). Both are optional: without them the standard
@@ -626,6 +630,9 @@ func tryProviderConfig(cfg configFile, modelOverride string, callerContext conte
 		AmbientAuth:  ambientAuth,
 		AWSProfile:   entry.AWSProfile,
 		AWSRegion:    entry.AWSRegion,
+		// Custom provider entries own their opt in. Built in presets keep the
+		// flag from their registry entry (chatgpt resolves through its own path).
+		RequiresStreaming: !isPreset && entry.RequiresStreaming,
 	}, true, nil
 }
 
