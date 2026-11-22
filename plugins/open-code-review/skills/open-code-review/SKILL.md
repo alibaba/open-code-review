@@ -35,7 +35,7 @@ Analyze the review target (commits, branch, or changes) to extract concise busin
 
 ### Step 2: Run Code Review
 
-**Do not pre-check whether `ocr` is installed** — skip probes like `command -v ocr` or `ocr --version`. Assume the CLI is available and run the review directly; that saves a tool call on the common path. Only if the review fails with `command not found` should you install it per Troubleshooting.
+Run the review directly without checking `command -v ocr` or `ocr --version` first.
 
 For a workspace review, omit revision flags and `--analysis`. **Pass business context via `--background`** when available:
 
@@ -53,8 +53,7 @@ ocr review --audience agent --background "business context here"
 - **Timeout**: effective timeout per review group = `--timeout` × review rounds. Default `--timeout 15` with default effort `medium` (2 rounds) gives 30 minutes; `low`/`high` give 15/45 minutes.
 - **Concurrency**: default concurrency is 8 file workers; reduce with `--concurrency <n>` if rate limits are hit
 - **Preview mode**: use `--preview` or `-p` to preview which files will be reviewed without running the LLM
-- **Output file**: use `--output <path>` to write the full result to a file instead of stdout. If the command fails with `unknown flag: --output`, do not continue the review with plain stdout. Ask the user whether to upgrade (`npm i -g @alibaba-group/open-code-review@latest`) and wait for the answer before proceeding. After the user confirms and the upgrade succeeds, rerun with `--output`.
-- **Installation**: if `ocr` command is not found, install it by running `npm i -g @alibaba-group/open-code-review`
+- **Output file**: use `--output <path>` to write the full result to a file instead of stdout.
 
 **Common invocation patterns:**
 
@@ -66,17 +65,11 @@ ocr review --audience agent --background "business context here"
 | "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123 --analysis --format json` |
 | "what would be reviewed?" (dry-run) | `ocr review --preview` |
 
-**Default behavior and impact analysis (OCR v1.14.0+):**
+**Behavior and impact analysis:**
 
-For a fresh commit or range review (`--commit` or `--from`), include `--analysis` in the review command without waiting for the user to ask. OCR runs both tasks in one invocation. Use JSON for agent consumption unless the caller specifies another format. Preserve the caller's repository, revisions, background, and output path. For example, given a pinned range:
+For a fresh commit or range review (`--commit` or `--from`), run Review and Analysis together with `--analysis` by default. Use JSON unless the caller requests another format. Preserve the caller's repository, revisions, background, and output path.
 
-```bash
-ocr review --repo "$WORKTREE" --from "$MERGE_BASE" --to "$HEAD_OID" \
-  --background "$BACKGROUND" --audience agent --analysis --format json \
-  --output "$RUN_DIR/result.json"
-```
-
-Omit `--analysis` for workspace reviews, `--preview`, `--resume`, or `--format sarif`, and when the user explicitly asks to skip analysis. If the user explicitly requests analysis in an unsupported mode, explain the conflict rather than changing the target or format. If the CLI rejects `--analysis` as unknown, ask before upgrading to v1.14.0 or later; do not silently retry without it.
+Omit `--analysis` for workspace reviews, `--preview`, `--resume`, or `--format sarif`, and when the user explicitly asks to skip analysis. If the user explicitly requests analysis in an unsupported mode, explain the conflict rather than changing the target or format.
 
 **Output mode:**
 
@@ -224,7 +217,7 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 - **Plan phase triggers on either of two thresholds** — a group runs an extra risk-analysis phase before main review when its largest changed file reaches `PLAN_MODE_LINE_THRESHOLD` (default `50`) **or** it holds 2+ files whose combined changed lines reach `PLAN_MODE_GROUP_LINE_THRESHOLD` (default `100`). This adds latency but improves quality.
 - **Don't pass `--audience human`** — it streams progress UI that pollutes output. Always use `--audience agent`.
 - **Comment language follows config** — the `language` config controls review comment language, defaults to `English`, and accepts any language name (for example `English` or `中文`).
-- **Avoid output truncation** — Large review runs produce verbose output. Never pipe command output to `tail` or `head` as it drops review comments from earlier sections. Use `--output <path>` and read it in full; on older CLIs, follow the **Output file** guidance above.
+- **Avoid output truncation** — Large review runs produce verbose output. Never pipe command output to `tail` or `head` as it drops review comments from earlier sections. Use `--output <path>` and read it in full.
 - **Resume an interrupted review** — a failed or interrupted range/commit review can be continued with `ocr review --resume <id>` using the same `--from`/`--to` or `--commit` target (the id is printed as `retry with: --resume <id>` on failure, or find it with `ocr session list`). Workspace resume is not supported.
 
 ## Validation
@@ -233,17 +226,11 @@ Check the exit code, output, and stderr for failures or coverage gaps. The exit 
 
 ## Troubleshooting
 
-**`ocr: command not found`**
+**CLI missing or flag not recognized**
 
-Install the CLI:
-
-```bash
-npm install -g @alibaba-group/open-code-review
-```
-
-**`unknown flag: --output`**
-
-The CLI is older than v1.10.0. Do not continue the review with plain stdout. Ask the user whether to upgrade (`npm i -g @alibaba-group/open-code-review@latest`) and wait for the answer before proceeding. After the user confirms and the upgrade succeeds, rerun with `--output`.
+- If `ocr` is not found, install the latest CLI with `npm i -g @alibaba-group/open-code-review@latest`.
+- If OCR reports `unknown flag` for an option this skill uses, offer to upgrade with the same command and wait for approval. For a user-supplied option, check the spelling and subcommand first. Do not silently drop the flag.
+- After installation or an approved upgrade succeeds, rerun the original command once. If it still fails, report the error rather than retrying or changing the request.
 
 **`ocr review` fails with LLM connection error**
 
