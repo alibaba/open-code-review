@@ -51,7 +51,7 @@ pipeline {
         stage('Install OCR') {
             steps {
                 // Pin the version you have validated; bump deliberately.
-                sh 'npm install -g @alibaba-group/open-code-review@1.7.12'
+                sh 'npm install -g @alibaba-group/open-code-review@1.14.0'
                 // extra_body has no env-var equivalent. Providers that accept
                 // a top-level "thinking" field (e.g. DashScope/GLM; OpenAI
                 // rejects unknown fields) must fall back to the config file,
