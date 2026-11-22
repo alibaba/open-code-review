@@ -155,6 +155,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".VY", true},
 		{".rego", true},
 		{".REGO", true},
+		{".cu", true},
+		{".CU", true},
+		{".cuh", true},
+		{".CUH", true},
+		{".hip", true},
+		{".HIP", true},
 		{".glsl", true},
 		{".GLSL", true},
 		{".hlsl", true},
@@ -179,6 +185,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".EDN", true},
 		{".move", true},
 		{".MOVE", true},
+		{".dhall", true},
+		{".DHALL", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -241,7 +249,7 @@ func TestAllowlistKeepsEveryTestedExtension(t *testing.T) {
 		".haml", ".slim", ".erb",
 		".js", ".jsx", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".cs",
 		".rb", ".sh", ".bash", ".zsh", ".sql", ".css", ".scss", ".html", ".xml", ".yaml",
-		".yml", ".json", ".toml", ".lua", ".swift",
+		".yml", ".json", ".toml", ".lua", ".swift", ".cu", ".cuh", ".hip",
 	}
 	for _, ext := range tested {
 		if !allowed[ext] {
@@ -324,9 +332,23 @@ func TestIsExcludedPath(t *testing.T) {
 		{"ruby spec dir", "spec/models/user_spec.rb", true},
 		{"ruby non-spec", "app/models/user.rb", false},
 
-		// Rust test files
+		// Rust test and benchmark files
 		{"rust test file", "src/parser_test.rs", true},
+		{"rust tests suffix", "src/parser_tests.rs", true},
+		{"rust nested tests suffix", "crates/mcp/src/handler_tests.rs", true},
+		{"rust module tests.rs", "src/tests.rs", true},
+		{"rust nested module tests.rs", "crates/gateway/src/runner/tests.rs", true},
+		{"rust integration test at root", "tests/integration.rs", true},
+		{"rust integration test in crate", "crates/server/tests/webhook.rs", true},
+		{"rust integration test helper mod", "crates/server/tests/common/mod.rs", true},
+		{"rust bench at root", "benches/bench_main.rs", true},
+		{"rust bench in crate", "crates/core/benches/parse.rs", true},
 		{"rust non-test", "src/parser.rs", false},
+		{"rust tests prefix helper not excluded", "src/tests_helper.rs", false},
+		{"rust test_support not excluded", "src/test_support.rs", false},
+		{"rust contest not excluded", "src/contest.rs", false},
+		{"rust benches prefix not excluded", "src/benches_util.rs", false},
+		{"rust benchmark module not excluded", "src/benchmark.rs", false},
 
 		// Prisma schemas have no conventional default test-file exclusion.
 		{"prisma schema", "prisma/schema.prisma", false},
@@ -523,6 +545,16 @@ func TestIsExcludedPath(t *testing.T) {
 		{"vyper non-test", "src/token.vy", false},
 		{"vyper test in filename only", "src/test_helpers.vy", false},
 
+		// CUDA/HIP kernels have no conventional default test-file exclusion:
+		// PyTorch, CUTLASS and ROCm put kernels under both tests/ and test/,
+		// and many projects keep production kernels there too, so an
+		// extension-scoped pattern would drop real source. Generic fixture
+		// directories remain excluded.
+		{"cuda kernel in a tests directory", "tests/kernels/softmax.cu", false},
+		{"cuda header in a test directory", "kernels/test/attention.cuh", false},
+		{"hip kernel in a tests directory", "tests/kernels/hip_softmax.hip", false},
+		{"cuda kernel in testdata", "kernels/testdata/ref.cu", true},
+		{"cuda kernel under vendor", "third_party/cutlass/vendor/softmax.cu", true},
 		// Shader languages have no conventional default test-file exclusion.
 		{"glsl shader", "shaders/fragment.glsl", false},
 		{"hlsl shader", "shaders/lighting.hlsl", false},

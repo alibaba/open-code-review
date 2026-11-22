@@ -96,6 +96,16 @@ func splitSamePathHeader(rest string) (oldPath string, newPath string, ok bool) 
 // runner, if non-nil, is used to execute git subprocesses through a
 // shared concurrency limiter.
 func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref string, runner *gitcmd.Runner) ([]model.Diff, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	diffs := ParsePatch(diffText)
+	for index := range diffs {
+		finalizeDiff(ctx, &diffs[index], repoDir, ref, runner)
+	}
+	return diffs, nil
+}
+
+func ParsePatch(diffText string) []model.Diff {
 	lines := splitDiffLines(diffText)
 	var diffs []model.Diff
 	var current *model.Diff
@@ -108,15 +118,11 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	// like "++i" renders as "+++i" and still counts as an insertion.
 	inHunk := false
 
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-
 	for _, line := range lines {
 		if oldPath, newPath, ok := parseDiffHeaderLine(line); ok {
 			// Flush previous diff
 			if current != nil {
 				current.Diff = strings.TrimSuffix(buf.String(), "\n")
-				finalizeDiff(ctx, current, repoDir, ref, runner)
 				diffs = append(diffs, *current)
 				buf.Reset()
 			}
@@ -177,11 +183,10 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	// Flush last diff
 	if current != nil {
 		current.Diff = strings.TrimSuffix(buf.String(), "\n")
-		finalizeDiff(ctx, current, repoDir, ref, runner)
 		diffs = append(diffs, *current)
 	}
 
-	return diffs, nil
+	return diffs
 }
 
 // finalizeDiff reads the new file content. When ref is non-empty it uses

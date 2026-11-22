@@ -49,7 +49,7 @@ export const ko: TranslationKeys = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'NPM 다운로드',
   'highlights.stat2Caption': '실제 npm 다운로드 수 · 최근 30일',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': '실제 작업',
   'highlights.stat3Caption': '지금까지 수행한 코드 리뷰 작업',
   'highlights.stat4Value': '1/9',
@@ -122,6 +122,7 @@ export const ko: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': '문의하기',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
 
   // Docs Page
@@ -290,6 +291,7 @@ export const ko: TranslationKeys = {
   'docs.sidebar.configuration': '설정',
   'docs.sidebar.cliReference': 'CLI 레퍼런스',
   'docs.sidebar.reviewRules': '리뷰 규칙',
+  'docs.sidebar.reviewingRequirements': '요구사항에 따른 리뷰',
   'docs.sidebar.architecture': '아키텍처',
   'docs.sidebar.tools': '도구',
   'docs.sidebar.mcp': 'MCP 서버',
@@ -310,6 +312,11 @@ export const ko: TranslationKeys = {
   'docs.search.hint.select': '선택',
   'docs.search.hint.open': '열기',
   'docs.search.hint.close': '닫기',
+  'docs.content.loading': '문서를 불러오는 중...',
+  'docs.content.loadError': '문서 콘텐츠를 불러오지 못했습니다.',
+  'docs.content.retry': '다시 시도',
+  'docs.search.loading': '검색 중...',
+  'docs.search.loadError': '검색 콘텐츠를 불러오지 못했습니다.',
 
   // Blog
   'blog.title': '블로그',

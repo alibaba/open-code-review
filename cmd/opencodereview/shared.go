@@ -197,6 +197,7 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 // adjusted template (mutated in place via ApplyLanguage), the LLM client,
 // the resolved model name, and a fresh comment collector.
 type llmRuntime struct {
+	Endpoint  llm.ResolvedEndpoint
 	Client    llm.LLMClient
 	Model     string
 	Provider  string // resolved provider name (non-secret label; empty for non-provider endpoints)
@@ -263,6 +264,7 @@ func loadLLMRuntime(tpl *template.Template, resolveOpts llm.ResolveOptions) (*ll
 	}
 
 	return &llmRuntime{
+		Endpoint:       ep,
 		Client:         llm.NewLLMClient(ep, retryCollector, rawHolder),
 		Model:          ep.Model,
 		Provider:       ep.Provider,
@@ -285,14 +287,17 @@ func loadLLMRuntime(tpl *template.Template, resolveOpts llm.ResolveOptions) (*ll
 // or an open failure returns a no-op closer: raw capture must never fail a
 // review.
 func bindRawWriter(holder *llm.RawHolder, repoDir string, sess *session.SessionHistory) func() {
-	noop := func() {}
 	if holder == nil {
-		return noop
+		return func() {}
 	}
 	w, err := session.NewRawFileWriter(repoDir, sess.SessionID)
+	return attachRawWriter(holder, w, err)
+}
+
+func attachRawWriter(holder *llm.RawHolder, w *session.RawFileWriter, err error) func() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: raw logging disabled for this run: %v\n", err)
-		return noop
+		return func() {}
 	}
 	holder.Set(w)
 	return func() {
@@ -822,7 +827,7 @@ func emitRunResult(
 	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
-	duration := time.Since(startTime)
+	duration := reviewDuration(ag, startTime)
 	telemetry.RecordReviewDuration(ctx, duration)
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
@@ -830,12 +835,13 @@ func emitRunResult(
 
 	traceID := telemetry.TraceIDFromContext(ctx)
 	manifest := ag.RunManifest()
+	analysis := analysisOutputOf(ag)
 
 	// JSON and SARIF are machine-readable formats written to stdout; they
 	// share the same suppression of trace summaries and early stdout restore.
 	machineReadable := isMachineReadable(outputFormat)
 
-	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
+	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 && analysis == nil {
 		if outputFormat == "json" {
 			return outputJSONNoFiles(traceID, llmIdentity, out)
 		}
@@ -862,6 +868,10 @@ func emitRunResult(
 		})
 	}
 
+	if outputFormat == "sarif" {
+		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+	}
+	comments = inCommentSeverityOrder(comments, comments)
 	if outputFormat == "json" {
 		var resumeInfo *agent.ResumeInfo
 		if p, ok := ag.(resumeInfoProvider); ok {
@@ -874,10 +884,7 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
-	}
-	if outputFormat == "sarif" {
-		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, analysis)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
 	// Between the comments/warnings block and the project summary: the report is
@@ -886,6 +893,9 @@ func emitRunResult(
 	outputRetryReportText(out, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", markdownForOutput(out, summary))
+	}
+	if analysis != nil {
+		outputAnalysisText(out, analysis)
 	}
 	// Text rendering ignores fmt.Fprintf write errors; surface them here so a
 	// failed --output write (permission, disk full) fails the command non-zero
