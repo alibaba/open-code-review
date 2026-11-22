@@ -61,6 +61,17 @@ describe('Turkish localization', () => {
     expect(searchDocs('kir', loaded)).toEqual([]);
   });
 
+  it.each([
+    ['openid connect', 'chatgpt-preview', 'OpenID Connect'],
+    ['GITHUB RELEASE', 'installation', 'GitHub Release'],
+    ['intellij idea', 'contributing', 'IntelliJ IDEA'],
+  ])('finds "%s" in the Turkish %s guide', async (query, slug, name) => {
+    const docs = await loadLanguageContent('tr');
+    expect(searchDocs(query, { language: 'tr', docs })).toContainEqual(
+      expect.objectContaining({ slug, snippet: expect.stringContaining(name) }),
+    );
+  });
+
   it('matches English identifiers and acronym prefixes as users type them', () => {
     const loaded = { language: 'tr' as const, docs: { quickstart: '`OCR_LLM_TIMEOUT` / SARIF' } };
     for (const query of ['ocr_llm_timeout', 'SARI', 'sari']) {

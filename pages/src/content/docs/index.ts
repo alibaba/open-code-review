@@ -144,10 +144,11 @@ function turkishSearchPattern(query: string): RegExp {
 }
 
 function foldTurkishDocument(content: string): string {
-  const englishIdentifier = /^(?:AI|ANSI|API|CI|CLI|ID|IDE|SARIF|TUI|UI|URI|UUID|[a-z0-9]+_[a-z0-9_]+)$/i;
+  const englishIdentifier = /^(?:AI|ANSI|API|CI|CLI|ID|IDE|IDEA|SARIF|TUI|UI|URI|UUID|[a-z0-9]+_[a-z0-9_]+)$/i;
   return content.replace(/[\p{L}\p{M}\p{N}_]+/gu, word => {
     if (!/[Ii\u0130]/u.test(word)) return word.toLowerCase();
-    if (englishIdentifier.test(word)) return word.toLowerCase().replace(/i/g, 'I');
+    const isCamelCaseName = /^[a-zA-Z0-9]+$/.test(word) && /[a-z][A-Z]/.test(word);
+    if (isCamelCaseName || englishIdentifier.test(word)) return word.toLowerCase().replace(/i/g, 'I');
     return word.toLocaleLowerCase('tr');
   });
 }

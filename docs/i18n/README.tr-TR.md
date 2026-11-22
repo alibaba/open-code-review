@@ -160,8 +160,8 @@ Diğer kurulum yolları (kurulum betiği, GitHub Release ikili dosyası, kaynakt
 - **Modeli mevcut ajan çağırır:** `/open-code-review:delegate-review` komutu ve `open-code-review-delegate` becerisi, ajan ortamının modelini ve kimlik doğrulamasını kullanır. OCR'da ayrı LLM ayarı veya kimlik bilgisi gerekmez. [Claude Code kurulumuna](../../plugins/open-code-review/README.md#claude-code) bakın.
 
 ```bash
-ocr config provider          # Select a built-in provider or add a custom one
-ocr config model             # Pick a model for the active provider
+ocr config provider          # Yerleşik bir sağlayıcı seçin veya özel bir sağlayıcı ekleyin
+ocr config model             # Etkin sağlayıcı için bir model seçin
 ```
 
 ![Model sağlayıcıları](../../imgs/providers.jpg)
@@ -175,28 +175,28 @@ CLI kurulumu, ortam değişkenleri, özel sağlayıcılar ve gelişmiş ayarlar 
 ```bash
 cd your-project
 
-# Workspace mode — review all staged, unstaged, and untracked changes
+# Çalışma alanı — indekse eklenmiş ve eklenmemiş değişikliklerle izlenmeyen dosyaları inceleyin
 ocr review
 
-# Geçerli dalın main'den ayrıldıktan sonraki değişikliklerini incele (--to verilmezse HEAD kullanılır)
+# Geçerli dalın main'den ayrıldıktan sonraki değişikliklerini inceleyin (--to verilmezse HEAD kullanılır)
 ocr review --from main
 
-# Branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)
+# Dal aralığı — feature-branch dalındaki değişiklikleri main ile ortak atadan itibaren inceleyin
 ocr review --from main --to feature-branch
 
-# Single commit
+# Tek bir commit'i inceleyin
 ocr review --commit abc123
 
-# Resume an interrupted range or commit review
+# Yarıda kalan dal aralığı veya commit incelemesine devam edin
 ocr session list
 ocr review --from main --to feature-branch --resume <session-id>
 
-# Full-file scan — review whole files instead of a diff (no git history needed)
-ocr scan                          # scan the entire repository
-ocr scan --path internal/agent    # scan a directory or specific files
-ocr scan --resume <session-id>   # resume an interrupted full-file scan
+# Tam dosya taraması — fark yerine dosyaların tamamını inceleyin (Git geçmişi gerekmez)
+ocr scan                          # Deponun tamamını tarayın
+ocr scan --path internal/agent    # Bir dizini veya belirli dosyaları tarayın
+ocr scan --resume <session-id>    # Yarıda kalan tam dosya taramasına devam edin
 
-# Save results to a file (recommended for AI host agents)
+# Sonuçları bir dosyaya kaydedin (OCR'yi çalıştıran yapay zekâ ajanları için önerilir)
 ocr review --format json --output result.json
 
 # Görev devri modu — incelemeyi kodlama ajanınız yürütür
