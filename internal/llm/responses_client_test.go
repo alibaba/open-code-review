@@ -1210,26 +1210,29 @@ func TestOpenAIResponsesClient_ExtraBodyPromptCacheKeyOverridesSessionID(t *test
 // TestNewLLMClientResponsesOptInStreams pins the public JSON key and both
 // directions of the opt-in gate from a raw config through NewLLMClient.
 func TestNewLLMClientResponsesOptInStreams(t *testing.T) {
-	const providerName = "terra-bifrost"
 	tests := []struct {
-		name       string
-		raw        string
-		wantStream bool
+		name                  string
+		raw                   string
+		wantStream            bool
+		wantRequiresStreaming bool
 	}{
 		{
-			name:       "custom opt in",
-			raw:        `{"provider":"terra-bifrost","custom_providers":{"terra-bifrost":{"api_key":"fixture-key","url":"URL","protocol":"openai-responses","model":"gpt-6.1-terra","extra_body":{"stream":false,"reasoning_effort":"medium"},"requires_streaming":true}}}`,
-			wantStream: true,
+			name:                  "custom opt in",
+			raw:                   `{"provider":"terra-bifrost","custom_providers":{"terra-bifrost":{"api_key":"fixture-key","url":"URL","protocol":"openai-responses","model":"gpt-6.1-terra","extra_body":{"stream":false,"reasoning_effort":"medium"},"requires_streaming":true}}}`,
+			wantStream:            true,
+			wantRequiresStreaming: true,
 		},
 		{
-			name:       "custom opt out",
-			raw:        `{"provider":"terra-bifrost","custom_providers":{"terra-bifrost":{"api_key":"fixture-key","url":"URL","protocol":"openai-responses","model":"gpt-6.1-terra","extra_body":{"stream":false,"reasoning_effort":"medium"}}}}`,
-			wantStream: false,
+			name:                  "custom opt out",
+			raw:                   `{"provider":"terra-bifrost","custom_providers":{"terra-bifrost":{"api_key":"fixture-key","url":"URL","protocol":"openai-responses","model":"gpt-6.1-terra","extra_body":{"stream":false,"reasoning_effort":"medium"}}}}`,
+			wantStream:            false,
+			wantRequiresStreaming: false,
 		},
 		{
-			name:       "preset key ignored",
-			raw:        `{"provider":"openai-responses","providers":{"openai-responses":{"api_key":"fixture-key","url":"URL","model":"gpt-6.1-terra","extra_body":{"stream":false},"requires_streaming":true}}}`,
-			wantStream: false,
+			name:                  "preset key ignored",
+			raw:                   `{"provider":"openai-responses","providers":{"openai-responses":{"api_key":"fixture-key","url":"URL","model":"gpt-6.1-terra","extra_body":{"stream":false},"requires_streaming":true}}}`,
+			wantStream:            false,
+			wantRequiresStreaming: false,
 		},
 	}
 	for _, testCase := range tests {
@@ -1266,18 +1269,14 @@ func TestNewLLMClientResponsesOptInStreams(t *testing.T) {
 			}))
 			defer server.Close()
 
-			provider := providerName
-			if testCase.name == "preset key ignored" {
-				provider = "openai-responses"
-			}
 			raw := strings.ReplaceAll(testCase.raw, "URL", server.URL+"/v1")
 			path := writeRawResolverConfig(t, raw)
 			ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
 			if err != nil {
 				t.Fatalf("ResolveEndpointWithOptions: %v", err)
 			}
-			if provider != providerName && ep.RequiresStreaming {
-				t.Fatal("preset entry carried requires_streaming into the resolved endpoint")
+			if ep.RequiresStreaming != testCase.wantRequiresStreaming {
+				t.Fatalf("ep.RequiresStreaming = %v, want %v", ep.RequiresStreaming, testCase.wantRequiresStreaming)
 			}
 			client := NewLLMClient(ep, nil, nil)
 			resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{

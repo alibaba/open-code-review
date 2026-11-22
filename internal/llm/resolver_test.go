@@ -2969,6 +2969,11 @@ func TestResolveEndpointRequiresStreamingOptIn(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "extra body stream is not an opt in",
+			raw:  `{"provider":"terra-bifrost","custom_providers":{"terra-bifrost":{"api_key":"fixture-key","url":"https://gateway.example.com/v1","protocol":"openai-responses","model":"gpt-6.1-terra","extra_body":{"stream":true,"reasoning_effort":"medium"}}}}`,
+			want: false,
+		},
+		{
 			name: "preset key ignored",
 			raw:  `{"provider":"openai-responses","providers":{"openai-responses":{"api_key":"fixture-key","url":"https://gateway.example.com/v1","model":"gpt-6.1-terra","extra_body":{"stream":false},"requires_streaming":true}}}`,
 			want: false,
@@ -2981,6 +2986,9 @@ func TestResolveEndpointRequiresStreamingOptIn(t *testing.T) {
 			ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
 			if err != nil {
 				t.Fatalf("ResolveEndpointWithOptions: %v", err)
+			}
+			if ep.Protocol != ProtocolOpenAIResponses {
+				t.Fatalf("ep.Protocol = %q, want %q", ep.Protocol, ProtocolOpenAIResponses)
 			}
 			if ep.RequiresStreaming != testCase.want {
 				t.Fatalf("ep.RequiresStreaming = %v, want %v", ep.RequiresStreaming, testCase.want)
