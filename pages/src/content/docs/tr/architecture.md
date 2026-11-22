@@ -143,7 +143,9 @@ Uzun araç kullanımı döngüleri sonunda bağlam penceresini aşabilir. OCR bu
 | MAX_TOKENS değerinin %60'ı | `tokenSoftThreshold` | Arka planda **asenkron** sıkıştırmayı başlatır; döngü kesintisiz sürer. |
 | MAX_TOKENS değerinin %80'i | `tokenWarningThreshold` | Sonraki istekten önce **senkron** sıkıştırma yapar. |
 
-> **`MAX_TOKENS` bir girdi sınırıdır.** Yalnızca istemi, yani mesaj tamponunun sıkıştırıldığı bağlam bütçesini sınırlar. Modelin çıktı sınırı ayrı bir ayardır: `MAX_COMPLETION_TOKENS = 16384`, her istekte `max_completion_tokens` olarak gönderilir (`Template.CompletionTokenLimit()`). Bu ayrım, büyük bağlamlı model için `--max-tokens` artırıldığında çıktı bütçesinin de fark edilmeden artmasını önler. Geriye uyumluluk için `MAX_COMPLETION_TOKENS` ayarlanmamışsa çıktı sınırı olarak `MAX_TOKENS` kullanılır.
+> **`MAX_TOKENS` bir girdi sınırıdır.** Yalnızca istemi, yani mesaj tamponunun sıkıştırıldığı bağlam bütçesini sınırlar. Modelin çıktı sınırı ayrı bir ayardır: `MAX_COMPLETION_TOKENS = 16384` (`Template.CompletionTokenLimit()`). Bu ayrım, büyük bağlamlı model için `--max-tokens` artırıldığında çıktı bütçesinin de fark edilmeden artmasını önler. Geriye uyumluluk için `MAX_COMPLETION_TOKENS` ayarlanmamışsa çıktı sınırı olarak `MAX_TOKENS` kullanılır.
+
+OCR, etkin turları seçmeden önce **görünür özet** için yer ayırır. Ayrılan alan üç sınırdan en küçüğünü aşamaz: yapılandırılmış çıktı sınırı, bağlamın %20'si ve sabit istemle özeti çevreleyen etiketlerden arta kalan alan. Bazı sağlayıcılar akıl yürütme tokenlarını da çıktıdan sayar. Sıkıştırma isteği %80 uyarı eşiğinin altında kalıyorsa OCR, yapılandırılmış çıktı sınırına kadar daha büyük bir üretim bütçesi isteyebilir; ancak modelden görünür özeti ayrılan alana sığdırmasını ister. Yeniden oluşturulan geçmiş yine sınıra sığmalıdır. Bu sınırlar toplam `--max-tokens-budget` değerinden bağımsızdır; bu değeri sıfırlamak bağlam sıkıştırmasını kapatmaz.
 
 ### Üç bölge {#the-three-zones}
 
@@ -158,30 +160,15 @@ flowchart LR
     F --- C --- A
 ```
 
-Bir “tur”, bir asistan mesajı ve ardından gelen araç sonuçlarıdır. `partitionMessages`, turları sondan başa tarar; `(0.80 × MAX_TOKENS) - reservedTokens` bütçesine sığanları tutar. Daha eski mesajlar **sıkıştırılacak bölgeyi** oluşturur.
+Bir “tur”, bir asistan mesajı ve ardından gelen araç sonuçlarıdır. `partitionMessages`, turları sondan başa tarar ve toplamı `(0.80 × MAX_TOKENS) - reservedTokens` değerinin kesin olarak altında tutar. Ayrılan alan ilk iki mesajı (önceki özetler dahil), görünür özeti ve etiketlerini kapsar. Daha eski mesajlar **sıkıştırılacak bölgeyi** oluşturur; bu bölge boşsa konuşma değişmez. Bütçeye, asistan mesajları ve araç sonuçlarının yanı sıra turlar arasındaki yeniden deneme talimatları da dahildir. Uyarı eşiğinin altındayken arka plan işlemi güncel geçmişin tamamını özetlemez. Eşiğe ulaşıldığında veya eşik aşıldığında en son tur bile özete ayrılan alanla birlikte sığmıyorsa özetlenebilir.
 
 Bu bölge XML'e dönüştürülür ve `MEMORY_COMPRESSION_TASK` istemiyle modele gönderilir. Dönen özet, özgün kullanıcı mesajına `<previous_review_summary>` etiketleri içinde eklenir.
 
-Sıkıştırma sonrasında: `messages = frozen[2] + compressed_user_msg + active`.
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … call MEMORY_COMPRESSION_TASK …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+Sıkıştırma sonrasında: `messages = system + (original_user + summary) + active`. Yeni konuşma aynı yerel token tahminiyle ölçülür ve özgün konuşmadan daha küçük olmalıdır. Sıkıştırma şablonu eksikse, özet boşsa veya sonuç küçülmediyse özgün geçmiş korunur. Yalnızca görünür özet kullanılır; modelin akıl yürütmesi tek başına geçmişin yerini almaz. Yanıt çıktı sınırında kesilmişse, özet şablonu kullanılamıyorsa veya yeniden oluşturulan konuşma sınırı aşıyorsa hiçbir özgün mesaj silinmeden hata döndürülür.
 
 ### Asenkron ve senkron çalışma {#async-vs-sync}
 
-Asenkron yolda sıkıştırma arka planda sürerken ana döngü araç çağırmaya devam eder. Sonraki token kontrolünde hazır özet `tryApplyPendingCompression` ile uygulanır. Asenkron iş tamamlanmadan uyarı eşiği aşılırsa döngü bekler ve `runCompression` senkron çalışır; böylece sonraki istek sınıra sığar.
+Asenkron yolda sıkıştırma arka planda sürerken ana döngü araç çağırmaya devam eder. Sonraki token kontrolünde hazır özet `tryApplyPendingCompression` ile uygulanır. Asenkron iş tamamlanmadan uyarı eşiği aşılırsa döngü bekler ve `runCompression` senkron çalışır. Arka plan işlemi için geçmişin kopyası alındıktan sonra eklenen mesajlar, özet uygulandığında korunur. Konuşma hâlâ yerel uyarı eşiğinin altına inmiyorsa döngü `StopCompression` ile durur; sıkıştırılmamış geçmişi sessizce silmez. Yerel tahmin, sağlayıcının gerçek bağlam penceresine sığılacağını garanti etmez.
 
 ## Yorum işleme akışı {#comment-processing-pipeline}
 

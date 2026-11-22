@@ -65,7 +65,7 @@ Her oturumda kimlik (UUID), algılanabildiyse dal adı, inceleme modu, model, do
 
 ### `/r/{repo}/{sessionID}` — Oturum ayrıntıları {#r-repo-sessionid-session-detail}
 
-1. **Başlık** — fark aralığı, model, dal, toplam token, süre.
+1. **Başlık** — çalışma dizinini, dalı, inceleme kipini, fark aralığını veya commit'i ve modeli gösterir. Oturum bir analiz içeriyorsa bu bilgiler **Review** ve **Analysis** sekmelerinin üzerinde kalır. İncelemenin durumu, dosya sayısı ve süresi ortak başlık yerine **Review** sekmesinin üstünde gösterilir.
 2. **Dosya grubu** — incelenen grup başına bir blok. Anlamsal gruplama nedeniyle bir blok ilişkili birkaç dosya içerebilir; başlığı dosya yollarıdır. Her grupta beş görev türü şeridi vardır:
 
 | Görev türü | Ne zaman görünür? |

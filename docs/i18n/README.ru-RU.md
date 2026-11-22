@@ -175,6 +175,9 @@ cd your-project
 # Режим рабочей копии — ревью всех staged, unstaged и untracked изменений
 ocr review
 
+# Текущая ветка — ревью изменений с момента её отделения от main (--to по умолчанию HEAD)
+ocr review --from main
+
 # Диапазон веток — просматривает изменения feature-branch с момента её отделения от main (режим merge-base)
 ocr review --from main --to feature-branch
 

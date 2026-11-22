@@ -175,6 +175,9 @@ cd your-project
 # Workspace mode — review all staged, unstaged, and untracked changes
 ocr review
 
+# Current branch — review changes since it diverged from main (--to defaults to HEAD)
+ocr review --from main
+
 # Branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)
 ocr review --from main --to feature-branch
 

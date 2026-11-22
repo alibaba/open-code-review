@@ -175,6 +175,9 @@ cd your-project
 # Workspace mode: staged, unstaged, untracked 변경을 모두 리뷰
 ocr review
 
+# 현재 브랜치 — main에서 분기된 이후의 변경 사항을 리뷰합니다 (--to의 기본값은 HEAD)
+ocr review --from main
+
 # 브랜치 범위 — main에서 분기된 이후 feature-branch의 변경 사항을 리뷰합니다 (머지베이스 모드)
 ocr review --from main --to feature-branch
 

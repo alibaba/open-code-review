@@ -157,6 +157,10 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -258,7 +262,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.erb`                                      | `erb.md`: ERB テンプレート（SSTI / XSS / エスケープ / 空白と出力構造）。 |
 | `**/*.ets`                                      | `arkts.md`: ArkTS / HarmonyOS。                                                                 |
 | `**/*.astro`                                    | `astro.md`: Astro コンポーネントと islands。                                                    |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                              |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                                              |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                     |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md`: F# の実装、シグネチャ、スクリプトファイル。                                        |
@@ -266,7 +270,10 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.rs`                                       | `rust.md`                                                                                       |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                        |
 | `**/*.c`                                        | `c.md`                                                                                          |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md`：CUDA カーネルとヘッダー。                                                        |
+| `**/*.hip`                                      | `cuda_hip.md`：HIP（AMD ROCm）カーネル。                                                        |
 | `**/*.{py,pyi,ipynb}`                           | `python.md`: Python ソースコード。                                                              |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md`: Ruby のソース、Rake タスク、gemspec、Gemfile、Rakefile。 |
 | `**/*.{php,phtml}`                              | `php.md`: PHP ソースと PHP テンプレート。                                                       |
 | `**/*.proto`                                    | `protobuf.md`: Protocol Buffers のワイヤ互換性。                                                |
 | `**/*.po`                                       | `po.md`: gettext 翻訳ソースカタログ。                                                           |
@@ -277,6 +284,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.R`                                        | `r.md`                                                                                          |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md`: Terraform / HCL。                                                               |
 | `**/*.bicep`                                    | `bicep.md`: Bicep（Azure）テンプレート。                                                        |
+| `**/*.dhall` | `dhall.md`: Dhall 設定言語。 |
 | `**/*.nix`                          | `nix.md`: Nix 式と flake。                                                                  |
 | `**/*.{hs,lhs}`                     | `haskell.md`: Haskell ソースコード。                                                            |
 | `**/*.{nim,nims,nimble}`            | `nim.md`: Nim ソースコードとパッケージマニフェスト。                                                        |
@@ -300,6 +308,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - GLSL、HLSL、WGSL、Metal シェーダー。                                              |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md`: PowerShell スクリプト、モジュール、データ／マニフェストファイル。              |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md`: Clojure / ClojureScript ソースコードと EDN データ。 |
+| `**/*.sql`                                      | `sql.md`: SQL マイグレーションとクエリ。 |
 | _(fallback)_                                    | `default.md`                                                                                    |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。

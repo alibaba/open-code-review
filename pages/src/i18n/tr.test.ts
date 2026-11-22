@@ -5,6 +5,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { getDocContent, loadLanguageContent, searchDocs } from '../content/docs';
 import { en } from './en';
 import { tr } from './tr';
 import { extractHeadingInfo } from '../utils/headingId';
@@ -21,6 +22,18 @@ describe('Turkish localization', () => {
       expect(tr[key].trim(), key).not.toBe('');
       expect(placeholders(tr[key]), key).toEqual(placeholders(en[key]));
     }
+  });
+
+  it('loads and searches the Turkish requirements guide without English fallback', async () => {
+    const docs = await loadLanguageContent('tr');
+    const loaded = { language: 'tr' as const, docs };
+    const query = 'Sepet boşsa';
+    expect(getDocContent('reviewing-requirements', loaded)).toContain(query);
+    expect(searchDocs(query, loaded)).toContainEqual({
+      slug: 'reviewing-requirements',
+      title: tr['docs.sidebar.reviewingRequirements'],
+      snippet: expect.stringContaining(query),
+    });
   });
 
   it.each(files)('translates %s with all source sections and stable anchors', path => {

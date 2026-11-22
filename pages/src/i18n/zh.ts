@@ -291,6 +291,7 @@ export const zh: TranslationKeys = {
   'docs.sidebar.configuration': '配置',
   'docs.sidebar.cliReference': 'CLI 参考',
   'docs.sidebar.reviewRules': '评审规则',
+  'docs.sidebar.reviewingRequirements': '结合需求进行评审',
   'docs.sidebar.architecture': '架构',
   'docs.sidebar.tools': '工具',
   'docs.sidebar.mcp': 'MCP 服务器',
@@ -311,6 +312,11 @@ export const zh: TranslationKeys = {
   'docs.search.hint.select': '选择',
   'docs.search.hint.open': '打开',
   'docs.search.hint.close': '关闭',
+  'docs.content.loading': '文档加载中...',
+  'docs.content.loadError': '文档内容加载失败。',
+  'docs.content.retry': '重试',
+  'docs.search.loading': '搜索中...',
+  'docs.search.loadError': '搜索内容加载失败。',
 
   // Blog
   'blog.title': '博客',

@@ -89,6 +89,8 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 Ana komuttur. Git farkını alır, değişen dosyaları anlamsal gruplara ayırır, grup başına alt ajan çalıştırır, yorumları toplar ve yazdırır.
 
+`review` ve `scan`, son raporda bulguları metin, JSON ve SARIF biçimlerinde düşük önem derecesinden yükseğe doğru sıralar: `low`, `medium`, `high`, `critical`. Önem derecesi eksik veya tanınmayan bulgular `low` öncesinde gelir. Aynı derecedeki bulgular toplanma sırasını korur; paralel çalıştırmalarda bu sıra değişebilir.
+
 ### Kullanım biçimi {#synopsis}
 
 ```text
@@ -120,11 +122,13 @@ Seçenek verilmezse **çalışma alanı kipinde** çalışır; geçerli dizinin 
 | `--effort <level>` | — | `medium` | `low`: 1, `medium`: 2, `high`: 3 tur. Fazla tur daha fazla bulgu ve orantılı maliyet sağlar. Bu çalıştırmada kayıtlı `effort` değerini geçersiz kılar. |
 | `--rule <path>` | — | — | Proje ve genel `rule.json` yerine kullanılacak özel JSON kural dosyası. |
 | `--max-tools <n>` | — | Şablon varsayılanı | Alt görev başına araç çağrısı turu sınırı. `0`, şablon varsayılanını (`100`) kullanır; 1–49 değerleri `50` yapılır. Çözümlenen pozitif değer kesin sınırdır. |
-| `--max-tokens <n>` | — | Yapılandırma veya şablon | Alt görev başına istem/girdi token sınırı; şablon varsayılanı `200000`. Kayıtlı `max_tokens` değerinden önceliklidir. Çıktı sınırını değiştirmez; bkz. `MAX_COMPLETION_TOKENS`. |
+| `--max-tokens <n>` | — | Yapılandırma veya şablon | Hem inceleme hem analiz için alt görev başına istem/girdi token sınırı; şablon varsayılanı `200000`. Kayıtlı `max_tokens` değerinden önceliklidir. Çıktı sınırını değiştirmez; bkz. `MAX_COMPLETION_TOKENS`. |
+| `--analysis` | — | Kapalı | Commit veya aralık incelemesiyle (`--commit` veya `--from`) birlikte ayrı bir davranış ve etki analizi çalıştırır. Yalnızca metin ve JSON çıktısını destekler. Çalışma alanında, önizlemede veya yarıda kalan incelemeye devam ederken kullanılmaz. Analiz, `--max-tools` değerinden bağımsız olarak 300 araştırma turu kullanabilir; bütçe tükenirse yalnızca sonucu göndermek için en fazla bir ek tur yapılır. Analizin başarısız olması veya atlanması incelemenin çıkış kodunu değiştirmez. |
+| `--analysis-max-tokens-budget <n>` | — | `0` (sınırsız) | Yalnızca analizin toplam girdi ve çıktı token sayısına esnek bir sınır koyar. İncelemeyle eşzamanlı olarak bir ek model isteği çalışabilir. JSON çıktısında `analysis_meta.usage` ve `analysis_meta.execution_status` alanlarına bakın. |
 | `--max-tokens-budget <n>` | — | `0` (sınırsız) | Toplam girdi+çıktı token sınırı. Her LLM turundan önce denetlenir. Bütçeyi aşan alt göreve bulguları göndermesi için son tur verilir ve `failed(budget)` bildirilir. Yeni görev dağıtılmaz; mevcut sonuçlar yazdırılır. |
 | `--provider <name>` | — | — | Bu çalıştırmada kullanılacak yapılandırılmış sağlayıcı; `providers` ve `custom_providers` adları kabul edilir. |
 | `--model <name>` | — | — | Çözümlenen modeli bu çalıştırma için değiştirir; ör. `claude-opus-4-6`. |
-| `--max-git-procs <n>` | — | `16` | Eşzamanlı Git alt süreçlerinin üst sınırı. |
+| `--max-git-procs <n>` | — | `16` | İnceleme ve analiz genelinde eşzamanlı çalışabilecek toplam Git alt süreci sayısı. |
 
 > Kip seçenekleri birlikte kullanılamaz. Ya `--from`/`--to`, ya `--commit` verin ya da hiçbirini vermeyin (çalışma alanı). Karıştırmak hatadır. `--resume` üç kipte de çalışır ancak `--preview` ile birleşemez.
 
@@ -172,6 +176,10 @@ ocr review -c abc123
 ```
 
 `git show abc123` çıktısını, yani o commit'in getirdiği değişiklikleri inceler.
+
+Commit ve aralık incelemeleri, hedef commit'in (`--commit` veya `--to` ile belirlenen commit) kök dizinindeki `.gitignore` ile eşleşen değişiklikleri dışarıda bırakır; çalışma ağacındaki dosyayı kullanmaz. Analiz de değişiklik listesini aynı kurala göre oluşturur. Yok sayılan bir dosya yine de bağlam olarak okunabilir; analizin dosyayı okumasını engellemek için `--exclude` kullanın.
+
+`--analysis` kullanıldığında `ocr viewer`, aynı oturum kimliğiyle **Review** ve **Analysis** sekmelerini tek bir raporda açar. **Analysis** sekmesinde yürütme durumu, kapsamdaki değişen dosyalar (okunan dosyaların listesi değil), modelin değerlendirmesi ve dayanakları gösterilir. Metindeki numaralı bir kaynağı seçerek ilgili kanıtı okuyabilir, **Evidence** bölümünü açarak atıf yapılan ve yapılmayan tüm gözlemleri görebilirsiniz. **Conversations** bölümünde kaydedilen analiz isteklerini, model yanıtlarını, araç çağrılarını ve sonuçlarını inceleyebilirsiniz. Bu kayıt HTML dışa aktarımına dahil edilmez. Analizin Markdown dosyası, sonuç üst verileri, kanıtları ve yürütme kaydı `~/.opencodereview/sessions/<encoded-repo>/<session-id>/analysis/` altında saklanır. Kanıtlar ve günlükler kaynak kodu içerebilir. Tamamlanmamış bir çalıştırmanın nihai durumu olmayabilir.
 
 ### Yarıda kalan incelemeye devam etme {#resuming-interrupted-reviews}
 
@@ -447,7 +455,7 @@ Sayfa, oturumun kaydettiği kaynak parçalarını içerir. Yayımlamadan önce d
 
 ### `ocr session rm` {#ocr-session-rm}
 
-`~/.opencodereview/sessions/` içindeki tek oturumu siler.
+`~/.opencodereview/sessions/` içindeki tek bir oturumu, varsa ilişkili analiz raporu, kanıtlar ve günlüklerle birlikte siler.
 
 ```bash
 ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b

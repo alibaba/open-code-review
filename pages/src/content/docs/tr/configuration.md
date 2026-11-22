@@ -141,15 +141,19 @@ Bedrock, `llm.protocol` veya `OCR_LLM_PROTOCOL` üzerinden kullanılamaz. Bu blo
 
 `mimo-v2.6-flash` ve `foo.api_key` gibi adlar desteklenir. Nokta içeren yeni bir adın alanlarını ayarlamadan önce `ocr config set provider <name>` ile oluşturup seçin; bu işlem etkin sağlayıcıyı değiştirir. Mevcut noktalı girdiler seçilmeden `providers.<name>.<field>` veya `custom_providers.<name>.<field>` üzerinden düzenlenebilir. Adlar noktayla başlayıp bitemez, art arda noktalar ya da boş/sadece boşluk içeren bölümler içeremez. Noktasız adlar örtük oluşturmayı desteklemeye devam eder.
 
-Yukarıdaki tabloda bulunmayan sağlayıcı adları özel kabul edilir ve en az `url` ile `protocol` gerektirir. Protokol `anthropic`, `openai`, `openai-responses` veya `anthropic-bedrock` olabilir:
+Yukarıdaki tabloda bulunmayan sağlayıcı adları özel kabul edilir ve en az `url` ile `protocol` gerektirir. Protokol `anthropic`, `openai`, `openai-responses` veya `anthropic-bedrock` olabilir.
+
+Chat Completions sunan OpenAI uyumlu bir uzak sağlayıcı için `protocol` alanını `openai` olarak ayarlayın. `url` alanına sağlayıcının belgelerinde belirtilen API kök adresini girin; bu adres genellikle `/v1` ile biter. OCR, isteği gönderirken adrese `/chat/completions` ekler. Örneğin OpenAI'ın herkese açık Chat Completions uç noktasına şu adla bağlanabilirsiniz:
 
 ```bash
-ocr config set provider                             my-gateway
-ocr config set custom_providers.my-gateway.url      https://gateway.internal.com/v1
-ocr config set custom_providers.my-gateway.protocol openai
-ocr config set custom_providers.my-gateway.model    llama-3-70b
-ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+ocr config set provider                                      openai-chat-gateway
+ocr config set custom_providers.openai-chat-gateway.url      https://api.openai.com/v1
+ocr config set custom_providers.openai-chat-gateway.protocol openai
+ocr config set custom_providers.openai-chat-gateway.model    gpt-4.1
+ocr config set custom_providers.openai-chat-gateway.api_key  "$OPENAI_API_KEY"
 ```
+
+Diğer OpenAI uyumlu uzak hizmetler için de aynı alanları kullanın. `url` yerine hizmetin API kök adresini, `model` yerine kataloğunda kabul ettiği model kimliğini yazın. OCR, araçları Chat Completions üzerinden gönderdiğinden hem model hem de uç nokta yerleşik araç çağrılarını desteklemelidir. Özel sağlayıcılarda OCR, API anahtarı için ortam değişkeni adını kendiliğinden belirlemez; `api_key` veya `api_key_cmd` ayarlanmalıdır. `ocr config set provider <name>`, sağlayıcıyı etkinleştirir ve OCR'nin hangi yapılandırmayı kullanacağını değiştirir.
 
 Sağlayıcı veya model OpenAI Responses API (`/v1/responses`) gerektiriyorsa `openai-responses` kullanın:
 

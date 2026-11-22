@@ -175,6 +175,9 @@ cd your-project
 # ワークスペースモード — ステージ済み・未ステージ・未追跡のすべての変更をレビュー
 ocr review
 
+# 現在のブランチ — main から分岐した後の変更をレビュー（--to のデフォルトは HEAD）
+ocr review --from main
+
 # ブランチ範囲 — main から分岐した後の feature-branch の変更をレビュー（マージベースモード）
 ocr review --from main --to feature-branch
 

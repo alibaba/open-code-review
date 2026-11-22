@@ -291,6 +291,7 @@ export const ja: TranslationKeys = {
   'docs.sidebar.configuration': '設定',
   'docs.sidebar.cliReference': 'CLI リファレンス',
   'docs.sidebar.reviewRules': 'レビュールール',
+  'docs.sidebar.reviewingRequirements': '要件に基づくレビュー',
   'docs.sidebar.architecture': 'アーキテクチャ',
   'docs.sidebar.tools': 'ツール',
   'docs.sidebar.mcp': 'MCP サーバー',
@@ -311,6 +312,11 @@ export const ja: TranslationKeys = {
   'docs.search.hint.select': '選択',
   'docs.search.hint.open': '開く',
   'docs.search.hint.close': '閉じる',
+  'docs.content.loading': 'ドキュメントを読み込み中...',
+  'docs.content.loadError': 'ドキュメントの読み込みに失敗しました。',
+  'docs.content.retry': '再試行',
+  'docs.search.loading': '検索中...',
+  'docs.search.loadError': '検索コンテンツの読み込みに失敗しました。',
 
   // Blog
   'blog.title': 'ブログ',

@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net/http"
 	"path/filepath"
+	"slices"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -60,6 +61,7 @@ func handleSessions(w http.ResponseWriter, r *http.Request, root, repo string) {
 }
 
 type sessionPageData struct {
+	Analysis    *analysisPage
 	EncodedRepo string
 	RepoName    string
 	Session     *ViewSession
@@ -74,22 +76,27 @@ type sessionPageData struct {
 	InlineJS  template.JS
 }
 
+func sessionRepoName(cwd, encodedRepo string) string {
+	if name := filepath.Base(cwd); name != "." && name != "" {
+		return name
+	}
+	return encodedRepo
+}
+
 func handleSession(w http.ResponseWriter, r *http.Request, root, repo, sessionID string) {
+	if r.URL.Query().Get("tab") == "analysis" {
+		handleAnalysis(w, r, root, repo, sessionID)
+		return
+	}
 	vs, err := LoadSession(root, repo, sessionID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusNotFound)
 		return
 	}
 
-	// Derive a display name
-	name := filepath.Base(vs.Summary.CWD)
-	if name == "." || name == "" {
-		name = repo
-	}
-
 	renderTemplate(w, "session.html", sessionPageData{
 		EncodedRepo: repo,
-		RepoName:    name,
+		RepoName:    sessionRepoName(vs.Summary.CWD, repo),
 		Session:     vs,
 	})
 }
@@ -168,11 +175,9 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 	// ServeMux never inspects query values, so these ids need the same
 	// rejection newMux gives the path segments: both end up in filepath.Join
 	// inside LoadSession.
-	for _, id := range []string{before, after} {
-		if unsafeSegment(id) {
-			http.Error(w, "invalid session id", http.StatusBadRequest)
-			return
-		}
+	if slices.ContainsFunc([]string{before, after}, unsafeSegment) {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
+		return
 	}
 
 	bv, err := LoadSession(root, repo, before)

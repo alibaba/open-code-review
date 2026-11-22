@@ -295,14 +295,12 @@ func TestRefreshRotationAndConcurrency(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			r, err := f.client.Credentials(context.Background(), s, "")
 			if err != nil || r.RefreshToken != "refresh-new" || r.IDToken != "id" || !r.PlanEnabled() {
 				t.Error(r, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if f.calls.Load() != 1 {
@@ -355,15 +353,13 @@ func TestSigningKeyCacheAndCancellation(t *testing.T) {
 		return transport.RoundTrip(r)
 	})
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			key, err := f.client.signingKey(context.Background(), "key")
 			if err != nil || key == nil || key.N.Cmp(f.key.N) != 0 {
 				t.Error("cached signing key did not match", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if discoveries.Load() != 1 || sets.Load() != 1 {

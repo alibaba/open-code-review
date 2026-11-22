@@ -289,6 +289,7 @@ export const ru: TranslationKeys = {
   'docs.sidebar.configuration': 'Конфигурация',
   'docs.sidebar.cliReference': 'Справочник CLI',
   'docs.sidebar.reviewRules': 'Правила ревью',
+  'docs.sidebar.reviewingRequirements': 'Ревью с учётом требований',
   'docs.sidebar.architecture': 'Архитектура',
   'docs.sidebar.tools': 'Инструменты',
   'docs.sidebar.mcp': 'MCP-серверы',
@@ -309,6 +310,11 @@ export const ru: TranslationKeys = {
   'docs.search.hint.select': 'Выбрать',
   'docs.search.hint.open': 'Открыть',
   'docs.search.hint.close': 'Закрыть',
+  'docs.content.loading': 'Загрузка документации...',
+  'docs.content.loadError': 'Не удалось загрузить содержимое документации.',
+  'docs.content.retry': 'Повторить',
+  'docs.search.loading': 'Поиск...',
+  'docs.search.loadError': 'Не удалось загрузить содержимое для поиска.',
 
   // Blog
   'blog.title': 'Блог',

@@ -287,6 +287,7 @@ export const en = {
   'docs.sidebar.configuration': 'Configuration',
   'docs.sidebar.cliReference': 'CLI Reference',
   'docs.sidebar.reviewRules': 'Review Rules',
+  'docs.sidebar.reviewingRequirements': 'Reviewing against requirements',
   'docs.sidebar.architecture': 'Architecture',
   'docs.sidebar.tools': 'Tools',
   'docs.sidebar.mcp': 'MCP Servers',
@@ -307,6 +308,11 @@ export const en = {
   'docs.search.hint.select': 'Select',
   'docs.search.hint.open': 'Open',
   'docs.search.hint.close': 'Close',
+  'docs.content.loading': 'Loading documentation...',
+  'docs.content.loadError': 'Failed to load documentation content.',
+  'docs.content.retry': 'Retry',
+  'docs.search.loading': 'Searching...',
+  'docs.search.loadError': 'Search content failed to load.',
 
   // Blog
   'blog.title': 'Blog',

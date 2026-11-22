@@ -175,6 +175,9 @@ cd your-project
 # Workspace mode — review all staged, unstaged, and untracked changes
 ocr review
 
+# Geçerli dalın main'den ayrıldıktan sonraki değişikliklerini incele (--to verilmezse HEAD kullanılır)
+ocr review --from main
+
 # Branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)
 ocr review --from main --to feature-branch
 

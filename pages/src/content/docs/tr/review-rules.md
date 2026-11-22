@@ -151,6 +151,10 @@ Yerleşik gizli dosya yolları incelenmez ([`internal/config/allowlist/default_s
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -252,7 +256,7 @@ Gömülü `system_rules.json` içindeki tüm kalıplar, eşleşme sıraları kor
 | `**/*.erb`                                      | `erb.md` — ERB şablonları (SSTI / XSS / kaçışlama / boşluk ve çıktı yapısı). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
 | `**/*.astro`                                    | `astro.md` — Astro bileşenleri ve adaları.                                                            |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                                    |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                                                    |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                           |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# uygulama, imza ve betik dosyaları.                                         |
@@ -260,7 +264,10 @@ Gömülü `system_rules.json` içindeki tüm kalıplar, eşleşme sıraları kor
 | `**/*.rs`                                       | `rust.md`                                                                                             |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                              |
 | `**/*.c`                                        | `c.md`                                                                                                |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md` — CUDA çekirdekleri ve başlık dosyaları. |
+| `**/*.hip`                                      | `cuda_hip.md` — HIP (AMD ROCm) çekirdekleri. |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — Python kaynak kodu.                                                                          |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md` — Ruby kaynak kodu, Rake görevleri, gemspec, Gemfile ve Rakefile dosyaları. |
 | `**/*.{php,phtml}`                              | `php.md` — PHP kaynak kodu ve şablonları.                                                              |
 | `**/*.proto`                                    | `protobuf.md` — Protocol Buffers aktarım biçimi uyumluluğu.                                                  |
 | `**/*.po`                                       | `po.md` — gettext çeviri kaynak katalogları.                                                        |
@@ -271,6 +278,7 @@ Gömülü `system_rules.json` içindeki tüm kalıplar, eşleşme sıraları kor
 | `**/*.R`                                        | `r.md`                                                                                                |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                     |
 | `**/*.bicep`                                    | `bicep.md` — Bicep (Azure) şablonları.                                                                 |
+| `**/*.dhall`                                    | `dhall.md` — Dhall yapılandırma dili. |
 | `**/*.nix`                          | `nix.md` — Nix ifadeleri ve flake dosyaları.                                                                |
 | `**/*.{hs,lhs}`                     | `haskell.md` — Haskell kaynak kodu.                                                                        |
 | `**/*.{nim,nims,nimble}`            | `nim.md` — Nim kaynak kodu ve paket bildirimleri.                                                          |
@@ -294,6 +302,7 @@ Gömülü `system_rules.json` içindeki tüm kalıplar, eşleşme sıraları kor
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL ve Metal gölgelendiricileri.                                                    |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell betikleri, modülleri ve veri/bildirim dosyaları.                               |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — Clojure / ClojureScript kaynak kodu ve EDN verileri. |
+| `**/*.sql`                                      | `sql.md` — SQL geçiş betikleri ve sorguları. |
 | _(varsayılan)_                                    | `default.md`                                                                                          |
 
 Çözümlenen kural metni, planlama ve ana görev istemlerindeki `{{system_rule}}` yer tutucusuna yerleştirilir.
