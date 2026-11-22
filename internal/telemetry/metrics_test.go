@@ -74,12 +74,10 @@ func TestRecordMetrics_ConcurrentFirstUse(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			RecordLLMRequest(ctx, "gpt-4", time.Millisecond, 10, "ok")
 			RecordToolCall(ctx, "file_read", time.Millisecond, true)
-		}()
+		})
 	}
 	wg.Wait()
 
