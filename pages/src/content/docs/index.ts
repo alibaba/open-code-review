@@ -51,6 +51,8 @@ const availableTranslations: Record<Language, readonly DocSlug[]> = {
   ja: DOC_SLUG_ORDER,
   ko: DOC_SLUG_ORDER,
   ru: DOC_SLUG_ORDER,
+  // Vietnamese ships UI copy only, so every doc page falls back to English.
+  vi: [],
 };
 
 export function hasTranslation(slug: DocSlug, language: Language): boolean {
@@ -69,6 +71,7 @@ const languageLoaders: Record<Language, () => Promise<{ default: LocalizedDocs }
   ja: () => import('./ja'),
   ko: () => import('./ko'),
   ru: () => import('./ru'),
+  vi: () => import('./vi'),
 };
 
 /* Successful loads stay cached for the session; concurrent callers share the

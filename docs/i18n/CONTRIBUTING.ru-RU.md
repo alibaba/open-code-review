@@ -2,7 +2,7 @@
 
 Спасибо за интерес к развитию OpenCodeReview! Важен любой вклад — будь то исправленная опечатка, сообщение о баге или новая функциональность.
 
-[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | Русский
+[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | Русский | [Tiếng Việt](CONTRIBUTING.vi-VN.md)
 
 ## Кодекс поведения
 

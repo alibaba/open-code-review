@@ -65,3 +65,4 @@ do not edit them by hand:
   - docs/i18n/README.ja-JP.md
   - docs/i18n/README.ko-KR.md
   - docs/i18n/README.ru-RU.md
+  - docs/i18n/README.vi-VN.md
