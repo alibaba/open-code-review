@@ -63,7 +63,7 @@ export function isPartialLocale(language: Language): boolean {
   return availableTranslations[language].length !== DOC_SLUG_ORDER.length;
 }
 
-/* One import() boundary per language so webpack emits five independent
+/* One import() boundary per language so webpack emits six independent
  * chunks; a computed specifier would merge them into a single context. */
 const languageLoaders: Record<Language, () => Promise<{ default: LocalizedDocs }>> = {
   en: () => import('./en'),
