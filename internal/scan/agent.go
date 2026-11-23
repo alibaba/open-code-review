@@ -34,6 +34,23 @@ import (
 // less misleading than leaving the placeholder empty.
 const changeFilesScanLiteral = "(not applicable in full-scan mode)"
 
+// defaultNoPlanGuidance is the {{plan_guidance}} text for plan-disabled runs
+// when the template sets no NO_PLAN_GUIDANCE override. Non-empty so the
+// surrounding "### Pre-scan Focus Areas" header in MAIN_TASK has content
+// instead of dangling.
+const defaultNoPlanGuidance = "(no pre-scan plan; review the entire file as usual)"
+
+// substituteScanTokens replaces every {{token}} in content for the given
+// canonical token list (template.ScanMainTokens et al). Tokens outside the
+// list are left untouched here; template validation rejects them at load,
+// so a leak can only come from a template that bypassed Validate.
+func substituteScanTokens(content string, tokens []string, values map[string]string) string {
+	for _, token := range tokens {
+		content = strings.ReplaceAll(content, "{{"+token+"}}", values[token])
+	}
+	return content
+}
+
 // Args bundles all dependencies needed for one scan session.
 //
 // Note: Template is the scan-specific template.ScanTemplate (loaded from
@@ -844,28 +861,37 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 	return true, "", nil
 }
 
-// maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable
-// guidance string suitable for {{plan_guidance}} substitution. Returns "(no
-// pre-scan plan; review the entire file as usual)" when planning is
-// disabled or fails — that sentinel is intentionally non-empty so the
-// surrounding "### Pre-scan Focus Areas" header in MAIN_TASK has content
-// instead of dangling.
-func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string) string {
-	const noPlan = "(no pre-scan plan; review the entire file as usual)"
+// noPlanGuidance returns the {{plan_guidance}} text for plan-disabled runs:
+// the template's NO_PLAN_GUIDANCE override when set, else the built-in
+// whole-file sentinel.
+func (a *Agent) noPlanGuidance() string {
+	if guidance := a.args.Template.NoPlanGuidance; guidance != "" {
+		return guidance
+	}
+	return defaultNoPlanGuidance
+}
 
+// maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable
+// guidance string suitable for {{plan_guidance}} substitution. Returns the
+// no-plan guidance when planning is disabled or fails — that text is
+// intentionally non-empty so the surrounding "### Pre-scan Focus Areas"
+// header in MAIN_TASK has content instead of dangling.
+func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string) string {
 	if !a.planEnabledFor(it) {
-		return noPlan
+		return a.noPlanGuidance()
 	}
 	pt := a.args.Template.PlanTask
 
 	// Render plan messages.
+	planValues := map[string]string{
+		"current_system_date_time": a.currentDate,
+		"current_file_path":        it.Path,
+		"system_rule":              rule,
+		"file_content":             it.Content,
+	}
 	messages := make([]llm.Message, 0, len(pt.Messages))
 	for _, m := range pt.Messages {
-		content := m.Content
-		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
-		content = strings.ReplaceAll(content, "{{current_file_path}}", it.Path)
-		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{file_content}}", it.Content)
+		content := substituteScanTokens(m.Content, template.ScanPlanTokens, planValues)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
@@ -883,14 +909,14 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))
 		fmt.Fprintf(stdout.Writer(), "[ocr] scan plan failed for %s: %v (falling back to plan-less)\n", it.Path, err)
-		return noPlan
+		return a.noPlanGuidance()
 	}
 	rec.SetResponse(resp, time.Since(startTime))
 	a.runner.RecordUsage(resp.Usage)
 
 	guidance := formatPlanGuidance(resp.Content())
 	if guidance == "" {
-		return noPlan
+		return a.noPlanGuidance()
 	}
 	return guidance
 }
@@ -914,12 +940,14 @@ func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.Llm
 	}
 	payload := buildSummaryCommentsList(comments)
 
+	summaryValues := map[string]string{
+		"comment_count": fmt.Sprintf("%d", len(comments)),
+		"file_count":    fmt.Sprintf("%d", len(fileSet)),
+		"all_comments":  payload,
+	}
 	messages := make([]llm.Message, 0, len(pt.Messages))
 	for _, m := range pt.Messages {
-		content := m.Content
-		content = strings.ReplaceAll(content, "{{comment_count}}", fmt.Sprintf("%d", len(comments)))
-		content = strings.ReplaceAll(content, "{{file_count}}", fmt.Sprintf("%d", len(fileSet)))
-		content = strings.ReplaceAll(content, "{{all_comments}}", payload)
+		content := substituteScanTokens(m.Content, template.ScanSummaryTokens, summaryValues)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
@@ -1000,9 +1028,10 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) map
 	}
 
 	payload := buildDedupCommentsJSON(batchComments)
+	dedupValues := map[string]string{"batch_comments": payload}
 	messages := make([]llm.Message, 0, len(dt.Messages))
 	for _, m := range dt.Messages {
-		content := strings.ReplaceAll(m.Content, "{{batch_comments}}", payload)
+		content := substituteScanTokens(m.Content, template.ScanDedupTokens, dedupValues)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
@@ -1202,16 +1231,18 @@ func formatPlanGuidance(raw string) string {
 // the prompt template doesn't dangle.
 func (a *Agent) renderMessages(it model.ScanItem, rule, planGuidance string) []llm.Message {
 	rawMsgs := a.args.Template.MainTask.Messages
+	values := map[string]string{
+		"plan_guidance":            planGuidance,
+		"current_system_date_time": a.currentDate,
+		"current_file_path":        it.Path,
+		"system_rule":              rule,
+		"change_files":             changeFilesScanLiteral,
+		"file_content":             it.Content,
+		"requirement_background":   a.args.Background,
+	}
 	messages := make([]llm.Message, 0, len(rawMsgs))
 	for _, m := range rawMsgs {
-		content := m.Content
-		content = strings.ReplaceAll(content, "{{plan_guidance}}", planGuidance)
-		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
-		content = strings.ReplaceAll(content, "{{current_file_path}}", it.Path)
-		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesScanLiteral)
-		content = strings.ReplaceAll(content, "{{file_content}}", it.Content)
-		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
+		content := substituteScanTokens(m.Content, template.ScanMainTokens, values)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 	return messages

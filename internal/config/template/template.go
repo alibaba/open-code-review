@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -51,7 +53,35 @@ type ScanTemplate struct {
 	DedupTask             *LlmConversation `json:"DEDUP_TASK,omitempty"`
 	DedupMinComments      int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
 	ProjectSummaryTask    *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
+	// NoPlanGuidance overrides the "no pre-scan plan" sentinel substituted
+	// for {{plan_guidance}} when planning is disabled or fails. Empty keeps
+	// the built-in whole-file sentinel, so existing files stay valid.
+	NoPlanGuidance string `json:"NO_PLAN_GUIDANCE,omitempty"`
 }
+
+// Canonical placeholder names the scan agent substitutes per task. The
+// renderers in internal/scan iterate these same lists and Validate rejects
+// any {{token}} outside them, so renderer and validator cannot drift apart.
+// MEMORY_COMPRESSION_TASK and RE_LOCATION_TASK are consumed by shared paths
+// and intentionally have no list here.
+var (
+	// ScanMainTokens fills MAIN_TASK prompts (see Agent.renderMessages).
+	ScanMainTokens = []string{"plan_guidance", "current_system_date_time", "current_file_path", "system_rule", "change_files", "file_content", "requirement_background"}
+	// ScanPlanTokens fills PLAN_TASK prompts (see Agent.maybeRunPlan).
+	ScanPlanTokens = []string{"current_system_date_time", "current_file_path", "system_rule", "file_content"}
+	// ScanSummaryTokens fills PROJECT_SUMMARY_TASK prompts.
+	ScanSummaryTokens = []string{"comment_count", "file_count", "all_comments"}
+	// ScanDedupTokens fills DEDUP_TASK prompts.
+	ScanDedupTokens = []string{"batch_comments"}
+)
+
+// scanPlaceholderPattern matches {{token}} placeholders; single-brace
+// spellings such as RE_LOCATION's {diff} are literal text, not placeholders.
+var scanPlaceholderPattern = regexp.MustCompile(`\{\{([^{}]+)\}\}`)
+
+// maxScanTemplateFileBytes caps --scan-template inputs at 1 MiB, the same
+// ceiling --background-file enforces.
+const maxScanTemplateFileBytes = 1 << 20
 
 // ReviewRounds returns the effective per-group round count, never below 1.
 func (t Template) ReviewRounds() int {
@@ -266,6 +296,35 @@ func LoadScanDefault() (*ScanTemplate, error) {
 	return &tpl, nil
 }
 
+// LoadScanFile parses a scan template override file into a ScanTemplate and
+// validates it, so file overrides share the embedded default's enforcement
+// point. Every error names the path.
+func LoadScanFile(path string) (*ScanTemplate, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("read scan template file %q: %w", path, err)
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("scan template file %q is a directory, not a file", path)
+	}
+	if info.Size() > maxScanTemplateFileBytes {
+		return nil, fmt.Errorf("scan template file %q is %d bytes, exceeding the maximum of %d bytes",
+			path, info.Size(), maxScanTemplateFileBytes)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read scan template file %q: %w", path, err)
+	}
+	var tpl ScanTemplate
+	if err := json.Unmarshal(raw, &tpl); err != nil {
+		return nil, fmt.Errorf("unmarshal scan template file %q: %w", path, err)
+	}
+	if err := tpl.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid scan template file %q: %w", path, err)
+	}
+	return &tpl, nil
+}
+
 // applyLanguage appends instruction to all system-role messages in conv.
 func applyLanguage(conv *LlmConversation, instruction string) {
 	for i := range conv.Messages {
@@ -355,6 +414,51 @@ func (t *ScanTemplate) Validate() error {
 		"PROJECT_SUMMARY_TASK":    t.ProjectSummaryTask,
 	}, ""); err != nil {
 		return fmt.Errorf("scan: %w", err)
+	}
+	if err := validateScanPlaceholders(t); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateScanPlaceholders enforces the scan prompt contract: at least one
+// MAIN_TASK user-role message must carry {{file_content}} (the file under
+// review must reach the model), and every {{token}} in the four
+// scan-rendered tasks must belong to that task's canonical known set — an
+// override introducing a token the renderer never fills would otherwise
+// leak a literal {{...}} into the prompt.
+func validateScanPlaceholders(t *ScanTemplate) error {
+	found := false
+	for _, m := range t.MainTask.Messages {
+		if m.Role == "user" && strings.Contains(m.Content, "{{file_content}}") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("scan: MAIN_TASK must include {{file_content}} in at least one user-role message")
+	}
+	tasks := []struct {
+		name  string
+		conv  *LlmConversation
+		known []string
+	}{
+		{"MAIN_TASK", &t.MainTask, ScanMainTokens},
+		{"PLAN_TASK", t.PlanTask, ScanPlanTokens},
+		{"DEDUP_TASK", t.DedupTask, ScanDedupTokens},
+		{"PROJECT_SUMMARY_TASK", t.ProjectSummaryTask, ScanSummaryTokens},
+	}
+	for _, task := range tasks {
+		if task.conv == nil {
+			continue
+		}
+		for i, m := range task.conv.Messages {
+			for _, match := range scanPlaceholderPattern.FindAllStringSubmatch(m.Content, -1) {
+				if !slices.Contains(task.known, match[1]) {
+					return fmt.Errorf("scan: %s message %d: unknown placeholder {{%s}}", task.name, i, match[1])
+				}
+			}
+		}
 	}
 	return nil
 }

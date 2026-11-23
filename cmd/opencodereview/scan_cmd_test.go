@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -331,4 +332,134 @@ func TestParseScanFlags_IntFlags(t *testing.T) {
 	if opts.maxTokensBudget != 100000 {
 		t.Errorf("maxTokensBudget = %d", opts.maxTokensBudget)
 	}
+}
+
+const promptToolOverrideJSON = `{
+  "MAIN_TASK": {
+    "tools": ["task_done", "code_comment"],
+    "messages": [
+      {"role": "system", "content": "You review one function at a time for null handling. Use code_comment for findings, task_done when finished. Checklist: {{system_rule}}"},
+      {"role": "user", "content": "<current_file_path>{{current_file_path}}</current_file_path>\n<current_file_content>\n{{file_content}}\n</current_file_content>\nFocus: {{plan_guidance}}"}
+    ]
+  },
+  "NO_PLAN_GUIDANCE": "(function scope; no pre-scan plan)",
+  "MAX_TOKENS": 58888,
+  "MAX_TOOL_REQUEST_TIMES": 60
+}`
+
+// runScanCaptureRequests runs a scan against an httptest stub that records
+// every decoded wire request and answers task_done. It returns what the stub
+// saw so callers can assert prompt×tool consistency on the wire bytes.
+func runScanCaptureRequests(t *testing.T, tplPath string, extraArgs []string) ([]llm.ChatRequest, error) {
+	t.Helper()
+	freshOCRHome(t)
+	var mu sync.Mutex
+	var captured []llm.ChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req llm.ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		captured = append(captured, req)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"done","type":"function","function":{"name":"task_done","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`))
+	}))
+	defer server.Close()
+	setStubLLMEnv(t, server)
+
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{
+		"--repo", repo, "--path", "main.go", "--concurrency", "1",
+		"--scan-template", tplPath,
+		"--no-plan", "--no-dedup", "--no-summary",
+		"--format", "json", "--audience", "agent",
+	}
+	args = append(args, extraArgs...)
+	opts, err := parseScanFlags(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scanErr error
+	captureStdout(t, func() { scanErr = executeScan(opts) })
+	mu.Lock()
+	defer mu.Unlock()
+	return captured, scanErr
+}
+
+func wireToolNames(req llm.ChatRequest) []string {
+	names := make([]string, 0, len(req.Tools))
+	for _, def := range req.Tools {
+		names = append(names, def.Function.Name)
+	}
+	return names
+}
+
+func TestPromptToolConsistency(t *testing.T) {
+	t.Run("override observed on the wire", func(t *testing.T) {
+		captured, scanErr := runScanCaptureRequests(t, writeScanTemplateFile(t, promptToolOverrideJSON), nil)
+		if scanErr != nil {
+			t.Fatalf("executeScan: %v", scanErr)
+		}
+		if len(captured) == 0 {
+			t.Fatal("stub saw zero requests, want at least one MAIN round")
+		}
+		for i, req := range captured {
+			if got, want := wireToolNames(req), []string{"task_done", "code_comment"}; !reflect.DeepEqual(got, want) {
+				t.Errorf("request %d tools = %v, want exactly %v", i, got, want)
+			}
+		}
+		var prompt strings.Builder
+		for _, msg := range captured[0].Messages {
+			prompt.WriteString(msg.ExtractText())
+			prompt.WriteString("\n")
+		}
+		rendered := prompt.String()
+		if !strings.Contains(rendered, "one function at a time") {
+			t.Errorf("wire prompt misses the override text:\n%s", rendered)
+		}
+		for _, closer := range []string{"entire source file", "ENTIRE", "whole file", "whole-file"} {
+			if strings.Contains(rendered, closer) {
+				t.Errorf("wire prompt leaks whole-file closer %q:\n%s", closer, rendered)
+			}
+		}
+		if strings.Contains(rendered, "{{") {
+			t.Errorf("wire prompt leaks a placeholder:\n%s", rendered)
+		}
+	})
+
+	t.Run("unknown tool fails closed", func(t *testing.T) {
+		bad := strings.Replace(promptToolOverrideJSON, `"code_comment"`, `"no_such_tool"`, 1)
+		freshOCRHome(t)
+		var requests atomic.Int64
+		server := stubLLMCountingRequests(t, &requests, "")
+		defer server.Close()
+		setStubLLMEnv(t, server)
+
+		repo := t.TempDir()
+		if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		opts, err := parseScanFlags([]string{
+			"--repo", repo, "--scan-template", writeScanTemplateFile(t, bad),
+			"--no-plan", "--no-dedup", "--no-summary",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var scanErr error
+		captureStdout(t, func() { scanErr = executeScan(opts) })
+		if scanErr == nil {
+			t.Fatal("executeScan succeeded with an unknown tool, want a startup error")
+		}
+		if got := requests.Load(); got != 0 {
+			t.Errorf("LLM requests = %d, want zero for an unknown tool", got)
+		}
+	})
 }

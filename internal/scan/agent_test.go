@@ -591,3 +591,57 @@ func TestScanAgent_WaitBackground_NoLeakOnRun(t *testing.T) {
 		t.Errorf("last session JSONL record type = %q, want session_end", lastRec["type"])
 	}
 }
+
+// defaultNoPlanSentinelLiteral is the default {{plan_guidance}} text, spelled
+// out so this golden pins the rendered bytes independently of the agent's
+// constant. Any drift between the two fails the byte comparison below.
+const defaultNoPlanSentinelLiteral = "(no pre-scan plan; review the entire file as usual)"
+
+func renderGoldenMessages(msgs []llm.Message) string {
+	var sb strings.Builder
+	for _, m := range msgs {
+		sb.WriteString("--- role: ")
+		sb.WriteString(m.Role)
+		sb.WriteString(" ---\n")
+		sb.WriteString(m.ExtractText())
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func TestDefaultMainPromptGolden(t *testing.T) {
+	tpl, err := template.LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+	a := newAgentForTest(t, *tpl)
+	a.currentDate = "2026-01-02 15:04"
+	a.args.Background = "background-context"
+	it := model.ScanItem{Path: "internal/foo/bar.go", Content: "package foo\n\nfunc Bar() {}\n"}
+	rendered := renderGoldenMessages(a.renderMessages(it, "rule-text", defaultNoPlanSentinelLiteral))
+
+	for _, want := range []string{
+		"ENTIRE existing source file",
+		"Review the entire source file",
+		"internal/foo/bar.go",
+		"package foo",
+		"2026-01-02 15:04",
+		"rule-text",
+		"background-context",
+		defaultNoPlanSentinelLiteral,
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered prompt missing %q", want)
+		}
+	}
+	if strings.Contains(rendered, "{{") {
+		t.Errorf("rendered prompt leaks a placeholder: %q", rendered)
+	}
+	want, err := os.ReadFile("testdata/default_main_prompt.golden")
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	if rendered != string(want) {
+		t.Errorf("rendered MAIN prompt differs from testdata/default_main_prompt.golden")
+	}
+}

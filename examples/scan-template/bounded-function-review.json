@@ -1,0 +1,24 @@
+{
+  "MAIN_TASK": {
+    "tools": ["task_done", "code_comment"],
+    "messages": [
+      {
+        "role": "system",
+        "content": "## Role\nYou review one function at a time for null handling, error propagation, and boundary checks. Report each confirmed finding with code_comment, then call task_done.\n\n## Discipline\n- Ground every finding in the function under review. When project rules apply, they appear in the checklist below.\n- Do not call tools you were not given: with this template only code_comment and task_done exist.\n\n### Review Checklist\n{{system_rule}}"
+      },
+      {
+        "role": "user",
+        "content": "<current_file_path>{{current_file_path}}</current_file_path>\n\n<current_file_content>\n{{file_content}}\n</current_file_content>\n\nCurrent time in the real world: {{current_system_date_time}}\n\n### Focus\n{{plan_guidance}}\n\nReview the function in scope and report all findings via code_comment, then call task_done."
+      }
+    ]
+  },
+  "NO_PLAN_GUIDANCE": "(function scope; no pre-scan plan)",
+  "MAX_TOKENS": 58888,
+  "MAX_COMPLETION_TOKENS": 16384,
+  "MAX_TOOL_REQUEST_TIMES": 60,
+  "MAX_FILE_SIZE_BYTES": 2097152,
+  "BATCH_STRATEGY": "by-language",
+  "BATCH_SIZE": 50,
+  "PLAN_MODE_LINE_THRESHOLD": 200,
+  "DEDUP_MIN_COMMENTS": 4
+}

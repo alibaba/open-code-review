@@ -1792,3 +1792,78 @@ func TestDispatchSubtasks_ResumeMultiBatchAndChained(t *testing.T) {
 		t.Fatalf("ResumeInfo = %+v, want 3 reused / 2 rerun", info)
 	}
 }
+
+func TestNoPlanGuidanceOverride(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		guidance string
+		want     string
+		notWant  string
+	}{
+		{
+			name:     "custom guidance replaces the default sentinel",
+			guidance: "(bounded scope; no pre-scan plan)",
+			want:     "(bounded scope; no pre-scan plan)",
+			notWant:  "(no pre-scan plan; review the entire file as usual)",
+		},
+		{
+			name:     "empty guidance keeps the exact default bytes",
+			guidance: "",
+			want:     "(no pre-scan plan; review the entire file as usual)",
+			notWant:  "(bounded scope",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := initTestRepo(t)
+			writeFile(t, repo, "fixture.go", []byte("package fixture\n"))
+			gitCommit(t, repo, "add scan fixture")
+
+			scanTemplate, err := template.LoadScanDefault()
+			if err != nil {
+				t.Fatalf("LoadScanDefault: %v", err)
+			}
+			scanTemplate.NoPlanGuidance = testCase.guidance
+			client := &fakeScanClient{
+				responses: []*llm.ChatResponse{{
+					Choices: []llm.Choice{{Message: llm.ResponseMessage{
+						ToolCalls: []llm.ToolCall{{
+							ID: "done", Type: "function",
+							Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"},
+						}},
+					}}},
+				}},
+			}
+			agent := NewAgent(Args{
+				MainToolDefs:   []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
+				RepoDir:        repo,
+				Template:       *scanTemplate,
+				LLMClient:      client,
+				MaxConcurrency: 1,
+				SkipPlan:       true,
+				SkipDedup:      true,
+				SkipSummary:    true,
+			})
+			if _, err := agent.Run(t.Context()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			fileSession := agent.Session().FileSessions["fixture.go"]
+			if fileSession == nil {
+				t.Fatal("fixture.go must have a file session")
+			}
+			mainRecords := fileSession.TaskRecords[session.MainTask]
+			if len(mainRecords) != 1 {
+				t.Fatalf("MAIN_TASK calls = %d, want 1", len(mainRecords))
+			}
+			var mainPrompt strings.Builder
+			for _, message := range mainRecords[0].RequestMessages {
+				mainPrompt.WriteString(message.ExtractText())
+			}
+			if !strings.Contains(mainPrompt.String(), testCase.want) {
+				t.Errorf("MAIN_TASK prompt must include %q", testCase.want)
+			}
+			if strings.Contains(mainPrompt.String(), testCase.notWant) {
+				t.Errorf("MAIN_TASK prompt must not include %q", testCase.notWant)
+			}
+		})
+	}
+}

@@ -4,6 +4,8 @@
 package template
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -376,7 +378,12 @@ func TestValidate_ScanTemplate(t *testing.T) {
 	valid := ScanTemplate{
 		MaxTokens:           100,
 		MaxToolRequestTimes: 1,
-		MainTask:            LlmConversation{Messages: []ChatMessage{{Role: "system", Content: "x"}}},
+		// A valid scan template needs a user message carrying the file
+		// under review (see validateScanPlaceholders).
+		MainTask: LlmConversation{Messages: []ChatMessage{
+			{Role: "system", Content: "x"},
+			{Role: "user", Content: "{{file_content}}"},
+		}},
 	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid ScanTemplate.Validate() error: %v", err)
@@ -565,5 +572,146 @@ func TestPlanRequired(t *testing.T) {
 					tt.fileCount, tt.total, tt.maxFile, got, tt.want)
 			}
 		})
+	}
+}
+
+const validScanOverrideJSON = `{
+  "MAIN_TASK": {
+    "tools": ["task_done", "code_comment"],
+    "messages": [
+      {"role": "system", "content": "bounded scope system {{system_rule}}"},
+      {"role": "user", "content": "file {{current_file_path}}:\n{{file_content}}\n{{plan_guidance}}"}
+    ]
+  },
+  "NO_PLAN_GUIDANCE": "(bounded scope; no pre-scan plan)",
+  "MAX_TOKENS": 1000,
+  "MAX_TOOL_REQUEST_TIMES": 5
+}`
+
+func writeScanOverrideFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "override.json")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLoadScanFile_ValidOverride(t *testing.T) {
+	tpl, err := LoadScanFile(writeScanOverrideFile(t, validScanOverrideJSON))
+	if err != nil {
+		t.Fatalf("LoadScanFile(valid): %v", err)
+	}
+	if !reflect.DeepEqual(tpl.MainTask.Tools, []string{"task_done", "code_comment"}) {
+		t.Errorf("MainTask.Tools = %v, want 2-tool subset", tpl.MainTask.Tools)
+	}
+	if tpl.NoPlanGuidance != "(bounded scope; no pre-scan plan)" {
+		t.Errorf("NoPlanGuidance = %q", tpl.NoPlanGuidance)
+	}
+	if tpl.MaxTokens != 1000 || tpl.MaxToolRequestTimes != 5 {
+		t.Errorf("budgets = (%d, %d), want lowered (1000, 5)", tpl.MaxTokens, tpl.MaxToolRequestTimes)
+	}
+}
+
+func TestLoadScanFile_Invalid(t *testing.T) {
+	withDedupTools := strings.Replace(validScanOverrideJSON, `"NO_PLAN_GUIDANCE"`,
+		`"DEDUP_TASK": {"tools": ["file_read"], "messages": [{"role": "user", "content": "{{batch_comments}}"}]}, "NO_PLAN_GUIDANCE"`, 1)
+	withUnknownToken := strings.Replace(validScanOverrideJSON, `{{plan_guidance}}`, `{{frobnicate}}`, 1)
+	withoutFileContent := strings.Replace(validScanOverrideJSON, `\n{{file_content}}`, ``, 1)
+	zeroMaxTokens := strings.Replace(validScanOverrideJSON, `"MAX_TOKENS": 1000`, `"MAX_TOKENS": 0`, 1)
+	tests := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{"malformed JSON", `{oops`, "unmarshal"},
+		{"missing MAIN messages", `{"MAX_TOKENS": 1000, "MAX_TOOL_REQUEST_TIMES": 5}`, "main_task.messages must not be empty"},
+		{"non-positive MAX_TOKENS", zeroMaxTokens, "max_tokens must be positive"},
+		{"tools on DEDUP", withDedupTools, "DEDUP_TASK.tools"},
+		{"unknown token in MAIN", withUnknownToken, "unknown placeholder {{frobnicate}}"},
+		{"MAIN user without file_content", withoutFileContent, "{{file_content}}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadScanFile(writeScanOverrideFile(t, tt.content))
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("LoadScanFile error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadScanFile_PathHygiene(t *testing.T) {
+	t.Run("missing file", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "does-not-exist.json")
+		_, err := LoadScanFile(missing)
+		if err == nil || !strings.Contains(err.Error(), missing) {
+			t.Errorf("LoadScanFile error = %v, want path %q named", err, missing)
+		}
+	})
+	t.Run("directory path", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := LoadScanFile(dir)
+		if err == nil || !strings.Contains(err.Error(), "is a directory") {
+			t.Errorf("LoadScanFile error = %v, want directory rejection", err)
+		}
+	})
+	t.Run("oversize file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "huge.json")
+		if err := os.WriteFile(path, make([]byte, (1<<20)+1), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := LoadScanFile(path)
+		if err == nil || !strings.Contains(err.Error(), "exceed") {
+			t.Errorf("LoadScanFile error = %v, want size-cap rejection", err)
+		}
+	})
+	t.Run("exactly 1 MiB file loads", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "capped.json")
+		padded := validScanOverrideJSON + strings.Repeat(" ", (1<<20)-len(validScanOverrideJSON))
+		if err := os.WriteFile(path, []byte(padded), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadScanFile(path); err != nil {
+			t.Errorf("LoadScanFile(at cap) error = %v, want success", err)
+		}
+	})
+}
+
+func TestLoadScanDefault_PassesExtendedValidate(t *testing.T) {
+	tpl, err := LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+	if err := tpl.Validate(); err != nil {
+		t.Errorf("embedded default must pass extended Validate: %v", err)
+	}
+}
+
+func TestScanTemplateExampleLoads(t *testing.T) {
+	tpl, err := LoadScanFile("../../../examples/scan-template/bounded-function-review.json")
+	if err != nil {
+		t.Fatalf("shipped example must load and validate: %v", err)
+	}
+	if !reflect.DeepEqual(tpl.MainTask.Tools, []string{"task_done", "code_comment"}) {
+		t.Errorf("example MainTask.Tools = %v, want minimal 2-tool set", tpl.MainTask.Tools)
+	}
+	if tpl.PlanTask != nil {
+		t.Error("example must omit PLAN_TASK to exercise plan-less runs")
+	}
+	if tpl.NoPlanGuidance == "" {
+		t.Error("example must set scope-coherent NO_PLAN_GUIDANCE")
+	}
+}
+
+func TestApplyLanguage_ScanTemplateOverride(t *testing.T) {
+	tpl, err := LoadScanFile(writeScanOverrideFile(t, validScanOverrideJSON))
+	if err != nil {
+		t.Fatalf("LoadScanFile(valid): %v", err)
+	}
+	tpl.ApplyLanguage("French")
+	suffix := "\n\nAlways respond in French."
+	if !strings.HasSuffix(tpl.MainTask.Messages[0].Content, suffix) {
+		t.Errorf("override system message does not end with %q", suffix)
 	}
 }

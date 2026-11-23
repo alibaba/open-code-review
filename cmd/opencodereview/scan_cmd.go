@@ -47,6 +47,7 @@ type scanOptions struct {
 	provider              string
 	model                 string
 	resume                string
+	scanTemplate          string
 }
 
 var scanOpts scanOptions
@@ -79,7 +80,10 @@ var scanCmd = &cobra.Command{
   ocr scan --no-plan
 
   # Resume a previous full-file scan
-  ocr scan --resume <session-id>`,
+  ocr scan --resume <session-id>
+
+  # Scan with a custom scan template file
+  ocr scan --scan-template ./my-scan-template.json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateScanOptions(&scanOpts); err != nil {
 			return err
@@ -129,28 +133,26 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// scan owns its own template (scan_template.json) independent from the
-	// diff-review template loaded by loadCommonContext above. Apply --max-tools
-	// as an "only raise" override to the scan template's per-file budget.
-	scanTpl, err := template.LoadScanDefault()
-	if err != nil {
-		return fmt.Errorf("load scan template: %w", err)
+	// diff-review template loaded by loadCommonContext above. --scan-template
+	// swaps in a validated override file as the base; everything below
+	// applies unchanged, so invalid files error before preview enumeration
+	// and before any LLM dispatch.
+	var scanTpl *template.ScanTemplate
+	if opts.scanTemplate != "" {
+		scanTpl, err = template.LoadScanFile(opts.scanTemplate)
+		if err != nil {
+			return fmt.Errorf("load scan template: %w", err)
+		}
+	} else {
+		scanTpl, err = template.LoadScanDefault()
+		if err != nil {
+			return fmt.Errorf("load scan template: %w", err)
+		}
 	}
 	if err := scanTpl.Validate(); err != nil {
 		return fmt.Errorf("invalid scan template: %w", err)
 	}
-	if opts.maxTools > scanTpl.MaxToolRequestTimes {
-		scanTpl.MaxToolRequestTimes = opts.maxTools
-	}
-	if opts.batch != "" {
-		// CLI override of BATCH_STRATEGY; validated downstream by parseBatchStrategy
-		// (unknown values silently fall back to "none").
-		scanTpl.BatchStrategy = opts.batch
-	}
-	// Token budget: --max-tokens-budget overrides the template value when set.
-	budget := scanTpl.MaxTokensBudget
-	if opts.maxTokensBudget > 0 {
-		budget = int64(opts.maxTokensBudget)
-	}
+	budget := applyScanScalarOverrides(scanTpl, opts)
 
 	scanPaths := splitPaths(opts.paths)
 
@@ -257,6 +259,27 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	}
 
 	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, nil)
+}
+
+// applyScanScalarOverrides layers CLI scalar flags over the effective scan
+// template (file base first, CLI on top): raise-only --max-tools, --batch,
+// and --max-tokens-budget. It returns the effective token budget. --max-tokens
+// still flows through resolveMaxTokens downstream.
+func applyScanScalarOverrides(scanTpl *template.ScanTemplate, opts scanOptions) int64 {
+	if opts.maxTools > scanTpl.MaxToolRequestTimes {
+		scanTpl.MaxToolRequestTimes = opts.maxTools
+	}
+	if opts.batch != "" {
+		// CLI override of BATCH_STRATEGY; validated downstream by parseBatchStrategy
+		// (unknown values silently fall back to "none").
+		scanTpl.BatchStrategy = opts.batch
+	}
+	// Token budget: --max-tokens-budget overrides the template value when set.
+	budget := scanTpl.MaxTokensBudget
+	if opts.maxTokensBudget > 0 {
+		budget = int64(opts.maxTokensBudget)
+	}
+	return budget
 }
 
 func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (*session.ResumeState, error) {

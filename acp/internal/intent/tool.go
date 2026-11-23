@@ -77,7 +77,7 @@ const submitIntentParameters = `{
     "extra": {
       "type": "array",
       "items": {"type": "string"},
-      "description": "Optional review/scan flags. review: --effort, --no-filter, --background, --background-file. scan: --batch, --no-plan, --no-dedup, --no-summary, --background. Do not invent flags."
+      "description": "Optional review/scan flags. review: --effort, --no-filter, --background, --background-file. scan: --batch, --no-plan, --no-dedup, --no-summary, --background, --scan-template. Do not invent flags."
     },
     "question": {"type": "string", "description": "Required for clarify. Write in the language of the current user request, unless the user explicitly requests another response language."},
     "missing": {

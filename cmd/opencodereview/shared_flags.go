@@ -250,6 +250,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().BoolVar(&opts.noDedup, "no-dedup", false, "skip the per-batch DEDUP_TASK")
 	cmd.Flags().BoolVar(&opts.noSummary, "no-summary", false, "skip the post-run PROJECT_SUMMARY_TASK")
 	cmd.Flags().StringVar(&opts.batch, "batch", "", "override BATCH_STRATEGY: none | by-language | by-directory")
+	cmd.Flags().StringVar(&opts.scanTemplate, "scan-template", "", "path to a scan template JSON file overriding the embedded default (see examples/scan-template/)")
 	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
 	cmd.Flags().StringVar(&opts.resume, "resume", "", "resume from a previous scan session id")
