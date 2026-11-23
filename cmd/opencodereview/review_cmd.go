@@ -506,13 +506,21 @@ func reviewModeFromOptions(opts reviewOptions) string {
 	return session.ReviewModeWorkspace
 }
 
-// resolveRepoDir resolves the repo dir for `ocr rules check`. It delegates to
-// resolveWorkingDir(requireGit=true) so it anchors at the git top-level just
-// like the review path — keeping rule resolution consistent when run from a
-// monorepo subdirectory (#287).
+// resolveRepoDir resolves the repo dir for `ocr rules check`. Rule resolution
+// has no git dependency: the command runs the resolver with an empty ref, so
+// the sniffer reads file content straight from the working tree and a plain
+// non-git directory works too (#1704). Inside a git repo it still anchors at
+// the git top-level just like the review path, keeping rule resolution
+// consistent when run from a monorepo subdirectory (#287).
 func resolveRepoDir(input string) (string, error) {
-	absPath, _, err := resolveWorkingDir(input, true)
-	return absPath, err
+	absPath, isGit, err := resolveWorkingDir(input, false)
+	if err != nil {
+		return "", err
+	}
+	if !isGit {
+		return absPath, nil
+	}
+	return anchorToGitTopLevel(absPath)
 }
 
 // requireGitRepo validates that the given directory is part of a git repository.
