@@ -69,10 +69,12 @@ class ConfigService(
         val dir = path.parentFile
         runCatching {
             if (!dir.isDirectory) {
-                Files.createDirectories(dir.toPath())
+                if ("posix" in dir.toPath().fileSystem.supportedFileAttributeViews()) {
+                    Files.createDirectories(dir.toPath(), PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+                } else {
+                    Files.createDirectories(dir.toPath())
+                }
             }
-            // Tighten even a pre-existing directory (the CLI or older versions may leave 755; the directory holds api_key and must be 700).
-            trySetPosixPermissions(dir, "rwx------")
             // Atomic write + permissions tightened first: a uniquely named temp file avoids collisions across
             // instances/IDE windows; the empty file is tightened to rw------- before api_key is written, so the
             // key never sits in a readable file at any point.

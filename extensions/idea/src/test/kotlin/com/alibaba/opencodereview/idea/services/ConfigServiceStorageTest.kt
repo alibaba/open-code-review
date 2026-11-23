@@ -7,6 +7,7 @@ import com.alibaba.opencodereview.idea.model.ConfigEntry
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -34,6 +35,10 @@ class ConfigServiceStorageTest {
     @Test
     fun `failed batch restores the snapshot in the selected storage`() {
         withStorage { cli, config, path, root ->
+            val directory = path.parentFile.toPath()
+            val permissions = PosixFilePermissions.fromString("rwxr-x---")
+            val posix = Files.getFileStore(directory).supportsFileAttributeView("posix")
+            if (posix) Files.setPosixFilePermissions(directory, permissions)
             val saved = parseRawConfig(path.readText())
             val other = File(root, "other-workspace").apply { mkdirs() }
             assertEquals("saved-model", config.read()?.customProviders?.get("custom")?.model)
@@ -41,6 +46,10 @@ class ConfigServiceStorageTest {
                 ConfigService(cli, other).setMany(listOf(ConfigEntry("model", "changed-model"), ConfigEntry("invalid", "value")))
             }
             assertEquals(saved, parseRawConfig(path.readText()))
+            if (posix) {
+                assertEquals(permissions, Files.getPosixFilePermissions(directory))
+                assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(path.toPath()))
+            }
             assertEquals("saved-model", config.read()?.customProviders?.get("custom")?.model)
         }
     }
