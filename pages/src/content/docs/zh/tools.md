@@ -392,6 +392,12 @@ Match lines: 1
 若工具名不在注册表中，OCR 返回常量 `tool.NotAvailableMsg` 而不是崩溃，
 将未知工具调用作为工具不可用的结果反馈给模型。
 
+凭据路径同样不会进入工具。审查的文件筛选视为凭据文件的路径（`.env` 及其变体、
+`id_rsa`、`.npmrc`、`.netrc` 等）不会进入被选中的文件集合，因此工具也无法从其他
+途径把它暴露出来：`file_read` 返回错误并指明该路径，`code_search` 丢弃匹配行并
+报告省略了多少行，`file_find` 不会列出它。`.env.example` 之类的模板文件不属于
+凭据路径。
+
 ## 工具定制限制与迁移 {#customizing-tools}
 
 OCR 使用专用审查 Agent，核心工作流与内置工具通过测试和 benchmark 一同验证，

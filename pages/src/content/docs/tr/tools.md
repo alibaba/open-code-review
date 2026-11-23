@@ -319,6 +319,13 @@ Ağ hatası, geçersiz argüman veya bulunamayan dosya gibi hatalar modele norma
 
 Araç adı kayıtlı değilse OCR çökmek yerine `tool.NotAvailableMsg` sabitini döndürür; bilinmeyen çağrı modele kullanılamayan araç olarak bildirilir.
 
+Kimlik bilgisi yolları da araçlara girmez. İnceleme için dosya seçiminin kimlik bilgisi
+dosyası saydığı bir yol (`.env` ve türevleri, `id_rsa`, `.npmrc`, `.netrc` vb.) seçilen
+kümeye hiç girmez; bu yüzden araçlar onu başka bir yoldan gösteremez: `file_read` yolu
+adıyla belirterek hata döndürür, `code_search` eşleşen satırları atlar ve kaç satırı
+atladığını bildirir, `file_find` ise onu listelemez. `.env.example` gibi şablon dosyaları
+kimlik bilgisi yolu sayılmaz.
+
 ## Araç özelleştirme sınırları ve geçiş {#customizing-tools}
 
 OCR, çekirdek iş akışı ve yerleşik araçları testler ve kıyaslamalarla birlikte doğrulanan özel bir inceleme ajanı kullanır. Kullanıcının tanımladığı bir araç kayıt sistemi kullanmaz.
