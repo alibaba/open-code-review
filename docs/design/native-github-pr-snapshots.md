@@ -25,6 +25,8 @@ A bare positive integer selects PR mode in the [native skill](../../skills/open-
 
 The script prints the absolute path to `run.json`. It records the frozen identity and revisions, OCR exit status and result path (if produced), freshness and check time (if checked), cleanup status, and any failed step. `review.json` remains the native OCR output; do not copy its findings or reinterpret coverage in the script. For example, a run can be `current` with partial Analysis, or `stale` with complete Analysis. An interrupted run must not be reported as reviewed merely because its worktree was cleaned up.
 
+The host agent, not the helper, checks each Review claim against the recorded revisions. It reports reproduced findings with evidence and unresolved findings with the open question. If the pinned source is unavailable or the claim would require executing PR code, the claim stays unresolved. Refuted claims stay in the unchanged `review.json`; this triage does not alter coverage, freshness, or Analysis.
+
 ## Acceptance checks
 
 Use real local Git fixtures, stub GitHub responses and a recording OCR executable. Test the installed script as a process, not just its internal functions.

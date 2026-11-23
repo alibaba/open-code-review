@@ -82,14 +82,18 @@ Omit `--analysis` for workspace reviews, `--preview`, `--resume`, or `--format s
 
 **On failure:** If `ocr review` exits non-zero (e.g. an LLM connection error), do not retry blindly — consult the Troubleshooting section below for the matching fix before re-running.
 
-### Step 3: Report
+### Step 3: Verify and Report
 
-Show OCR's user-facing report in the reply. Summarize, translate, or filter only if requested. For text output, relay the report as emitted. For JSON output, present the report content rather than dumping internal fields such as `thinking`:
+Treat every OCR Review comment, including low-severity ones, as a claim for the host agent to check against the reviewed workspace or exact revisions. Trace the stated trigger to the claimed effect. For ordinary functional bugs, try the smallest safe, non-destructive check that exercises that path; compare with the base when the claim is a regression. In PR mode, inspect blobs at the SHAs in `run.json` after helper cleanup, not the current branch. Do not run PR-supplied code, tests, or builds, bypass a policy stop, or try to exploit a suspected vulnerability.
 
-- **Review:** present `comments` in their original order, retaining wording, severity, category, file and line range, and any code suggestions. Include low-severity findings. Report coverage from `review_status` and `manifest.coverage` when available; an empty comment list does not prove everything was reviewed.
-- **Analysis (combined runs):** render the `analysis` Markdown directly, not `analysis_raw` or a paraphrase. Preserve its headings, tables (including every row), lists, and caveats. If the original uses prose, keep the prose.
+For text and JSON alike, report findings in two groups, keeping OCR order within each. Keep OCR's claim, severity, category, location, and any suggestion distinct from the host's evidence:
 
-Keep PR snapshot details and any host verification separate from OCR's report. Distinguish `analysis_meta.execution_status` from `analysis_meta.declared_completion`; report skipped, failed, or unverified Analysis without discarding Review. If the report cannot fit in the reply, identify what was omitted and give the full artifact path.
+- **Reproduced:** give the trigger, the check performed, and the observed result. A source observation can establish a directly inspectable fact; it is not a reproduction of predicted runtime behavior.
+- **Uncertain:** say what was checked, why it did not settle the claim, and what evidence or maintainer decision would settle it. Include claims that could not be checked safely or within the available time. A passing unrelated test or a single unsuccessful attempt does not refute a claim.
+
+Omit a claim from the default findings list only when specific evidence contradicts it. Keep the raw OCR result unchanged and provide its path when saved. If the user asks for the full OCR report, include the original comments separately, without internal fields such as `thinking`. Report Review coverage and gaps from `review_status` and `manifest.coverage` when available, even if neither group contains findings.
+
+**Analysis (combined runs):** render the `analysis` Markdown directly, not `analysis_raw` or a paraphrase. Preserve headings, all table rows, lists, and caveats. Keep Analysis and PR snapshot details separate from host verification. Distinguish `analysis_meta.execution_status` from `analysis_meta.declared_completion`; report skipped, failed, or unverified Analysis without discarding Review. If the report cannot fit, identify what was omitted and give the full artifact path.
 
 ### Step 4: Fix
 
@@ -101,7 +105,7 @@ Before applying fixes, check whether the user requested automatic fixes:
 When fixing issues and suggestions:
 
 - Focus on critical, high, and medium severity items
-- Apply fixes directly to the code when safe and well-defined
+- Apply fixes only for verified issues when safe and well-defined; flag uncertain items for a decision instead
 - For complex fixes requiring manual intervention, clearly describe what needs to be done
 - Always verify fixes with the user before committing
 
