@@ -1,0 +1,11 @@
+{
+  "ocr.activitybar.title": "Open Code Review",
+  "ocr.sidebar.name": "Kod incelemesi",
+  "ocr.review.start": "OCR: Kod incelemesini başlat",
+  "ocr.review.cancel": "OCR: İncelemeyi iptal et",
+  "ocr.config.open": "OCR: Ayarları aç",
+  "ocr.comment.apply": "Uygula",
+  "ocr.comment.discard": "Reddet",
+  "ocr.comment.falsePositive": "Yanlış pozitif",
+  "ocr.description": "Yapay zekâ ile kod incelemesi — open-code-review CLI ile"
+}

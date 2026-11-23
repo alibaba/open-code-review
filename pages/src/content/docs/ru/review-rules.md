@@ -209,6 +209,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -321,7 +325,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.erb`                                      | `erb.md` — шаблоны ERB (SSTI / XSS / экранирование / пробелы и структура вывода). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                  |
 | `**/*.astro`                                    | `astro.md` — компоненты и islands Astro.                                                         |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                               |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                                               |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                      |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — файлы реализации, сигнатур и скриптов F#.                                          |
@@ -329,7 +333,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.rs`                                       | `rust.md`                                                                                        |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                         |
 | `**/*.c`                                        | `c.md`                                                                                           |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md` — ядра и заголовки CUDA.                                                           |
+| `**/*.hip`                                      | `cuda_hip.md` — ядра HIP (AMD ROCm).                                                             |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — исходный код Python.                                                               |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md` — исходный код Ruby, задачи Rake, gemspec, Gemfile и Rakefile. |
 | `**/*.{php,phtml}`                              | `php.md` — исходный код PHP и шаблоны PHP.                                                       |
 | `**/*.proto`                                    | `protobuf.md` — совместимость Protocol Buffers на уровне wire.                                   |
 | `**/*.po`                                       | `po.md` — исходные каталоги переводов gettext.                                                   |
@@ -340,6 +347,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.R`                                        | `r.md`                                                                                           |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                |
 | `**/*.bicep`                                    | `bicep.md` — шаблоны Bicep (Azure).                                                              |
+| `**/*.dhall` | `dhall.md` — язык конфигурации Dhall. |
 | `**/*.nix`                          | `nix.md` — выражения Nix и flake.                                                                |
 | `**/*.{hs,lhs}`                     | `haskell.md` — исходный код Haskell.                                                             |
 | `**/*.{nim,nims,nimble}`            | `nim.md` — исходный код Nim и манифесты пакетов.                                                 |
@@ -363,6 +371,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell.                          |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — исходный код Clojure / ClojureScript и данные EDN. |
+| `**/*.sql`                                      | `sql.md` — SQL-миграции и запросы. |
 | _(fallback)_                                    | `default.md`                                                                                     |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

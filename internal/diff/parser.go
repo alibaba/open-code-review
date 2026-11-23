@@ -98,10 +98,31 @@ func splitSamePathHeader(rest string) (oldPath string, newPath string, ok bool) 
 func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref string, runner *gitcmd.Runner) ([]model.Diff, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	diffs, err := parsePatch(ctx, diffText)
+	if err != nil {
+		return nil, err
+	}
+	for index := range diffs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		finalizeDiff(ctx, &diffs[index], repoDir, ref, runner)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return diffs, nil
+}
+
+func ParsePatch(diffText string) []model.Diff {
+	diffs, _ := parsePatch(context.Background(), diffText)
+	return diffs
+}
+
+func parsePatch(ctx context.Context, diffText string) ([]model.Diff, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
 	lines := splitDiffLines(diffText)
 	var diffs []model.Diff
 	var current *model.Diff
@@ -122,10 +143,6 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 			// Flush previous diff
 			if current != nil {
 				current.Diff = strings.TrimSuffix(buf.String(), "\n")
-				finalizeDiff(ctx, current, repoDir, ref, runner)
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
 				diffs = append(diffs, *current)
 				buf.Reset()
 			}
@@ -186,10 +203,6 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	// Flush last diff
 	if current != nil {
 		current.Diff = strings.TrimSuffix(buf.String(), "\n")
-		finalizeDiff(ctx, current, repoDir, ref, runner)
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		diffs = append(diffs, *current)
 	}
 

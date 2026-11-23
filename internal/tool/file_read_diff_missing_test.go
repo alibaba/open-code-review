@@ -101,7 +101,7 @@ func TestFileReadDiffAllPathsFoundHasNoError(t *testing.T) {
 // the remainder is counted rather than listed.
 func TestFileReadDiffCapsAvailablePathList(t *testing.T) {
 	m := make(map[string]string, diffNotFoundMaxListed+2)
-	for i := 0; i < diffNotFoundMaxListed+2; i++ {
+	for i := range diffNotFoundMaxListed + 2 {
 		m[fmt.Sprintf("f%02d.go", i)] = "diff"
 	}
 	p := NewFileReadDiff(NewDiffMap(m))

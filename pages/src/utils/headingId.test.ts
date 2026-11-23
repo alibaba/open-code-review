@@ -30,7 +30,7 @@ describe('explicit heading IDs', () => {
     ]);
   });
 
-  it.each(['en', 'zh', 'ja', 'ko', 'ru'])('preserves the tools migration anchor in %s documentation', (language) => {
+  it.each(['en', 'zh', 'ja', 'ko', 'ru', 'tr'])('preserves the tools migration anchor in %s documentation', (language) => {
     const docsDirectory = join(dirname(fileURLToPath(import.meta.url)), '..', 'content', 'docs');
     const markdown = readFileSync(join(docsDirectory, language, 'tools.md'), 'utf8');
     const headings = extractHeadings(markdown).filter(heading => heading.id === 'customizing-tools');

@@ -145,11 +145,9 @@ func TestCodeAccessConcurrentSides(test *testing.T) {
 	}
 	providers := comparisonProviders(&current, access)
 	var workers sync.WaitGroup
-	for iteration := 0; iteration < 12; iteration++ {
+	for iteration := range 12 {
 		for _, provider := range providers {
-			workers.Add(1)
-			go func() {
-				defer workers.Done()
+			workers.Go(func() {
 				side := "new"
 				if iteration%2 == 0 {
 					side = "old"
@@ -171,7 +169,7 @@ func TestCodeAccessConcurrentSides(test *testing.T) {
 				if !strings.Contains(got, want) {
 					test.Errorf("%s/%s: %q lacks %q", provider.Tool().Name(), side, got, want)
 				}
-			}()
+			})
 		}
 	}
 	workers.Wait()
@@ -252,9 +250,7 @@ func TestWorkspaceCodeAccess(test *testing.T) {
 			}
 		}
 		for _, side := range []string{"old", "new"} {
-			workers.Add(1)
-			go func() {
-				defer workers.Done()
+			workers.Go(func() {
 				args := comparisonArgs(provider.Tool().Name())
 				args["side"] = side
 				got, err := provider.Execute(context.Background(), args)
@@ -274,7 +270,7 @@ func TestWorkspaceCodeAccess(test *testing.T) {
 				if err != nil || !strings.Contains(got, want) {
 					test.Errorf("%s/%s: %q %v", provider.Tool().Name(), side, got, err)
 				}
-			}()
+			})
 		}
 	}
 	workers.Wait()

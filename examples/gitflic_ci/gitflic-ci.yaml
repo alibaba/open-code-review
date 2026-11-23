@@ -58,27 +58,39 @@ code-review:
     - git fetch --unshallow 2>/dev/null || true
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
-    # Run OCR review (CI_COMMIT_SHA as head supports forked MRs as well)
+    # Run OCR review (CI_COMMIT_SHA as head supports forked MRs as well).
+    # A non-zero exit means the review failed or left items unreviewed. Keep
+    # the code so the posting step can still publish what was produced and
+    # then fail the job (mirrors the GitLab example and the GitHub Action).
     - |
+      OCR_EXIT_CODE=0
       ocr review \
         --from "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" \
         --to "${CI_COMMIT_SHA}" \
         --format json \
         --audience agent \
-        > /tmp/ocr-result.json || true
-      echo "OCR review completed."
+        > /tmp/ocr-result.json || OCR_EXIT_CODE=$?
+      echo "$OCR_EXIT_CODE" > /tmp/ocr-exit-code
+      echo "OCR review exited with code ${OCR_EXIT_CODE}."
 
     # Post review comments onto the MR (inline discussions + summary note).
     # post_review.py recomputes the old-side line for each comment from the
     # merge-base diff, which the GitFlic Discussions API requires for inline
     # (code) comments.
     #
-    # The review step above ends with `|| true`, so a failed `ocr review` (bad
-    # token, network error) leaves an empty or partial file. Skip posting in
-    # that case instead of feeding invalid JSON to post_review.py.
+    # A run-level `ocr review` failure (bad token, network error) leaves an
+    # empty file. Skip posting in that case instead of feeding invalid JSON to
+    # post_review.py, then fail the job with the review's exit code.
     - |
-      if [ ! -s /tmp/ocr-result.json ]; then
+      POST_EXIT_CODE=0
+      if [ -s /tmp/ocr-result.json ]; then
+        python3 post_review.py /tmp/ocr-result.json || POST_EXIT_CODE=$?
+      else
         echo "OCR review produced no output, skipping post."
-        exit 0
       fi
-      python3 post_review.py /tmp/ocr-result.json
+      OCR_EXIT_CODE=$(cat /tmp/ocr-exit-code 2>/dev/null || echo 0)
+      if [ "$OCR_EXIT_CODE" != "0" ]; then
+        echo "ocr review exited with code ${OCR_EXIT_CODE}; failing the job."
+        exit "$OCR_EXIT_CODE"
+      fi
+      exit "$POST_EXIT_CODE"

@@ -440,6 +440,9 @@ async function runPostReviewComments({
     toSend = reviewComments.filter(
       ({ reviewComment }) => !overlapsHistory(reviewComment, hist, incrementalOverlapThreshold)
     );
+    toSend.sort((left, right) =>
+      (SEVERITY_RANK.get(right.comment.severity) ?? 0) - (SEVERITY_RANK.get(left.comment.severity) ?? 0)
+    );
 
     const deduped = [];
     const acceptedComments = [];
