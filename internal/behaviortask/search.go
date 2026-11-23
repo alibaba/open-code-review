@@ -15,6 +15,7 @@ import (
 )
 
 const scopedPathBytes = 16 * 1024
+const searchMatchLimit = 100
 
 func literalPathBatches(groups [][]string) ([][]string, error) {
 	return pathBatches(groups, func(name string) string { return ":(top,literal)" + name })
@@ -137,7 +138,7 @@ func (code *codeTools) search(ctx context.Context, provider tool.Provider, args 
 				flush()
 				filePath = strings.TrimPrefix(line, "File: ")
 			case code.allowed[side][filePath] && (line == tool.CodeSearchBinaryMatch || numberedLine.MatchString(line)):
-				if count >= tool.CodeSearchMatchLimit {
+				if count >= searchMatchLimit {
 					truncated = true
 					continue
 				}
@@ -164,7 +165,7 @@ func (code *codeTools) search(ctx context.Context, provider tool.Provider, args 
 		result = "No matches found"
 	}
 	if truncated {
-		result = fmt.Sprintf("Note: Showing the first %d matches. Narrow file_patterns to see the rest.\n", tool.CodeSearchMatchLimit) + result
+		result = fmt.Sprintf("Note: Showing the first %d matches. Narrow file_patterns to see the rest.\n", searchMatchLimit) + result
 	}
 	if side == "old" {
 		prefix := "SIDE: old\nREVISION: " + code.comparison.Old + "\n"

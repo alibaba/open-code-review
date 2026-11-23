@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	gitGrepTimeout = 10 * time.Second
+	gitGrepMaxCount = 100
+	gitGrepTimeout  = 10 * time.Second
 
-	CodeSearchMatchLimit  = 100
 	CodeSearchBinaryMatch = "Binary file matches; content not shown"
 )
 
@@ -93,7 +93,7 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	cmdArgs = append(cmdArgs, "-n", "--no-color")
 	// git grep limits matches per file. Fetch one extra to distinguish an exact
 	// limit from truncated results, then enforce the global limit below.
-	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", CodeSearchMatchLimit+1))
+	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
 
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
@@ -227,7 +227,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		}
 		seen := matchedFiles[fname]
 		matchedFiles[fname] = true
-		if matchCount >= CodeSearchMatchLimit {
+		if matchCount >= gitGrepMaxCount {
 			// Keep scanning to finish counting matched files, but render no more.
 			truncated = true
 			continue
@@ -243,7 +243,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 
 	var sb strings.Builder
 	if truncated {
-		sb.WriteString(fmt.Sprintf("Note: Showing the first %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", CodeSearchMatchLimit, len(matchedFiles)))
+		sb.WriteString(fmt.Sprintf("Note: Showing the first %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", gitGrepMaxCount, len(matchedFiles)))
 	}
 
 	for _, path := range fileOrder {

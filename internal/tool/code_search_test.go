@@ -233,7 +233,7 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 						t.Errorf("expected note to report %q, got:\n%s", want, got)
 					}
 				}
-				wantBinary := min(tc.binaryCount, CodeSearchMatchLimit)
+				wantBinary := min(tc.binaryCount, gitGrepMaxCount)
 				if count := strings.Count(got, "\nBinary file matches; content not shown\n"); count != wantBinary {
 					t.Errorf("returned %d binary matches, want %d", count, wantBinary)
 				}
