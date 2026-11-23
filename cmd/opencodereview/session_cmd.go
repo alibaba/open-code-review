@@ -162,9 +162,6 @@ func completeSessionIDsAnywhere(cmd *cobra.Command, args []string, toComplete st
 	}
 	completions := make([]string, 0, len(locations))
 	for _, loc := range locations {
-		if !strings.HasPrefix(loc.SessionID, toComplete) {
-			continue
-		}
 		repo := loc.RepoDir
 		if repo == "" {
 			repo = "(repository not recorded)"
