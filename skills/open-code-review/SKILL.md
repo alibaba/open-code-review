@@ -4,7 +4,7 @@ description: >
   Review workspace changes, PRs, commits, or branch comparisons with OCR's
   native review pipeline and independently configured model provider.
   Produces line-level findings and explains the behavior and impact of
-  committed changes by default. Fixes code only when requested. Use when
+  committed changes on explicit request. Fixes code only when requested. Use when
   the user wants native mode or has an OCR provider configured. To use the
   host agent's model without separate OCR credentials, choose
   open-code-review-delegate instead.
@@ -55,16 +55,23 @@ ocr review --audience agent --background "business context here"
 | User says | Command to run |
 |-----------|---------------|
 | "review my changes" / "review the working copy" | `ocr review --audience agent -b "context"` |
-| "review this PR" / "review feature branch" | `ocr review --audience agent -b "context" --from <base> --to <branch> --analysis --format json` |
-| "review the current branch against main" | `ocr review --audience agent -b "context" --from main --analysis --format json` |
-| "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123 --analysis --format json` |
+| "review this PR" / "review feature branch" | `ocr review --audience agent -b "context" --from <base> --to <branch>` |
+| "review this PR with behavior and impact analysis" | `ocr review --audience agent -b "context" --from <base> --to <branch> --analysis --format json` |
+| "review the current branch against main" | `ocr review --audience agent -b "context" --from main` |
+| "review the current branch against main with behavior and impact analysis" | `ocr review --audience agent -b "context" --from main --analysis --format json` |
+| "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123` |
+| "review commit abc123 with behavior and impact analysis" | `ocr review --audience agent -b "context" --commit abc123 --analysis --format json` |
 | "what would be reviewed?" (dry-run) | `ocr review --preview` |
 
 **Behavior and impact analysis:**
 
-For a fresh commit or range review (`--commit` or `--from`), run Review and Analysis together with `--analysis` by default. Use JSON unless the caller requests another format. Preserve the caller's repository, revisions, background, and output path.
+Keep the default review lightweight: ordinary requests run Review only — omit `--analysis` unless the caller explicitly asks for it.
 
-Omit `--analysis` for workspace reviews, `--preview`, `--resume`, or `--format sarif`, and when the user explicitly asks to skip analysis. If the user explicitly requests analysis in an unsupported mode, explain the conflict rather than changing the target or format.
+An explicit analysis request is the literal `--analysis` flag, or natural language pairing `analys*`/`analyz*` with `behavior`/`behaviour`/`impact` (for example "analyze the behavior and impact", "impact analysis"). Vague intensifiers such as "deep review", "thorough review", or "full review" do not request analysis.
+
+For a fresh commit or range review (`--commit` or `--from`) with an explicit analysis request, run Review and Analysis together with exactly one `ocr review --analysis` invocation. Use JSON unless the caller requests another format. Preserve the caller's repository, revisions, background, and output path.
+
+`--analysis` is only valid for commit or range reviews with text or json output. If the user explicitly requests analysis for a workspace review, `--preview`, `--resume`, or `--format sarif`, explain the conflict rather than changing the target or format.
 
 **Output mode:**
 
