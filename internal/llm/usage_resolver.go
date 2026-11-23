@@ -6,6 +6,8 @@ package llm
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/buger/jsonparser"
 )
 
 // UsageInfo holds token usage extracted from an LLM API response.
@@ -71,11 +73,33 @@ var totalTokensPaths = []string{
 	"data.usage.total_tokens", // wrapped in data layer
 }
 
-// resolveUsage parses raw JSON bytes into a map and extracts token usage
-// by probing configured paths sequentially. Returns nil if no total_tokens found.
+// resolveUsage extracts token usage by probing configured paths sequentially.
 func resolveUsage(raw []byte) *UsageInfo {
-	var rawBody map[string]any
-	if err := json.Unmarshal(raw, &rawBody); err != nil {
+	// Completions can contain large text or tool arguments that the SDK has
+	// already decoded. Skip unrelated root values without allocating copies,
+	// while retaining exact-key matching and last-value-wins object semantics.
+	if !json.Valid(raw) {
+		return nil
+	}
+	rawBody := make(map[string]any)
+	err := jsonparser.ObjectEach(raw, func(key, value []byte, kind jsonparser.ValueType, _ int) error {
+		switch string(key) {
+		case "usage", "data", "total_tokens", "prompt_tokens", "completion_tokens", "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens":
+		default:
+			return nil
+		}
+		var decoded any
+		// Only objects and numbers can contribute to a configured usage path.
+		// Other types still replace an earlier duplicate of the same key.
+		if kind == jsonparser.Object || kind == jsonparser.Number {
+			if err := json.Unmarshal(value, &decoded); err != nil {
+				return err
+			}
+		}
+		rawBody[string(key)] = decoded
+		return nil
+	})
+	if err != nil {
 		return nil
 	}
 
