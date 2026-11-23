@@ -25,9 +25,15 @@ type RuleGroup struct {
 // provenance (e.g. matched by different patterns or resolved from different
 // layers) stay in separate groups.
 func GroupRules(resolver rules.Resolver, paths []string) []RuleGroup {
+	type ruleKey struct {
+		source  string
+		pattern string
+		text    string
+	}
+
 	dr, hasDetail := resolver.(rules.DetailResolver)
 
-	keyIndex := make(map[string]int) // source|pattern|text -> group index
+	keyIndex := make(map[ruleKey]int)
 	var groups []RuleGroup
 
 	for _, path := range paths {
@@ -43,7 +49,7 @@ func GroupRules(resolver rules.Resolver, paths []string) []RuleGroup {
 			pattern = "default"
 		}
 
-		key := source + "\x00" + pattern + "\x00" + text
+		key := ruleKey{source: source, pattern: pattern, text: text}
 		idx, exists := keyIndex[key]
 		if !exists {
 			idx = len(groups)
