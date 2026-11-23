@@ -71,7 +71,7 @@ const Footer: React.FC = () => {
             target="_blank"
             rel="noopener noreferrer"
           >
-            <img src={githubIcon} alt="" style={{ width: 14, height: 14 }} />
+            <ThemedMonochromeIcon src={githubIcon} alt="" width={14} height={14} />
             {t('footer.contact')}
           </a>
 
@@ -81,7 +81,7 @@ const Footer: React.FC = () => {
               className="footer-action"
               onClick={() => setOpen(v => !v)}
             >
-              <img src={langIcon} alt="" style={{ width: 14, height: 14 }} />
+              <ThemedMonochromeIcon src={langIcon} alt="" width={14} height={14} />
               {currentLabel}
               <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
                 <path d="M1 1L5 5L9 1" stroke="var(--text-faint)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
