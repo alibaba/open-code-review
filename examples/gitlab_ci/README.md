@@ -45,11 +45,12 @@ Go to your project's **Settings → CI/CD → Variables** and add:
 | `OCR_LLM_AUTH_HEADER` | No | No | Custom auth header name, written via `ocr config set llm.auth_header` (e.g. `x-api-key` for some providers). |
 | `OCR_LLM_EXTRA_HEADERS` | No | No | Extra headers `K=V,K=V`, written via `ocr config set llm.extra_headers`. |
 | `OCR_LLM_TIMEOUT` | No | No | LLM request timeout in seconds (read natively by OCR from the env). Unset/empty = OCR's default. |
+| `OCR_LLM_USE_ANTHROPIC` | No | No | Set to `true` for the Anthropic API format; defaults to `false`. Must be unmasked — GitLab's 8-character minimum applies to masked values only. |
 | `OCR_REVIEW_CONCURRENCY` | No | No | Max concurrent file reviews, passed via `ocr review --concurrency` (default: 8). |
 | `OCR_BACKGROUND` | No | No | Business/requirement context, passed via `ocr review --background` (e.g. the MR title). |
 | `OCR_RULE` | No | No | Path to a custom rules JSON file, passed via `ocr review --rule`. |
 
-> **Note:** GitLab CI/CD does not support variables with values shorter than 8 characters, so `use_anthropic` cannot be set as a CI variable. The pipeline sets it to `false` by default. If you need to use Anthropic Claude models, you'll need to modify the `.gitlab-ci.yml` script directly.
+> **Note:** Leave `OCR_LLM_USE_ANTHROPIC` unmasked: GitLab's 8-character minimum applies to masked variables only, and a boolean flag is not a secret. The pipeline defaults it to `false`.
 >
 > The pipeline also configures `llm.extra_body` to disable thinking mode for compatibility with various LLM providers.
 
@@ -85,12 +86,16 @@ OCR supports both OpenAI and Anthropic API formats:
   - OpenAI (GPT-4o, GPT-4, etc.)
   - Azure OpenAI
   - Self-hosted models (vLLM, Ollama, etc.)
-- **Anthropic APIs** (modify `.gitlab-ci.yml` to set `use_anthropic: true`):
+- **Anthropic APIs** (set `OCR_LLM_USE_ANTHROPIC` to `true`):
   - Anthropic Claude models
 
 ## Customization
 
 Most review behavior is configurable via CI/CD Variables (see the table above) — no YAML edits required. The recipes below cover the remaining cases.
+
+### Use an Anthropic endpoint
+
+Set `OCR_LLM_USE_ANTHROPIC` to `true`. Leave it unset or set it to `false` for OpenAI-compatible endpoints.
 
 ### Use a specific OCR version
 
@@ -189,7 +194,7 @@ script:
     ocr config set llm.url "$OCR_LLM_URL"
     ocr config set llm.auth_token "$OCR_LLM_AUTH_TOKEN"
     ocr config set llm.model "$OCR_LLM_MODEL"
-    ocr config set llm.use_anthropic false
+    ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC:-false}"
     ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
 
   # Check for existing OCR reviews and run review only if not found
