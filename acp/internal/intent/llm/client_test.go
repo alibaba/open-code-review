@@ -137,6 +137,25 @@ func TestOpenAICallTool(t *testing.T) {
 	}
 }
 
+func TestOpenAICallToolFindsCallInLaterChoice(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"I will classify this request."},"finish_reason":"tool_calls"},{"index":1,"message":{"role":"assistant","tool_calls":[{"id":"call_intent","type":"function","function":{"name":"submit_intent","arguments":"{\"action\":\"review\",\"review\":{\"type\":\"workspace\"}}"}}]},"finish_reason":"tool_calls"}]}`)
+	}))
+	defer srv.Close()
+
+	c, err := NewClient(Endpoint{URL: srv.URL, Token: "key", Model: "m", Protocol: ProtocolOpenAI})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	call, err := c.CallTool(context.Background(), testRequest())
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if call.Name != "submit_intent" || !strings.Contains(string(call.Arguments), "workspace") {
+		t.Fatalf("call = %+v %s", call.Name, call.Arguments)
+	}
+}
+
 func TestOpenAIErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -146,6 +165,7 @@ func TestOpenAIErrors(t *testing.T) {
 		{"no choices", `{"choices":[]}`, 200},
 		{"no tool calls", `{"choices":[{"message":{}}]}`, 200},
 		{"two tool calls", `{"choices":[{"message":{"tool_calls":[{"function":{"name":"a"}},{"function":{"name":"b"}}]}}]}`, 200},
+		{"tool calls across choices", `{"choices":[{"message":{"tool_calls":[{"function":{"name":"submit_intent","arguments":"{}"}}]}},{"message":{"tool_calls":[{"function":{"name":"submit_intent","arguments":"{}"}}]}}]}`, 200},
 		{"endpoint error", `{"error":{"message":"bad key"}}`, 200},
 		{"invalid json", `not json`, 200},
 		{"http error", `{"error":"boom"}`, 500},
