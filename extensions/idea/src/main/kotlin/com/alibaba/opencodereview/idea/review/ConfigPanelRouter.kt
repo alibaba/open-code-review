@@ -102,8 +102,11 @@ class ConfigPanelRouter(
             }
 
             // checkCli and checkEnvironment share a branch: both force a fresh probe.
-            WebviewToHost.CheckCli, WebviewToHost.CheckEnvironment ->
-                post(ConfigPanelHostToWebview.EnvironmentResult(cli.checkEnvironment(force = true)))
+            WebviewToHost.CheckCli, WebviewToHost.CheckEnvironment -> {
+                val env = cli.checkEnvironment(force = true)
+                post(ConfigPanelHostToWebview.EnvironmentResult(env))
+                if (env.configPath?.ok == true) notifyConfig(config.read())
+            }
 
             is WebviewToHost.CopyToClipboard -> {
                 // The clipboard write and the acknowledgement both happen on the EDT: otherwise

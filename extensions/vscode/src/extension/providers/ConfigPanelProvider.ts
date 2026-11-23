@@ -131,6 +131,7 @@ export class ConfigPanelProvider implements vscode.Disposable {
       case 'checkEnvironment': {
         const env = await this.cli.checkEnvironment(true);
         this.post({ type: 'environmentResult', env });
+        if (env.configPath?.ok) this.notifyConfig(await this.config.read());
         break;
       }
       case 'copyToClipboard':
