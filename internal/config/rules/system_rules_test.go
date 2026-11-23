@@ -135,6 +135,13 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/app/main.pyi", "Mutable Default Arguments"},
 		{"notebook.ipynb", "Mutable Default Arguments"},
 		{"src/notebooks/data.ipynb", "Mutable Default Arguments"},
+		{"app/models/user.rb", "Nil, False, and Absent Values"},
+		{"lib/tasks/cleanup.rake", "Nil, False, and Absent Values"},
+		{"mygem.gemspec", "Nil, False, and Absent Values"},
+		{"Gemfile", "Nil, False, and Absent Values"},
+		{"Rakefile", "Nil, False, and Absent Values"},
+		{"lib/Rakefile", "Nil, False, and Absent Values"},
+		{"app/views/users/show.html.erb", "ERB Escaping and Output Contexts"},
 		{"public/index.php", "PHP Review Principles"},
 		{"templates/account/profile.phtml", "Web and Template Security Boundaries"},
 		{"locale/zh_CN/LC_MESSAGES/messages.po", "Placeholder Mismatch"},
@@ -206,6 +213,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 		{"policies/authz.rego", "Default Posture"},
 		{"policies/authz.REGO", "Default Posture"},
+		{"kernels/softmax.cu", "CUDA and HIP Kernel Review Principles"},
+		{"src/attention.cuh", "CUDA and HIP Kernel Review Principles"},
+		{"kernels/hip_softmax.hip", "CUDA and HIP Kernel Review Principles"},
 		{"scripts/deploy.ps1", "PowerShell Review Principles"},
 		{"modules/Build/Build.psm1", "PowerShell Review Principles"},
 		{"modules/Build/Build.psd1", "PowerShell Review Principles"},
@@ -213,10 +223,14 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/myapp/views.cljs", "Laziness, Sequences, and Resource Scope"},
 		{"src/myapp/shared.cljc", "Laziness, Sequences, and Resource Scope"},
 		{"deps.edn", "EDN Data, Configuration, and Untrusted Input"},
+		{"db/migrate/20260101_add_users.sql", "Destructive and Irreversible Migrations"},
+		{"sql/reports/monthly.sql", "Destructive and Irreversible Migrations"},
 		{"sources/pool.move", "Ability Grants"},
 		{"contracts/amm/sources/router.move", "Ability Grants"},
 		{"Move.toml", "Move Package Manifest"},
 		{"contracts/amm/Move.toml", "Move Package Manifest"},
+		{"config/prod.dhall", "Integrity Hashes"},
+		{"schemas/package.dhall", "Integrity Hashes"},
 	}
 
 	for _, tt := range tests {
@@ -599,12 +613,10 @@ func TestNewResolver_ProjectRuleMergesSystemRule(t *testing.T) {
 	wantUserRule := "project-go-rule"
 
 	got := resolver.Resolve("main.go")
-	systemIdx := strings.Index(got, wantSystemRule)
-	if systemIdx < 0 {
+	if !strings.Contains(got, wantSystemRule) {
 		t.Fatalf("expected merged system rule, got %q", truncate(got, 120))
 	}
-	userIdx := strings.Index(got, wantUserRule)
-	if userIdx < 0 {
+	if !strings.Contains(got, wantUserRule) {
 		t.Fatalf("expected merged project rule, got %q", truncate(got, 120))
 	}
 }
@@ -978,6 +990,44 @@ func TestResolveDetail_SystemPowerShellPatternMatch(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_SystemSQLPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{
+		"db/migrate/20260101_add_users.sql",
+		"sql/reports/monthly.sql",
+		"SQL/REPORTS/MONTHLY.SQL",
+	} {
+		t.Run(path, func(t *testing.T) {
+			if !allowedext.IsAllowedExt(filepath.Ext(path)) || allowedext.IsExcludedPath(path) {
+				t.Fatalf("SQL file %q must remain reviewable", path)
+			}
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.sql" {
+				t.Errorf("expected pattern '**/*.sql', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Destructive and Irreversible Migrations",
+				"Locking and Online-Migration Hazards",
+				"NULL Semantics",
+				"sqlfluff",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected SQL rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveDetail_SystemPrismaPatternMatch(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
@@ -1197,6 +1247,49 @@ func TestResolveDetail_SystemComposerPatternPrecedesJSON(t *testing.T) {
 			} {
 				if !strings.Contains(detail.Rule, required) {
 					t.Errorf("expected Composer rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemCUDAHIPPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	// CUDA and HIP share one rule doc, mapped by two patterns, the way
+	// ocaml.md serves both {ml,mli} and {re,rei}. The reported Pattern must
+	// stay the one that actually matched.
+	tests := []struct {
+		path        string
+		wantPattern string
+	}{
+		{"kernels/softmax.cu", "**/*.{cu,cuh}"},
+		{"src/kernels/attention.cuh", "**/*.{cu,cuh}"},
+		{"KERNELS/SOFTMAX.CU", "**/*.{cu,cuh}"},
+		{"kernels/hip_softmax.hip", "**/*.hip"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			detail := dr.ResolveDetail(tt.path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != tt.wantPattern {
+				t.Errorf("expected pattern %q, got %q", tt.wantPattern, detail.Pattern)
+			}
+			for _, required := range []string{
+				"CUDA and HIP Kernel Review Principles",
+				"__syncthreads",
+				"cudaGetLastError",
+				"__syncwarp",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected CUDA/HIP rule to contain %q", required)
 				}
 			}
 		})

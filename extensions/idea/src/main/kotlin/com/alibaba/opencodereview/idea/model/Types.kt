@@ -109,6 +109,7 @@ data class CliResult(
     val warnings: List<AgentWarning> = emptyList(),
     val summary: ReviewSummary? = null,
     val message: String? = null,
+    val executionError: String? = null,
 )
 
 @Serializable

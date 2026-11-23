@@ -17,9 +17,8 @@ func flagErrorWithSuggestion(cmd *cobra.Command, err error) error {
 	msg := err.Error()
 
 	var unknown string
-	if strings.HasPrefix(msg, "unknown flag: ") {
-		unknown = strings.TrimPrefix(msg, "unknown flag: ")
-		unknown = strings.TrimLeft(unknown, "-")
+	if after, ok := strings.CutPrefix(msg, "unknown flag: "); ok {
+		unknown = strings.TrimLeft(after, "-")
 	}
 	if unknown == "" {
 		return err

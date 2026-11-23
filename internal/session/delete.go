@@ -87,10 +87,35 @@ func DeleteSession(repoDir, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil {
+	if err := removeReport(path); err != nil {
 		return fmt.Errorf("delete session %q: %w", sessionID, err)
 	}
 	return nil
+}
+
+func removeReport(path string) error {
+	if _, err := os.Lstat(path); err != nil {
+		return err
+	}
+	directory := strings.TrimSuffix(path, ".jsonl")
+	info, err := os.Lstat(directory)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if info != nil && info.IsDir() {
+		root, err := os.OpenRoot(filepath.Dir(directory))
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		if err := root.RemoveAll(filepath.Join(filepath.Base(directory), "analysis")); err != nil {
+			return err
+		}
+		if err := os.Remove(directory); err != nil {
+			return err
+		}
+	}
+	return os.Remove(path)
 }
 
 // recordedRepoDir returns the working directory a session recorded, and whether it had one.
@@ -206,7 +231,7 @@ func DeleteSessionAt(loc Location) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil {
+	if err := removeReport(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("%w: %s", ErrSessionNotFound, loc.SessionID)
 		}
