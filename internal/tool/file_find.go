@@ -152,12 +152,25 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		// Non-git directory (git ls-files exits 128) and no specific ref:
-		// fall back to a filesystem walk so file_find still works for
-		// `ocr scan` on plain directories. Ref-based lookups can't be
-		// satisfied without git, so those still error.
 		if p.FileReader.Ref == "" {
-			return p.listWalkFiles(ctx)
+			// A bad index can make ls-files fail even though this is a Git
+			// repository. Only walk the filesystem if repository discovery also
+			// fails; walking a known repository would hide the original error.
+			// Probe Git directly so this does not depend on localized diagnostics.
+			var discoveryErr error
+			if p.FileReader.Runner != nil {
+				_, discoveryErr = p.FileReader.Runner.Output(ctx, p.FileReader.RepoDir, "rev-parse", "--git-dir")
+			} else {
+				cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
+				cmd.Dir = p.FileReader.RepoDir
+				_, discoveryErr = cmd.Output()
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if discoveryErr != nil {
+				return p.listWalkFiles(ctx)
+			}
 		}
 		return nil, err
 	}
