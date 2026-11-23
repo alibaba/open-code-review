@@ -78,6 +78,24 @@ func TestRunConfigSetProviderNames(t *testing.T) {
 	}
 }
 
+func TestTestMainProtectsInheritedOCRHome(t *testing.T) {
+	storage := t.TempDir()
+	config := filepath.Join(storage, "config.json")
+	sentinel := []byte(`{"model":"sentinel"}`)
+	if err := os.WriteFile(config, sentinel, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunConfigSetProviderNames$")
+	cmd.Env = append(os.Environ(), testHomeIsolatedEnv+"=", "OCR_HOME="+storage)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("subprocess: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(config)
+	if err != nil || !bytes.Equal(got, sentinel) {
+		t.Fatalf("inherited config changed: %q, %v", got, err)
+	}
+}
+
 func TestTestMainPreservesIsolatedHomeForSubprocess(t *testing.T) {
 	home := os.Getenv("HOME")
 	if home == "" || home != os.Getenv("USERPROFILE") {
