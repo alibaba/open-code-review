@@ -5,6 +5,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,25 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
+
+func TestMatchFileNamesAuthorizesOnlyCandidates(t *testing.T) {
+	files := []string{"irrelevant.go", "service.go", "service/main.go"}
+	allow := func(name string) bool {
+		if name == "irrelevant.go" {
+			t.Fatal("authorized a non-match")
+		}
+		return name == "service/main.go"
+	}
+	got, err := MatchFileNames(t.Context(), files, "service", false, 1, allow)
+	if err != nil || len(got) != 1 || got[0] != "service/main.go" {
+		t.Fatalf("%v: %v", got, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := MatchFileNames(ctx, files, "service", false, 1, allow); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
 
 // TestFileFind_NonGitDirectoryFallback verifies file_find works in a plain
 // (non-git) directory by falling back to a filesystem walk instead of

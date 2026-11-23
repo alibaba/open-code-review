@@ -332,9 +332,23 @@ func TestIsExcludedPath(t *testing.T) {
 		{"ruby spec dir", "spec/models/user_spec.rb", true},
 		{"ruby non-spec", "app/models/user.rb", false},
 
-		// Rust test files
+		// Rust test and benchmark files
 		{"rust test file", "src/parser_test.rs", true},
+		{"rust tests suffix", "src/parser_tests.rs", true},
+		{"rust nested tests suffix", "crates/mcp/src/handler_tests.rs", true},
+		{"rust module tests.rs", "src/tests.rs", true},
+		{"rust nested module tests.rs", "crates/gateway/src/runner/tests.rs", true},
+		{"rust integration test at root", "tests/integration.rs", true},
+		{"rust integration test in crate", "crates/server/tests/webhook.rs", true},
+		{"rust integration test helper mod", "crates/server/tests/common/mod.rs", true},
+		{"rust bench at root", "benches/bench_main.rs", true},
+		{"rust bench in crate", "crates/core/benches/parse.rs", true},
 		{"rust non-test", "src/parser.rs", false},
+		{"rust tests prefix helper not excluded", "src/tests_helper.rs", false},
+		{"rust test_support not excluded", "src/test_support.rs", false},
+		{"rust contest not excluded", "src/contest.rs", false},
+		{"rust benches prefix not excluded", "src/benches_util.rs", false},
+		{"rust benchmark module not excluded", "src/benchmark.rs", false},
 
 		// Prisma schemas have no conventional default test-file exclusion.
 		{"prisma schema", "prisma/schema.prisma", false},

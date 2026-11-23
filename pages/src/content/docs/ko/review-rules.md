@@ -195,6 +195,10 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -303,7 +307,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.erb`                                      | `erb.md` — ERB 템플릿(SSTI / XSS / 이스케이프 / 공백 및 출력 구조). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                  |
 | `**/*.astro`                                    | `astro.md` — Astro 컴포넌트와 아일랜드.                                          |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                               |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                               |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                      |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                  |

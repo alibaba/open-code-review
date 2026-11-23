@@ -134,7 +134,7 @@ var sessionRmCmd = &cobra.Command{
 	Long: "Delete a persisted review session from ~/.opencodereview/sessions/.\n\n" +
 		"The id is enough on its own, so this works from anywhere; --repo only narrows\n" +
 		"the search. An id saved for more than one repository is listed, not guessed at.\n\n" +
-		"The file cannot be recovered, so this confirms first unless --yes is given.",
+		"Any attached Analysis report, evidence and logs are also deleted. This confirms first unless --yes is given.",
 	Example: "  ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b\n" +
 		"  ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --yes\n" +
 		"  ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --repo ~/work/my-project",
@@ -528,7 +528,7 @@ func filterComments(comments []model.LlmComment, severities, categories string) 
 
 func parseFilterSet(s string) map[string]bool {
 	set := map[string]bool{}
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		part = strings.ToLower(strings.TrimSpace(part))
 		if part != "" {
 			set[part] = true
@@ -578,6 +578,7 @@ func runSessionRmAnywhere(cmd *cobra.Command, sessionID string) error {
 		} else {
 			fmt.Fprintf(cmd.OutOrStdout(), "Delete session %s? (its metadata could not be read)\n", sessionID)
 		}
+		warnAnalysisDeletion(cmd, loc.Path)
 		ok, err := confirmDeletion(cmd)
 		if err != nil {
 			return err
@@ -639,6 +640,7 @@ func runSessionRm(cmd *cobra.Command, sessionID string) error {
 		} else {
 			fmt.Fprintf(cmd.OutOrStdout(), "Delete session %s? (its metadata could not be read)\n", sessionID)
 		}
+		warnAnalysisDeletion(cmd, summary.FilePath)
 		ok, err := confirmDeletion(cmd)
 		if err != nil {
 			return err
@@ -657,6 +659,12 @@ func runSessionRm(cmd *cobra.Command, sessionID string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %s\n", sessionID)
 	return nil
+}
+
+func warnAnalysisDeletion(cmd *cobra.Command, path string) {
+	if _, err := os.Lstat(filepath.Join(strings.TrimSuffix(path, ".jsonl"), "analysis")); err == nil {
+		fmt.Fprintln(cmd.OutOrStdout(), "  This also deletes the Analysis report, evidence, and logs.")
+	}
 }
 
 // confirmDeletion reads a yes/no answer; a non-interactive stdin answers no.
@@ -711,6 +719,9 @@ func printSessionDetail(w io.Writer, s *session.Summary, items []session.ItemDet
 		fmt.Fprintf(w, "  Model:     %s\n", s.Model)
 	}
 	fmt.Fprintf(w, "  Mode:      %s\n", displayMode(s.ReviewMode))
+	if s.Analysis != nil && s.Analysis.Enabled {
+		fmt.Fprintf(w, "  Analysis:  %s\n", filepath.Join(strings.TrimSuffix(s.FilePath, ".jsonl"), "analysis"))
+	}
 	if r := describeRange(*s); r != "" && r != "-" {
 		fmt.Fprintf(w, "  Range:     %s\n", r)
 	}

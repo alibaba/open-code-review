@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -721,9 +722,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			if object, ok := streamOptions.(map[string]any); ok {
 				if _, has := object["include_usage"]; !has {
 					merged := make(map[string]any, len(object)+1)
-					for key, value := range object {
-						merged[key] = value
-					}
+					maps.Copy(merged, object)
 					merged["include_usage"] = true
 					streamOptions = merged
 				}
@@ -944,12 +943,12 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 		tools = append(tools, openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
 			Name:        t.Function.Name,
 			Description: openai.String(t.Function.Description),
-			Parameters:  shared.FunctionParameters(t.Function.Parameters),
+			Parameters:  t.Function.Parameters,
 		}))
 	}
 
 	params := openai.ChatCompletionNewParams{
-		Model:    shared.ChatModel(model),
+		Model:    model,
 		Messages: messages,
 	}
 
@@ -973,6 +972,22 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 
 // maxErrorBodyBytes bounds the provider payload quoted in an error message.
 const maxErrorBodyBytes = 64 << 10
+
+func ProviderHTTPStatus(err error) int {
+	var openAI *openai.Error
+	if errors.As(err, &openAI) {
+		return openAI.StatusCode
+	}
+	var anthropicErr *anthropic.Error
+	if errors.As(err, &anthropicErr) {
+		return anthropicErr.StatusCode
+	}
+	var httpErr interface{ HTTPStatusCode() int }
+	if errors.As(err, &httpErr) {
+		return httpErr.HTTPStatusCode()
+	}
+	return 0
+}
 
 // withProviderErrorBody appends the provider's response body to an API error the
 // SDK left without one. It extracts the payload with the gjson path "error",
@@ -1645,7 +1660,7 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	}
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(model),
+		Model:     model,
 		MaxTokens: maxTokens,
 		Messages:  messages,
 	}
@@ -1792,7 +1807,7 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 
 	return &ChatResponse{
 		ID:    sdkResp.ID,
-		Model: string(sdkResp.Model),
+		Model: sdkResp.Model,
 		Choices: []Choice{{
 			Message: ResponseMessage{
 				Role:             "assistant",

@@ -5,7 +5,9 @@ package llmloop
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -24,6 +26,7 @@ type Deps struct {
 	Model           string
 	Session         *session.SessionHistory
 	NewRequestMeta  func(taskKey string, taskType session.TaskType, requestNo int) llm.RequestMeta
+	ProgressError   func(error) string
 	MaxTokensBudget int64
 }
 
@@ -77,6 +80,13 @@ type ToolFailureDetail struct {
 // NewRunner returns a Runner bound to the given dependencies.
 func NewRunner(deps Deps, task Task) *Runner {
 	return &Runner{deps: deps, task: task}
+}
+
+func (r *Runner) progressError(err error) error {
+	if r.deps.ProgressError != nil {
+		return errors.New(r.deps.ProgressError(err))
+	}
+	return err
 }
 
 // WaitBackground blocks until every background job started by this Runner has
@@ -142,9 +152,7 @@ func (r *Runner) ToolCalls() map[string]int64 {
 	r.toolCallsMu.Lock()
 	defer r.toolCallsMu.Unlock()
 	out := make(map[string]int64, len(r.toolCalls))
-	for k, v := range r.toolCalls {
-		out[k] = v
-	}
+	maps.Copy(out, r.toolCalls)
 	return out
 }
 
@@ -204,15 +212,8 @@ func (r *Runner) RecordUsage(u *llm.UsageInfo) {
 	atomic.AddInt64(&r.totalCacheWriteTokens, u.CacheWriteTokens)
 }
 
-// MainLoopStop classifies why Run stopped without an explicit completion
-// and without a Go error. It lets the caller attribute a precise, honest failure
-// classification instead of guessing from free text: only a configured limit
-// (max tool-request rounds) is a budget stop; the empty-round and compression
-// exits are genuine but unclassifiable, so they map to the unknown catch-all.
-// StopNone means the loop returned via a completion outcome in a normal round or via an
-// error. A completion carried by the grace round is the exception: it completes
-// the run while the stop keeps naming the budget exit that reached that round,
-// so the completed flag, not the stop, is what separates success from failure.
+// MainLoopStop identifies the limit that ended investigation, independently
+// of whether the final submission completed the task or encountered an error.
 type MainLoopStop int
 
 const (
@@ -312,6 +313,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 	// reached zero, the run stopped on the round budget. The empty-round,
 	// compression and token-budget breaks overwrite it at their trigger points.
 	stop := StopMaxRounds
+	started := false
 	for toolReqCount > 0 {
 		select {
 		case <-ctx.Done():
@@ -350,11 +352,19 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		duration := time.Since(startTime)
 		if err != nil {
 			rec.SetError(err, duration)
-			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+			telemetry.RecordLLMResult(llmSpan, duration, 0, r.progressError(err))
 			llmSpan.End()
+			if errors.Is(err, llm.ErrTokenBudget) {
+				if !started {
+					return false, StopTokenBudget, nil
+				}
+				stop = StopTokenBudget
+				break
+			}
 			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 			return false, StopNone, fmt.Errorf("LLM completion error: %w", err)
 		}
+		started = true
 		rec.SetResponse(resp, duration)
 		totalTokens := int64(0)
 		if resp.Usage != nil {
@@ -432,10 +442,8 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 			consecutiveEmptyRounds = 0
 		}
 
-		succeed := r.addNextMessage(ctx, content, calls, resp.Native(), thinking, results, &messages, taskKey, st)
-		if !succeed {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", taskKey)
-			stop = StopCompression
+		if nextStop := r.addNextMessage(ctx, content, calls, resp.Native(), thinking, results, &messages, taskKey, st); nextStop != StopNone {
+			stop = nextStop
 			break
 		}
 	}
@@ -444,17 +452,26 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 	// task, so a completion outcome it carries counts. The caller records
 	// the subtask as incomplete otherwise, and a resume re-runs a file the
 	// model already declared done.
-	completed := false
 	switch stop {
+	case StopCompression:
+		fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", taskKey)
 	case StopMaxRounds:
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", taskKey)
-		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
 	case StopTokenBudget:
-		fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n",
-			r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
-		completed = r.runGraceRound(ctx, messages, taskKey, sessionID)
+		if _, limited := r.deps.LLMClient.(llm.FinalSubmissionClient); limited {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Token budget reached for %s.\n", taskKey)
+		} else {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Token budget exceeded (used %d > budget %d) for %s.\n", r.TotalTokensUsed(), r.deps.MaxTokensBudget, taskKey)
+		}
 	}
-	return completed, stop, nil
+	if stop == StopMaxRounds || stop == StopTokenBudget {
+		completed, finalStop, err := r.runGraceRound(ctx, messages, taskKey, sessionID, started, stop)
+		if !r.task.Grace.ReportErrors {
+			return completed, finalStop, nil
+		}
+		return completed, finalStop, err
+	}
+	return false, stop, nil
 }
 
 // Check the current request before dispatch so restricted rounds cannot invoke
@@ -475,17 +492,17 @@ func (r *Runner) tokenBudgetExceeded() bool {
 	return budget > 0 && r.TotalTokensUsed() > budget
 }
 
-func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string) bool {
+func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string, started bool, stop MainLoopStop) (bool, MainLoopStop, error) {
 	graceDefs := r.task.Grace.Tools
 	if len(graceDefs) == 0 {
-		return false
+		return false, stop, nil
 	}
 
 	messages = append(messages, r.task.Grace.Messages...)
 
 	if ctx.Err() != nil {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round skipped for %s: context cancelled\n", taskKey)
-		return false
+		return false, stop, ctx.Err()
 	}
 
 	fs := r.deps.Session.GetOrCreateFileSession(taskKey)
@@ -501,15 +518,28 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		MaxTokens: r.task.MaxCompletionTokens,
 		SessionID: sessionID,
 	}
-	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, request)
+	var resp *llm.ChatResponse
+	var err error
+	if client, ok := r.deps.LLMClient.(llm.FinalSubmissionClient); ok && started {
+		var budgetReached bool
+		resp, budgetReached, err = client.FinalSubmission(reqCtx, request)
+		if budgetReached {
+			stop = StopTokenBudget
+		}
+	} else {
+		resp, err = r.deps.LLMClient.CompletionsWithCtx(reqCtx, request)
+	}
 	duration := time.Since(startTime)
 	if err != nil {
 		rec.SetError(err, duration)
-		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		telemetry.RecordLLMResult(llmSpan, duration, 0, r.progressError(err))
 		llmSpan.End()
+		if errors.Is(err, llm.ErrTokenBudget) {
+			return false, StopTokenBudget, nil
+		}
+		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", taskKey, r.progressError(err))
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
-		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", taskKey, err)
-		return false
+		return false, stop, fmt.Errorf("final submission: %w", err)
 	}
 
 	rec.SetResponse(resp, duration)
@@ -527,7 +557,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
-		return false
+		return false, stop, nil
 	}
 
 	// Any explicit failure keeps the round incomplete, even if another tool
@@ -540,32 +570,32 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 		completed = completed || checkpoint.Action == Complete
 		failed = failed || checkpoint.Action == Fail
 	}
-	return completed && !failed
+	return completed && !failed, stop, nil
 }
 
 // addNextMessage extends the conversation with the assistant message and
 // tool responses, applying three-zone compression at the soft (60%) and
-// warning (80%) MaxTokens thresholds. Returns false when even after
-// synchronous compression the conversation is still over the warning
-// threshold — caller should stop the loop in that case.
-func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, native llm.NativeTurn, reasoningContent string, results []ToolCallResult, messages *[]llm.Message, taskKey string, st *compressionState) bool {
+// warning (80%) MaxTokens thresholds. A budget rejection keeps the latest
+// tool results available for final submission without retrying compression.
+func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, native llm.NativeTurn, reasoningContent string, results []ToolCallResult, messages *[]llm.Message, taskKey string, st *compressionState) MainLoopStop {
 	maxAllowed := r.task.MaxContextTokens
 	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
 	warnLimit := PromptTokenLimit(maxAllowed)
 
 	r.tryApplyPendingCompression(st, messages)
+	compress := func() error {
+		r.cancelPendingCompression(st)
+		var err error
+		*messages, err = r.runCompression(ctx, *messages, taskKey)
+		if err != nil && !errors.Is(err, llm.ErrTokenBudget) {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", r.progressError(err))
+		}
+		return err
+	}
 
 	// A conversation can already be over the warning threshold before this
 	// round's messages are appended (e.g. an oversized initial prompt).
-	if CountMessagesTokens(*messages) > warnLimit {
-		r.cancelPendingCompression(st)
-		var err error
-		if *messages, err = r.runCompression(ctx, *messages, taskKey); err != nil {
-			// Compression failed; continue with over-limit messages — the
-			// post-append check below will retry.
-			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
-		}
-	}
+	budgetDenied := CountMessagesTokens(*messages) > warnLimit && errors.Is(compress(), llm.ErrTokenBudget)
 
 	if len(toolCalls) > 0 {
 		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls, native, reasoningContent))
@@ -576,23 +606,27 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	for _, rs := range results {
 		*messages = append(*messages, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
 	}
+	if budgetDenied {
+		return StopTokenBudget
+	}
 
 	finalCount := CountMessagesTokens(*messages)
 	if finalCount >= warnLimit {
-		r.cancelPendingCompression(st)
-		var err error
-		if *messages, err = r.runCompression(ctx, *messages, taskKey); err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
+		if errors.Is(compress(), llm.ErrTokenBudget) {
+			return StopTokenBudget
 		}
 		finalCount = CountMessagesTokens(*messages)
+		if finalCount >= warnLimit {
+			return StopCompression
+		}
 	}
 
 	// Trigger async compression only after all appends for this update, so
 	// a job is never started and then immediately cancelled by the same
-	// call (#384), and never started when we are about to return false.
-	if finalCount > softLimit && finalCount < warnLimit {
+	// call (#384), and never started when investigation has stopped.
+	if finalCount > softLimit {
 		r.triggerAsyncCompression(ctx, st, *messages, taskKey)
 	}
 
-	return finalCount < warnLimit
+	return StopNone
 }

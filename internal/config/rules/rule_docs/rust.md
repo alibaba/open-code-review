@@ -1,3 +1,8 @@
+#### Rust Review Principles
+> Favor precision over recall: report only defects that are likely real in the changed code and its reachable context. A false positive costs reviewer trust. Treat correctness, soundness, and security findings as blocking; style-only suggestions are non-blocking. Focus on language-specific risks that ordinary formatting and deterministic tooling do not already cover.
+
+Before reporting a non-local claim, use `file_read` and `code_search` to establish the relevant call sites, trait implementations, ownership, synchronization, and input boundaries. Do not infer concurrent access, panic reachability, attacker control, or lifetime unsoundness solely from a function name or crate import. Do not duplicate findings that `rustc`, the borrow checker, `cargo clippy`, or `rustfmt` can determine reliably unless the diff shows a concrete runtime consequence those tools will not express.
+
 #### Obvious Typos or Spelling Errors
 - Spelling errors in type names, function names, variable names, enum variants, trait names, or module names at their declaration sites; do not report spelling errors at call sites
 - Strings in log messages, panic messages, error messages, or public diagnostics containing spelling errors that affect readability

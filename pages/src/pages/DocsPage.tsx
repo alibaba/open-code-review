@@ -88,6 +88,7 @@ const sidebarTree: SidebarGroup[] = [
       { id: 'sb-cli', labelKey: 'docs.sidebar.cliReference', slug: 'cli-reference' },
       { id: 'sb-chatgpt-preview', labelKey: 'docs.sidebar.chatgptPreview', slug: 'chatgpt-preview' },
       { id: 'sb-rules', labelKey: 'docs.sidebar.reviewRules', slug: 'review-rules' },
+      { id: 'sb-reviewing-reqs', labelKey: 'docs.sidebar.reviewingRequirements', slug: 'reviewing-requirements' },
       { id: 'sb-arch', labelKey: 'docs.sidebar.architecture', slug: 'architecture' },
       { id: 'sb-tools', labelKey: 'docs.sidebar.tools', slug: 'tools' },
       { id: 'sb-mcp', labelKey: 'docs.sidebar.mcp', slug: 'mcp' },
@@ -161,8 +162,6 @@ const DocsPage: React.FC = () => {
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({ 'sb-integrations': true });
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [hoveredHeadingId, setHoveredHeadingId] = useState<string>('');
-  /* Cancels an in-flight click-triggered scroll when a newer one starts */
-  const cancelPendingScroll = useRef<(() => void) | null>(null);
   const { t, language } = useTranslation();
   const { isMobile } = useResponsive();
 
@@ -173,17 +172,19 @@ const DocsPage: React.FC = () => {
     | { status: 'error'; language: Language; error: Error; attempt: number };
 
   /* English fallback for partial locales, tracked separately from the main
-   * language so its own loading and failure can drive page and search UI. */
+   * language so its own loading and failure can drive page and search UI.
+   * The attempt counter is bundle-scoped: it counts load attempts of the
+   * English bundle itself, regardless of which page or query needed it. */
   type EnglishFallbackState =
     | { status: 'idle' }
-    | { status: 'loading'; requestKey: string }
+    | { status: 'loading'; attempt: number }
     | { status: 'ready'; docs: LocalizedDocs }
-    | { status: 'error'; requestKey: string; error: Error; attempt: number };
+    | { status: 'error'; error: Error; attempt: number };
 
   const [docState, setDocState] = useState<DocsLoadState>(() => ({ status: 'loading', language, attempt: 0 }));
   const [mainRetry, setMainRetry] = useState<{ language: Language; count: number }>({ language, count: 0 });
   const [englishFallback, setEnglishFallback] = useState<EnglishFallbackState>({ status: 'idle' });
-  const [fallbackRetry, setFallbackRetry] = useState<{ requestKey: string; count: number }>({ requestKey: '', count: 0 });
+  const [fallbackRetry, setFallbackRetry] = useState(0);
 
   const loadedLanguage = docState.status === 'ready' ? docState.content.language : null;
 
@@ -222,7 +223,12 @@ const DocsPage: React.FC = () => {
     setDocState({ status: 'loading', language, attempt });
     loadLanguageContent(language)
       .then(docs => {
-        if (!cancelled) setDocState({ status: 'ready', content: { language, docs } });
+        if (!cancelled) {
+          setDocState({ status: 'ready', content: { language, docs } });
+          if (language === 'en') {
+            setEnglishFallback({ status: 'ready', docs });
+          }
+        }
       })
       .catch(error => {
         if (!cancelled) setDocState({ status: 'error', language, error, attempt });
@@ -230,48 +236,59 @@ const DocsPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [language, mainRetry.language, mainRetry.count]);
 
-  /* English fallback for partial locales: loaded only when the active page or
-   * an active search needs the English entries — never speculatively. English
-   * content is language-independent, so a load started by any trigger settles
-   * the shared state no matter which trigger remains active; the attempt key
-   * keeps a failed attempt from re-firing in a loop until the trigger changes
-   * or the user retries. */
-  const fallbackAttemptKey = useRef('');
+  const englishFallbackRef = useRef<EnglishFallbackState>(englishFallback);
   useEffect(() => {
-    if (loadedLanguage === null || loadedLanguage === 'en') return;
-    const pageNeedsFallback = !hasTranslation(activeSlug, loadedLanguage);
-    const searchNeedsFallback = searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
-    if (!pageNeedsFallback && !searchNeedsFallback) {
-      fallbackAttemptKey.current = '';
-      return;
-    }
-    if (englishFallback.status === 'ready' || englishFallback.status === 'loading') return;
-    const key = `${loadedLanguage}:${activeSlug}:${searchNeedsFallback}`;
-    const attempt = fallbackRetry.requestKey === key ? fallbackRetry.count : 0;
-    if (fallbackAttemptKey.current === `${key}:${attempt}`) return;
-    fallbackAttemptKey.current = `${key}:${attempt}`;
-    setEnglishFallback({ status: 'loading', requestKey: key });
+    englishFallbackRef.current = englishFallback;
+  }, [englishFallback]);
+
+  /* Whether anything currently needs the English entries: an untranslated
+   * active page, or an active search in a partial locale. This boolean — not
+   * the query text — is what drives the fallback subscription below. */
+  const pageNeedsFallback =
+    loadedLanguage !== null && loadedLanguage !== 'en' && !hasTranslation(activeSlug, loadedLanguage);
+  const searchNeedsEnglish =
+    loadedLanguage !== null && loadedLanguage !== 'en'
+    && searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
+  const fallbackDemanded = pageNeedsFallback || searchNeedsEnglish;
+
+  /* English fallback, loaded only when needed — never speculatively. The
+   * English bundle is one language-independent resource, so the subscription
+   * is keyed by a retry counter alone: editing the search query or navigating
+   * between pages neither re-keys nor cancels it, and a settled failure
+   * persists until the user retries. Dep changes still cancel the pending
+   * callbacks, so a response landing after English stopped being needed
+   * cannot overwrite the state a main 'en' load has seeded; re-firing
+   * reattaches through the loader's in-flight cache rather than issuing a
+   * second request. */
+  useEffect(() => {
+    if (!fallbackDemanded) return;
+    const currentFallback = englishFallbackRef.current;
+    if (currentFallback.status === 'ready') return;
+    if (currentFallback.status === 'error' && currentFallback.attempt >= fallbackRetry) return;
+    setEnglishFallback({ status: 'loading', attempt: fallbackRetry });
+    let cancelled = false;
     loadLanguageContent('en')
       .then(docs => {
-        setEnglishFallback({ status: 'ready', docs });
+        if (!cancelled) setEnglishFallback({ status: 'ready', docs });
       })
       .catch(error => {
-        setEnglishFallback({ status: 'error', requestKey: key, error, attempt });
+        if (!cancelled) setEnglishFallback({ status: 'error', error, attempt: fallbackRetry });
       });
-  }, [loadedLanguage, activeSlug, searchQuery, englishFallback.status, fallbackRetry.requestKey, fallbackRetry.count]);
+    return () => { cancelled = true; };
+  }, [fallbackDemanded, fallbackRetry]);
 
   /* ─── Effective states for the page body and the search modal ───
    * Both read the same content: the main language bundle, plus English while
-   * a partial locale needs it. "No results" is only shown once every piece of
-   * content the search depends on has actually arrived. */
-  const pageNeedsFallback =
-    loadedLanguage !== null && loadedLanguage !== 'en' && !hasTranslation(activeSlug, loadedLanguage);
-  const pageStatus: 'loading' | 'error' | 'ready' =
-    docState.status !== 'ready'
-      ? docState.status
-      : pageNeedsFallback && englishFallback.status !== 'ready'
-        ? (englishFallback.status === 'error' ? 'error' : 'loading')
-        : 'ready';
+   * a partial locale needs it. "No results" is only shown once every piece
+   * of content the search depends on has actually arrived. */
+  let pageStatus: 'loading' | 'error' | 'ready';
+  if (docState.status !== 'ready') {
+    pageStatus = docState.status;
+  } else if (pageNeedsFallback && englishFallback.status !== 'ready') {
+    pageStatus = englishFallback.status === 'error' ? 'error' : 'loading';
+  } else {
+    pageStatus = 'ready';
+  }
 
   const mainChunkError = docState.status === 'error' && isChunkLoadError(docState.error);
   const fallbackChunkError = englishFallback.status === 'error' && isChunkLoadError(englishFallback.error);
@@ -282,7 +299,7 @@ const DocsPage: React.FC = () => {
     if (docState.status === 'error') {
       setMainRetry({ language: docState.language, count: docState.attempt + 1 });
     } else if (pageNeedsFallback && englishFallback.status === 'error') {
-      setFallbackRetry({ requestKey: englishFallback.requestKey, count: englishFallback.attempt + 1 });
+      setFallbackRetry(englishFallback.attempt + 1);
     }
   }, [docState, pageNeedsFallback, englishFallback]);
 
@@ -290,23 +307,22 @@ const DocsPage: React.FC = () => {
     reloadAfterChunkError();
   }, []);
 
-  const searchNeedsEnglish =
-    loadedLanguage !== null && loadedLanguage !== 'en'
-    && searchQuery.trim() !== '' && isPartialLocale(loadedLanguage);
-  const searchContentStatus: 'loading' | 'error' | 'ready' =
-    docState.status === 'loading'
-      ? 'loading'
-      : docState.status === 'error'
-        ? 'error'
-        : searchNeedsEnglish && englishFallback.status !== 'ready'
-          ? (englishFallback.status === 'error' ? 'error' : 'loading')
-          : 'ready';
+  let searchContentStatus: 'loading' | 'error' | 'ready';
+  if (docState.status === 'loading') {
+    searchContentStatus = 'loading';
+  } else if (docState.status === 'error') {
+    searchContentStatus = 'error';
+  } else if (searchNeedsEnglish && englishFallback.status !== 'ready') {
+    searchContentStatus = englishFallback.status === 'error' ? 'error' : 'loading';
+  } else {
+    searchContentStatus = 'ready';
+  }
 
   const retrySearchContent = useCallback(() => {
     if (docState.status === 'error') {
       setMainRetry({ language: docState.language, count: docState.attempt + 1 });
     } else if (searchNeedsEnglish && englishFallback.status === 'error') {
-      setFallbackRetry({ requestKey: englishFallback.requestKey, count: englishFallback.attempt + 1 });
+      setFallbackRetry(englishFallback.attempt + 1);
     }
   }, [docState, searchNeedsEnglish, englishFallback]);
 
@@ -359,10 +375,10 @@ const DocsPage: React.FC = () => {
     setExpandedItems(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
-  const navigateToDoc = useCallback((slug: DocSlug) => {
-    navigate(`/docs/${slug}`);
-    // Scroll page to top
-    window.scrollTo(0, 0);
+  const navigateToDoc = useCallback((slug: DocSlug, fragment?: string) => {
+    navigate(`/docs/${slug}${fragment ? `#${fragment}` : ''}`);
+    // Scroll page to top when the destination has no requested heading.
+    if (!fragment) window.scrollTo(0, 0);
   }, [navigate]);
 
   /* Intercept clicks on internal doc links and convert to SPA navigation */
@@ -382,9 +398,11 @@ const DocsPage: React.FC = () => {
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
-    // Parse relative paths to extract slug
+    // Parse relative paths to extract slug and preserve any fragment.
     // Patterns: ../slug/, slug/, ../../slug/, ../slug/#anchor
-    const pathOnly = href.split('#')[0].replace(/\/+$/, ''); // remove trailing slash & anchor
+    const hashIndex = href.indexOf('#');
+    const pathOnly = (hashIndex === -1 ? href : href.slice(0, hashIndex)).replace(/\/+$/, '');
+    const rawFragment = hashIndex === -1 ? '' : href.slice(hashIndex + 1);
     const segments = pathOnly.split('/').filter(s => s !== '' && s !== '.' && s !== '..');
     const lastSegment = segments[segments.length - 1];
     if (!lastSegment) return;
@@ -394,14 +412,7 @@ const DocsPage: React.FC = () => {
     // Verify it's a valid doc slug
     if (validSlugs.has(slug)) {
       e.preventDefault();
-      navigateToDoc(slug);
-      // Handle anchor scroll after navigation with reliable retry
-      const anchor2raw = href.split('#')[1];
-      const anchor2 = anchor2raw ? decodeFragment(anchor2raw) : undefined;
-      if (anchor2) {
-        cancelPendingScroll.current?.();
-        cancelPendingScroll.current = scrollToFragmentWhenReady(anchor2);
-      }
+      navigateToDoc(slug, rawFragment || undefined);
     }
   }, [navigateToDoc]);
 

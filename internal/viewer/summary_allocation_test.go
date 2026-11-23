@@ -47,7 +47,7 @@ func BenchmarkListSessionsResponseRecords(b *testing.B) {
 			var data strings.Builder
 			data.WriteString("{\"type\":\"session_start\",\"timestamp\":\"2026-11-17T00:00:00Z\",\"cwd\":\"/repo\"}\n")
 			response := "{\"type\":\"llm_response\",\"filePath\":\"main.go\",\"content\":\"" + strings.Repeat("x", size.bytes) + "\"}\n"
-			for i := 0; i < 64; i++ {
+			for range 64 {
 				data.WriteString(response)
 			}
 			data.WriteString("{\"type\":\"review_item_done\",\"filePath\":\"main.go\",\"comments\":[{\"content\":\"finding\"}]}\n")

@@ -116,9 +116,8 @@ func stripMarkdownFences(s string) string {
 		}
 	}
 	s = strings.TrimSpace(s)
-	if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimSpace(s)
+	if before, ok := strings.CutSuffix(s, "```"); ok {
+		s = strings.TrimSpace(before)
 	}
 	return s
 }
@@ -393,9 +392,7 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 
 	// Registered before the goroutine starts so WaitBackground can never miss
 	// a job that was launched but has not run yet.
-	r.bg.Add(1)
-	go func() {
-		defer r.bg.Done()
+	r.bg.Go(func() {
 		defer cancel()
 		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, taskKey)
 
@@ -411,14 +408,14 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 			// pendingJob under the lock, so cancelled jobs fail the ownership
 			// check above and die silently). Abandon the job rather than
 			// applying a truncated/unmodified snapshot over live messages.
-			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
+			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", r.progressError(err))
 			st.pendingJob = nil
 			close(job.done)
 			return
 		}
 		job.rebuilt = rebuilt
 		close(job.done)
-	}()
+	})
 }
 
 // tryApplyPendingCompression checks whether a background compression has

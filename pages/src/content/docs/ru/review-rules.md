@@ -209,6 +209,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -321,7 +325,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.erb`                                      | `erb.md` — шаблоны ERB (SSTI / XSS / экранирование / пробелы и структура вывода). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                  |
 | `**/*.astro`                                    | `astro.md` — компоненты и islands Astro.                                                         |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                               |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                                               |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                      |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — файлы реализации, сигнатур и скриптов F#.                                          |
