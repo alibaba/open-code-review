@@ -24,22 +24,25 @@ internal fun configPathInvocation(
     windows: Boolean = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true),
 ): ConfigPathInvocation {
     require(bin.none { it == '"' || it == '\r' || it == '\n' }) { "Invalid OCR executable path" }
-    val names = if (windows && '.' !in bin) listOf("$bin.exe", "$bin.cmd", "$bin.bat", "$bin.com", bin) else listOf(bin)
-    val executable = if (File(bin).isAbsolute) bin else {
-        if ('/' in bin || '\\' in bin || ':' in bin) throw CliException("OCR executable path must be absolute")
-        env.entries.firstOrNull { it.key.equals("PATH", ignoreCase = windows) }?.value.orEmpty()
-            .split(if (windows) ';' else File.pathSeparatorChar)
-            .asSequence().map(::File).filter { it.isAbsolute }.flatMap { folder ->
-                names.asSequence().map { File(folder, it) }
-            }.firstOrNull { it.isFile && (windows || it.canExecute()) }?.absolutePath
-            ?: throw CliException("OCR executable not found on PATH")
-    }
+    val executable = resolveConfigPathExecutable(bin, env, windows)
     if (!windows) return ConfigPathInvocation(listOf(executable, "config", "path", "--json"), env)
     // Keep quotes in the environment value so strict JDK launchers see no embedded quotes in the command argument.
     return ConfigPathInvocation(
         listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"%OCR_CONFIG_PATH_COMMAND% config path --json\""),
         env.filterKeys { !it.equals("OCR_CONFIG_PATH_COMMAND", ignoreCase = true) } + ("OCR_CONFIG_PATH_COMMAND" to "\"$executable\""),
     )
+}
+
+private fun resolveConfigPathExecutable(bin: String, env: Map<String, String>, windows: Boolean): String {
+    if (File(bin).isAbsolute) return bin
+    val names = if (windows && '.' !in bin) listOf("$bin.exe", "$bin.cmd", "$bin.bat", "$bin.com", bin) else listOf(bin)
+    if ('/' in bin || '\\' in bin || ':' in bin) throw CliException("OCR executable path must be absolute")
+    return env.entries.firstOrNull { it.key.equals("PATH", ignoreCase = windows) }?.value.orEmpty()
+        .split(if (windows) ';' else File.pathSeparatorChar)
+        .asSequence().map(::File).filter { it.isAbsolute }.flatMap { folder ->
+            names.asSequence().map { File(folder, it) }
+        }.firstOrNull { it.isFile && (windows || it.canExecute()) }?.absolutePath
+        ?: throw CliException("OCR executable not found on PATH")
 }
 
 internal fun captureConfigPathQuery(

@@ -10,7 +10,9 @@ sidebar:
 - **命令行** —— `ocr config set <key> <value>`，适合脚本与 CI。
 - **手动编辑（不推荐）** —— 该 JSON 文件（下次 `ocr config set` 写入时会重新格式化）。
 
-## 存储目录
+<a id="storage-directory"></a>
+
+**存储目录**
 
 设置 `OCR_HOME`，可将配置、会话、原始 LLM 记录、全局规则和认证数据存储到其他目录。
 未设置或值为空时，使用 `~/.opencodereview`。已有文件不会自动迁移。

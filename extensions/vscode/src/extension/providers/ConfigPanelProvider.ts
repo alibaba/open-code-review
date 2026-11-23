@@ -129,9 +129,7 @@ export class ConfigPanelProvider implements vscode.Disposable {
         break;
       case 'checkCli':
       case 'checkEnvironment': {
-        const env = await this.cli.checkEnvironment(true);
-        this.post({ type: 'environmentResult', env });
-        if (env.configPath?.ok) this.notifyConfig(await this.config.read());
+        await this.refreshEnvironment(true, true);
         break;
       }
       case 'copyToClipboard':
@@ -141,14 +139,18 @@ export class ConfigPanelProvider implements vscode.Disposable {
       case 'installCli': {
         const ok = await this.cli.install((line) => this.post({ type: 'installLog', line }));
         this.post({ type: 'installDone', ok });
-        const env = await this.cli.checkEnvironment();
-        this.post({ type: 'environmentResult', env });
-        if (ok && env.configPath?.ok) this.notifyConfig(await this.config.read());
+        await this.refreshEnvironment(false, ok);
         break;
       }
       default:
         break;
     }
+  }
+
+  private async refreshEnvironment(force: boolean, reload: boolean): Promise<void> {
+    const env = await this.cli.checkEnvironment(force);
+    this.post({ type: 'environmentResult', env });
+    if (reload && env.configPath?.ok) this.notifyConfig(await this.config.read());
   }
 
   private html(webview: vscode.Webview): string {

@@ -103,9 +103,7 @@ class ConfigPanelRouter(
 
             // checkCli and checkEnvironment share a branch: both force a fresh probe.
             WebviewToHost.CheckCli, WebviewToHost.CheckEnvironment -> {
-                val env = cli.checkEnvironment(force = true)
-                post(ConfigPanelHostToWebview.EnvironmentResult(env))
-                if (env.configPath?.ok == true) notifyConfig(config.read())
+                refreshEnvironment(force = true, reload = true)
             }
 
             is WebviewToHost.CopyToClipboard -> {
@@ -123,9 +121,7 @@ class ConfigPanelRouter(
                 post(ConfigPanelHostToWebview.InstallDone(ok))
                 // A successful install clears the environment cache, so this re-probes even without
                 // force.
-                val env = cli.checkEnvironment()
-                post(ConfigPanelHostToWebview.EnvironmentResult(env))
-                if (ok && env.configPath?.ok == true) notifyConfig(config.read())
+                refreshEnvironment(force = false, reload = ok)
             }
 
             is WebviewToHost.Malformed -> post(ConfigPanelHostToWebview.PanelError(msg.reason))
@@ -156,6 +152,12 @@ class ConfigPanelRouter(
                 locale = locale(),
             ),
         )
+    }
+
+    private fun refreshEnvironment(force: Boolean, reload: Boolean) {
+        val env = cli.checkEnvironment(force)
+        post(ConfigPanelHostToWebview.EnvironmentResult(env))
+        if (reload && env.configPath?.ok == true) notifyConfig(config.read())
     }
 
     private fun notifyConfig(updated: OcrConfig?) {

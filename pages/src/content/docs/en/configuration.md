@@ -11,7 +11,9 @@ to edit it:
 - **Command line** — `ocr config set <key> <value>`, ideal for scripts and CI.
 - **Manual edit (not recommended)** — the JSON file directly (it gets reformatted on the next `ocr config set` write).
 
-## Storage directory
+<a id="storage-directory"></a>
+
+**Storage directory**
 
 Set `OCR_HOME` to store configuration, sessions, raw captures, global rules,
 and authentication data in another directory. An unset or empty value uses

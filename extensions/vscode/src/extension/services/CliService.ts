@@ -101,9 +101,8 @@ export class CliService {
     const ocr = node.ok && npm.ok
       ? await this.probeCommand(this.cliPath)
       : { ok: false };
-    const env = { node, npm, ocr };
     const configPath = ocr.ok ? await this.configPath().then(() => ({ ok: true }), configPathFailure) : undefined;
-    const checked = { ...env, configPath };
+    const checked = { node, npm, ocr, configPath };
     this.envCache = { env: checked, at: Date.now() };
     return checked;
   }

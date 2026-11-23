@@ -28,12 +28,9 @@ class ConfigService(
     private val cwd: File = File(System.getProperty("user.dir")),
 ) {
 
-    private fun configPath(): File =
-        cli.configPath(cwd)
-
     /** Reads the file and converts it to the plugin's internal camelCase config; returns null when the file is missing or invalid. */
     fun read(): OcrConfig? {
-        val path = configPath()
+        val path = cli.configPath(cwd)
         if (!path.isFile) return null
         return runCatching { parseConfig(path.readText()) }.getOrElse {
             thisLogger().warn("[ocr] Failed to parse config, treating as no config: ${path.absolutePath}", it)
@@ -43,7 +40,7 @@ class ConfigService(
 
     /** Reads the raw snake_case JSON, preserving all unknown fields. Parse failures are logged (same as [read]) and an empty config is returned. */
     private fun readRaw(): RawConfig {
-        val path = configPath()
+        val path = cli.configPath(cwd)
         if (!path.isFile) return emptyRawConfig()
         return runCatching { parseRawConfig(path.readText()) }.getOrElse {
             // Logged to ease troubleshooting; an empty config is returned, and downstream writeRaw/deleteCustomProvider bail
@@ -59,7 +56,7 @@ class ConfigService(
      *  writers (delete provider vs the setMany rollback). */
     @Synchronized
     private fun writeRaw(raw: RawConfig): OcrConfig? {
-        val path = configPath()
+        val path = cli.configPath(cwd)
         if (!raw.hasContent()) {
             if (path.exists() && !path.delete()) {
                 thisLogger().warn("[ocr] Failed to delete empty config file: ${path.absolutePath}")
@@ -184,7 +181,7 @@ class ConfigService(
     /** Writes a single config entry and returns the config after the write. [CliService.runRaw] throws [CliException] when the CLI exits non-zero. */
     @Synchronized
     fun set(key: String, value: String): OcrConfig? {
-        configPath()
+        cli.configPath(cwd)
         cli.runRaw(toConfigSetArgs(key, value), cwd, {})
         return read()
     }

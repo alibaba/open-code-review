@@ -13,12 +13,8 @@ import { parseConfig, toConfigSetArgs } from './configParse';
 export class ConfigService {
   constructor(private cli: CliService) {}
 
-  private configPath(): Promise<string> {
-    return this.cli.configPath();
-  }
-
   async read(): Promise<OcrConfig | null> {
-    const p = await this.configPath();
+    const p = await this.cli.configPath();
     try {
       if (!existsSync(p)) return null;
       return parseConfig(readFileSync(p, 'utf8'));
@@ -28,7 +24,7 @@ export class ConfigService {
   }
 
   private async readRaw(): Promise<RawConfig> {
-    const p = await this.configPath();
+    const p = await this.cli.configPath();
     if (!existsSync(p)) return {};
     try {
       return JSON.parse(readFileSync(p, 'utf8')) as RawConfig;
@@ -38,7 +34,7 @@ export class ConfigService {
   }
 
   private async writeRaw(raw: RawConfig): Promise<OcrConfig | null> {
-    const p = await this.configPath();
+    const p = await this.cli.configPath();
     const hasContent = Boolean(
       raw.provider
       || raw.model
@@ -86,13 +82,13 @@ export class ConfigService {
   }
 
   async set(key: string, value: string): Promise<OcrConfig | null> {
-    await this.configPath();
+    await this.cli.configPath();
     await this.cli.runRaw(toConfigSetArgs(key, value), process.cwd(), () => {});
     return this.read();
   }
 
   async setMany(entries: { key: string; value: string }[]): Promise<OcrConfig | null> {
-    await this.configPath();
+    await this.cli.configPath();
     for (const entry of entries) {
       await this.cli.runRaw(toConfigSetArgs(entry.key, entry.value), process.cwd(), () => {});
     }

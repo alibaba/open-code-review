@@ -10,7 +10,9 @@ sidebar:
 - **커맨드라인** — `ocr config set <key> <value>`. 스크립트와 CI에 적합합니다.
 - **직접 편집(권장하지 않음)** — JSON 파일을 직접 수정합니다(다음 `ocr config set` 기록 때 다시 포맷됩니다).
 
-## 저장 디렉터리 {#storage-directory}
+<a id="storage-directory"></a>
+
+**저장 디렉터리**
 
 `OCR_HOME`을 설정하면 구성, 세션, 원본 LLM 기록, 전역 규칙 및 인증 데이터를 다른 디렉터리에 저장할 수 있습니다.
 설정하지 않았거나 값이 비어 있으면 `~/.opencodereview`를 사용합니다. 기존 파일은 자동으로 이동하지 않습니다.
