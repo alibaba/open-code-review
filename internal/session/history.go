@@ -9,6 +9,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -131,13 +132,15 @@ type ToolResultRecord struct {
 
 // SessionOptions holds optional metadata for a new session.
 type SessionOptions struct {
-	ReviewMode  string
-	DiffFrom    string
-	DiffTo      string
-	DiffCommit  string
-	ScanPaths   []string
-	ResumedFrom string
-	LLMSource   string
+	AnalysisEnabled bool
+	tracePath       string
+	ReviewMode      string
+	DiffFrom        string
+	DiffTo          string
+	DiffCommit      string
+	ScanPaths       []string
+	ResumedFrom     string
+	LLMSource       string
 
 	// Operation opts this session into a run manifest. When non-empty (e.g.
 	// "review") New creates a ManifestBuilder with this operation and the session
@@ -156,7 +159,18 @@ type ResumeInfo struct {
 
 // New creates a new SessionHistory with the given repo directory.
 func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
-	sessionID := generateUUID()
+	return newHistory(generateUUID(), repoDir, gitBranch, model, opts)
+}
+
+func NewAnalysisTrace(reportID, directory, repoDir, model string, opts SessionOptions) *SessionHistory {
+	if reportID == "" {
+		reportID = generateUUID()
+	}
+	opts.tracePath = filepath.Join(directory, "trace.jsonl")
+	return newHistory(reportID, repoDir, "", model, opts)
+}
+
+func newHistory(sessionID, repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
 	sh := &SessionHistory{
 		SessionID:    sessionID,
 		RepoDir:      repoDir,

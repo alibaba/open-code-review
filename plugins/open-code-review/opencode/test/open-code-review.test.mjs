@@ -358,6 +358,24 @@ test("ocr_review reports non-zero exits with OCR output", async () => {
   )
 })
 
+test("ocr_review preserves output from the Windows command shim", { skip: process.platform !== "win32" }, async () => {
+  await withFakeOcr(
+    "console.error('windows shim output'); process.exit(7)",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await assert.rejects(
+        hooks.tool.ocr_review.execute({}, toolContext(worktree)),
+        (error) => {
+          assert.equal(error.name, "OcrExecutionError")
+          assert.equal(error.exitCode, 7)
+          assert.match(error.message, /windows shim output/)
+          return true
+        },
+      )
+    },
+  )
+})
+
 test("ocr_review removes its temporary background after a non-zero exit", async () => {
   await withFakeOcr(
     [
@@ -790,7 +808,9 @@ test("v2 falls back to the plugin location when session lookup fails", async () 
       await module.default.setup(ctx)
       const review = tools.find((definition) => definition.name === "ocr_review")
       const output = await review.execute({ preview: true }, v2ToolContext())
-      assert.match(output.content, new RegExp(`--repo\n${worktree}\n--preview`))
+      // A Windows worktree path contains backslashes, which are regex escapes.
+      const escapedWorktree = worktree.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      assert.match(output.content, new RegExp(`--repo\n${escapedWorktree}\n--preview`))
     },
   )
 })

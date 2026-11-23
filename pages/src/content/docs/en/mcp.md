@@ -9,6 +9,15 @@ one or more external MCP servers, and the tools those servers expose
 become available to the review agent — right alongside the
 [built-in tools](../tools/) like `file_read` and `code_search`.
 
+MCP extends the dedicated agent with external business context; it cannot
+override built-in tool names or definitions. It is currently connected in
+`ocr review`, not `ocr scan`. Benchmark results apply to the tested agent
+configuration, not to arbitrary MCP server combinations.
+
+Prefer read-only context tools and a minimal `tools` allowlist. OCR does not
+enforce read-only behavior on MCP tools; review each server's permissions and
+data access before enabling it.
+
 ## When to use it
 
 Reach for an MCP server when the reviewer would benefit from context that

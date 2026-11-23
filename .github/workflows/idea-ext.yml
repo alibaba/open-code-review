@@ -5,14 +5,15 @@ name: IDEA Extension
 # toolchain; the webview bundle itself is covered by frontend-ext.yml.
 # The full IntelliJ Plugin Verifier (verifyPlugin) downloads IDE builds and
 # runs for minutes, so it stays a release-grade check and out of the PR path.
-# Scoped with paths: so it only runs when the plugin or this workflow itself
-# changes.
+# Also runs for shared frontend changes, which the host/frontend consistency
+# tests read directly.
 
 on:
   pull_request:
     branches: [main]
     paths:
       - 'extensions/idea/**'
+      - 'extensions/frontend/**'
       - '.github/workflows/idea-ext.yml'
 
 permissions:

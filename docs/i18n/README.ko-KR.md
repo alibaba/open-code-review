@@ -22,7 +22,7 @@
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
-  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://img.shields.io/badge/Ask-DeepWiki-blue?style=flat-square" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
@@ -35,7 +35,7 @@
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | 한국어 | <a href="README.ru-RU.md">Русский</a>
+  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | 한국어 | <a href="README.ru-RU.md">Русский</a> | <a href="README.tr-TR.md">Türkçe</a>
 </p>
 
 ---
@@ -102,9 +102,41 @@ agent의 강점은 동적 판단과 동적 context 검색이 중요한 지점에
 
 ## 사용 방법
 
+<a id="supported-platforms"></a>
+
 ### 사전 요구 사항
 
+- **운영 체제:** Windows, macOS 또는 Linux.
 - **Git >= 2.41** — Open Code Review는 diff 생성, 코드 검색, 저장소 작업에 Git을 사용합니다.
+
+<a id="supported-agents"></a>
+
+### Agent Skills
+
+Claude Code, Codex, Cursor, Kimi Code 등 Agent Skills를 지원하고 로컬 명령을 실행할 수 있는 에이전트에서 사용할 수 있습니다. 두 모드 모두 **Git >= 2.41**과 **`ocr` CLI**가 필요하며, OCR 모델 공급자 설정은 네이티브 모드에만 필요합니다.
+
+#### 1. 스킬 설치
+
+리뷰할 프로젝트에서 실행한 다음 설치 프로그램에서 필요한 스킬과 에이전트를 선택하세요.
+
+```bash
+npx skills add alibaba/open-code-review
+```
+
+`ocr`가 없으면 스킬이 환경 권한에 따라 에이전트의 설치를 안내합니다. `npm install -g @alibaba-group/open-code-review`로 미리 설치할 수도 있습니다. 플러그인이나 수동 설치는 [에이전트별 설정 가이드](../../plugins/open-code-review/README.md)를 참고하거나, [`skills/`](../../skills/)에서 필요한 폴더를 에이전트의 스킬 디렉터리에 복사하세요.
+
+#### 2. 리뷰 모드 선택
+
+| | 네이티브 모드 | 위임 모드 |
+|---|---|---|
+| 스킬 | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
+| 리뷰 수행 주체 | OCR 전용 리뷰 에이전트와 파이프라인 | OCR의 리뷰 파이프라인과 가드레일을 따르는 현재 코딩 에이전트 |
+| 모델 및 인증 | OCR 자체 공급자 설정 | 호스트 에이전트의 기존 모델과 인증 |
+| 권장 상황 | OCR용 모델 엔드포인트가 있고 전체 리뷰 파이프라인을 사용하려는 경우 | 별도 API 키가 없거나 기존 에이전트 구독과 설정을 활용하려는 경우 |
+
+**별도 키가 없다면 위임 모드로 시작하세요.** OCR 공급자 설정만 생략하며, 호스트 에이전트의 인증, 사용량 제한, 비용은 그대로 적용됩니다. 에이전트 구독이 네이티브 모드의 API 인증 정보가 되는 것은 아닙니다. 위임 모드에서는 OCR의 CLI와 스킬이 함께 리뷰 파이프라인과 가드레일을 제공합니다. 여기에는 파일 선택, 규칙 해석, 커버리지 요구 사항, 구조화된 보고가 포함됩니다. 호스트 에이전트가 이 흐름에 따라 분석, 위치 지정, 보고를 수행하며 OCR의 전체 네이티브 파이프라인을 실행하지는 않습니다.
+
+네이티브 모드는 `ocr config provider`와 `ocr config model`로 한 번 설정합니다. 인증 요건은 공급자에 따라 다릅니다. [설정 안내](https://open-codereview.ai/docs/configuration)를 참고하세요.
 
 ### CLI
 
@@ -124,12 +156,15 @@ npm install -g @alibaba-group/open-code-review
 
 코드 리뷰 전에 LLM 설정이 필요합니다. [위임 모드](https://open-codereview.ai/docs/delegate)를 사용하는 경우에는 불필요합니다.
 
+- **OCR이 모델을 호출하는 경우:** `ocr review`, `/open-code-review:review` 명령, `open-code-review` 스킬은 Claude Code Team/Pro 구독 로그인이 아닌 OCR 자체의 공급자 설정을 사용합니다. 인증 요구 사항은 공급자에 따라 다릅니다. [설정 안내](https://open-codereview.ai/docs/configuration)를 참고하세요.
+- **호스트 에이전트가 모델을 호출하는 경우:** `/open-code-review:delegate-review` 명령과 `open-code-review-delegate` 스킬은 호스트 에이전트에 설정된 모델과 인증 방식을 사용합니다. OCR에 LLM이나 인증 정보를 별도로 설정할 필요는 없습니다. [Claude Code 설치 방법](../../plugins/open-code-review/README.md#claude-code)을 참고하세요.
+
 ```bash
 ocr config provider          # built-in provider 선택 또는 custom provider 추가
 ocr config model             # 활성 provider의 model 선택
 ```
 
-![Provider setup](../../imgs/providers.jpg)
+![Model providers](../../imgs/providers-ko.jpg)
 
 대화형 UI가 provider 선택, API key 입력, model 설정을 안내하며, 완료 후 자동으로 연결 테스트를 수행합니다.
 
@@ -142,6 +177,9 @@ cd your-project
 
 # Workspace mode: staged, unstaged, untracked 변경을 모두 리뷰
 ocr review
+
+# 현재 브랜치 — main에서 분기된 이후의 변경 사항을 리뷰합니다 (--to의 기본값은 HEAD)
+ocr review --from main
 
 # 브랜치 범위 — main에서 분기된 이후 feature-branch의 변경 사항을 리뷰합니다 (머지베이스 모드)
 ocr review --from main --to feature-branch

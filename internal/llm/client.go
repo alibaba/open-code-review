@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -324,10 +325,22 @@ type ResponseMessage struct {
 
 // ChatResponse is the parsed result of a completion request.
 type ChatResponse struct {
-	ID      string     `json:"-"`
-	Model   string     `json:"-"`
-	Choices []Choice   `json:"-"`
-	Usage   *UsageInfo `json:"-"` // Token usage extracted from API response
+	ID            string          `json:"-"`
+	Model         string          `json:"-"`
+	Choices       []Choice        `json:"-"`
+	Usage         *UsageInfo      `json:"-"` // Token usage extracted from API response
+	RawUsage      json.RawMessage `json:"-"`
+	rawOutputText string
+}
+
+func (r *ChatResponse) RawOutputText() string {
+	if r.rawOutputText != "" {
+		return r.rawOutputText
+	}
+	if len(r.Choices) == 0 || r.Choices[0].Message.Content == nil {
+		return ""
+	}
+	return *r.Choices[0].Message.Content
 }
 
 // Content extracts the text content from the first choice, falling back to reasoning content.
@@ -397,14 +410,18 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL          string            // Full API endpoint URL
-	APIKey       string            // Bearer token / API key
-	Model        string            // Default model override
-	AuthHeader   string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
-	Timeout      time.Duration     // Request timeout
-	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
-	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
-	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	URL                   string            // Full API endpoint URL
+	APIKey                string            // Bearer token / API key
+	Model                 string            // Default model override
+	AuthHeader            string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
+	Timeout               time.Duration     // Request timeout
+	ExtraBody             map[string]any    // Vendor-specific fields merged into every request body
+	ExtraHeaders          map[string]string // Extra HTTP headers sent with every request
+	RetryCodes            []int             // Additional HTTP status codes that trigger retry
+	RequiresStreaming     bool
+	RejectsSamplingParams bool
+	ChatGPTPlan           bool
+	ChatGPTAccount        string
 	// SessionKey is the fallback prompt-cache affinity key
 	// for requests whose context carries none (see ContextWithSessionKey).
 	//
@@ -480,18 +497,22 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // parameters rather than fields on ResolvedEndpoint.
 func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder) LLMClient {
 	cfg := ClientConfig{
-		URL:            ep.URL,
-		APIKey:         ep.Token,
-		Model:          ep.Model,
-		AuthHeader:     ep.AuthHeader,
-		Timeout:        ep.Timeout,
-		ExtraBody:      ep.ExtraBody,
-		ExtraHeaders:   ep.ExtraHeaders,
-		RetryCodes:     ep.RetryCodes,
-		retryCollector: collector,
-		rawHolder:      raw,
-		AWSProfile:     ep.AWSProfile,
-		AWSRegion:      ep.AWSRegion,
+		URL:                   ep.URL,
+		APIKey:                ep.Token,
+		Model:                 ep.Model,
+		AuthHeader:            ep.AuthHeader,
+		Timeout:               ep.Timeout,
+		ExtraBody:             ep.ExtraBody,
+		ExtraHeaders:          ep.ExtraHeaders,
+		RetryCodes:            ep.RetryCodes,
+		RequiresStreaming:     ep.RequiresStreaming,
+		RejectsSamplingParams: ep.RejectsSamplingParams,
+		ChatGPTPlan:           ep.ChatGPTPlan,
+		ChatGPTAccount:        ep.ChatGPTAccount,
+		retryCollector:        collector,
+		rawHolder:             raw,
+		AWSProfile:            ep.AWSProfile,
+		AWSRegion:             ep.AWSRegion,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -649,6 +670,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
+		err = describeTimeout(ctx, err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 
@@ -669,15 +691,18 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// Skip the "stream" key here. The streaming decision below uses a
-		// dedicated boolean check, and when streaming is enabled the SDK's
-		// NewStreaming method sets stream=true on the wire itself. When
-		// streaming is NOT enabled, leaving the key in the body would make
-		// the API answer with text/event-stream and the non-streaming path
-		// fails to decode (see issue #647). "stream_options" is owned by the
-		// streaming branch below for the same reason: providers reject it
-		// unless stream is true.
-		if k == "stream" || k == "stream_options" {
+		// Only boolean true enables the streaming branch below; NewStreaming
+		// sets stream=true itself. Drop non-boolean values so they cannot
+		// request SSE while the non-streaming SDK expects JSON. Forward
+		// explicit false so gateways that default to streaming return JSON.
+		// stream_options belongs to the streaming branch because providers
+		// reject it unless stream is true.
+		if k == "stream" {
+			stream, isBool := v.(bool)
+			if !isBool || stream {
+				continue
+			}
+		} else if k == "stream_options" {
 			continue
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
@@ -697,9 +722,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			if object, ok := streamOptions.(map[string]any); ok {
 				if _, has := object["include_usage"]; !has {
 					merged := make(map[string]any, len(object)+1)
-					for key, value := range object {
-						merged[key] = value
-					}
+					maps.Copy(merged, object)
 					merged["include_usage"] = true
 					streamOptions = merged
 				}
@@ -920,12 +943,12 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 		tools = append(tools, openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
 			Name:        t.Function.Name,
 			Description: openai.String(t.Function.Description),
-			Parameters:  shared.FunctionParameters(t.Function.Parameters),
+			Parameters:  t.Function.Parameters,
 		}))
 	}
 
 	params := openai.ChatCompletionNewParams{
-		Model:    shared.ChatModel(model),
+		Model:    model,
 		Messages: messages,
 	}
 
@@ -949,6 +972,22 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 
 // maxErrorBodyBytes bounds the provider payload quoted in an error message.
 const maxErrorBodyBytes = 64 << 10
+
+func ProviderHTTPStatus(err error) int {
+	var openAI *openai.Error
+	if errors.As(err, &openAI) {
+		return openAI.StatusCode
+	}
+	var anthropicErr *anthropic.Error
+	if errors.As(err, &anthropicErr) {
+		return anthropicErr.StatusCode
+	}
+	var httpErr interface{ HTTPStatusCode() int }
+	if errors.As(err, &httpErr) {
+		return httpErr.HTTPStatusCode()
+	}
+	return 0
+}
 
 // withProviderErrorBody appends the provider's response body to an API error the
 // SDK left without one. It extracts the payload with the gjson path "error",
@@ -1455,6 +1494,7 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
+		err = describeTimeout(ctx, err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 
@@ -1482,12 +1522,14 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		opts = append(opts, option.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// This client is non-streaming: it calls Messages.New, which expects a
-		// single JSON body. If a provider config sets extra_body.stream=true,
-		// forwarding it here makes the API answer with SSE and every call fails
-		// to decode. Drop the key rather than forward it.
+		// Messages.New expects a single JSON body, not SSE. Drop true and
+		// non-boolean stream values to preserve that contract, but forward
+		// explicit false so gateways that default to streaming return JSON.
 		if k == "stream" {
-			continue
+			stream, isBool := v.(bool)
+			if !isBool || stream {
+				continue
+			}
 		}
 		// Drop thinking when it conflicts with this request's constraints:
 		// forced tool_choice or budget_tokens >= max_tokens.
@@ -1618,7 +1660,7 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	}
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(model),
+		Model:     model,
 		MaxTokens: maxTokens,
 		Messages:  messages,
 	}
@@ -1765,7 +1807,7 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 
 	return &ChatResponse{
 		ID:    sdkResp.ID,
-		Model: string(sdkResp.Model),
+		Model: sdkResp.Model,
 		Choices: []Choice{{
 			Message: ResponseMessage{
 				Role:             "assistant",

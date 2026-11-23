@@ -6,6 +6,7 @@ package diff
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -14,15 +15,14 @@ func TestExcludedDirs(t *testing.T) {
 	if len(dirs) == 0 {
 		t.Fatal("ExcludedDirs should return non-empty list")
 	}
-	found := false
-	for _, d := range dirs {
-		if d == ".git/" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(dirs, ".git/") {
 		t.Error("ExcludedDirs should include .git/")
+	}
+
+	for _, d := range dirs {
+		if d == "pkgs/" {
+			t.Error("ExcludedDirs must not include pkgs/")
+		}
 	}
 
 	dirs2 := ExcludedDirs()
@@ -42,6 +42,8 @@ func TestProviderDirPrefix(t *testing.T) {
 		{"target/.pnpm/pkg/index.js", "target/"},
 		{"src/vendor/keep.go", ""},
 		{"main.go", ""},
+		{"pkgs/foo/default.nix", ""},
+		{"pkgs", ""},
 	}
 	for _, tc := range tests {
 		if got := ProviderDirPrefix(tc.path); got != tc.want {
@@ -76,6 +78,33 @@ func TestLoadGitignorePatterns(t *testing.T) {
 			t.Errorf("expected nil for missing .gitignore, got %v", patterns)
 		}
 	})
+}
+
+func TestLoadGitignoreAtRef(t *testing.T) {
+	repo := initBareRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("*.log\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repo, "commit", "--allow-empty", "-qm", "No ignore file")
+	runGitTest(t, repo, "add", ".gitignore")
+	runGitTest(t, repo, "commit", "-qm", "Regular ignore file")
+	blob := gitOut(t, repo, "rev-parse", "HEAD:.gitignore")
+	runGitTest(t, repo, "update-index", "--cacheinfo", "120000,"+blob+",.gitignore")
+	runGitTest(t, repo, "commit", "-qm", "Symlink instead of rules")
+	t.Setenv("GIT_GLOB_PATHSPECS", "1")
+	patterns, err := LoadGitignoreAtRef(t.Context(), repo, "HEAD~1", nil)
+	if err != nil || !patterns.Matches("test.log") {
+		t.Fatalf("regular .gitignore: patterns=%q err=%v", patterns, err)
+	}
+	for _, ref := range []string{"HEAD~2", "HEAD"} {
+		patterns, err := LoadGitignoreAtRef(t.Context(), repo, ref, nil)
+		if err != nil || len(patterns) != 0 {
+			t.Fatalf("%s: patterns=%q err=%v", ref, patterns, err)
+		}
+	}
+	if _, err := LoadGitignoreAtRef(t.Context(), repo, "absent-revision", nil); err == nil {
+		t.Fatal("missing revision treated as absent .gitignore")
+	}
 }
 
 func TestIsPathExcluded(t *testing.T) {

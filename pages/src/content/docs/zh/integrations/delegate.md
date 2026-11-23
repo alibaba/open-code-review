@@ -53,7 +53,7 @@ cp -R /path/to/open-code-review/skills/open-code-review-delegate ~/.claude/skill
 ### 第 1 步：Preview — 确定审查范围
 
 ```bash
-ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <patterns>]
 ```
 
 输出内容：
@@ -69,35 +69,54 @@ ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <pat
 |------|------|
 | 工作区变更 | `ocr delegate preview` |
 | 分支对比 | `ocr delegate preview --from main --to feature` |
+| 当前分支相对 main | `ocr delegate preview --from main` |
 | 单次提交 | `ocr delegate preview -c abc123` |
 
 ### 第 2 步：获取文件规则
 
 ```bash
-ocr delegate rule <path1> <path2> ...
+ocr delegate rule [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> ...
 ```
 
 传入第 1 步中的可审查文件路径。输出按规则内容分组 — 共享相同规则的文件归为一组，避免重复。
 
 ### 第 3 步：获取 diff
 
-根据第 1 步的 mode/ref 信息，使用 git 直接获取：
+根据第 1 步的模式和引用信息选择 diff 命令。审查中的所有 Git 调用均使用 `git --no-pager`。
+
+以下 diff 命令关闭外部 diff 程序、文本转换和颜色输出，以获取纯文本补丁。
 
 **Range 模式**（有 merge\_base）：
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit 模式**：
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace 模式**：
 ```bash
-git diff HEAD -- <path>        # 已跟踪文件
-cat <path>                     # 新的未跟踪文件
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 已跟踪文件
+cat "<path>"                     # 新的未跟踪文件
 ```
+
+查询上下文：
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+较大的 diff 可在对应模式的命令中添加 `--output="<absolute-diff-file>"`。选择仓库外的唯一绝对路径，并先创建父目录。后续文件读取工具使用同一路径：
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+Git 以退出码 0 结束后，分块读取并审查整个文件，再删除临时文件。命令失败或超时时，重试或标为 `skipped` 并记录错误。输出意外为空时，重新运行 preview 并核对。
 
 ### 第 4 步：审查每个文件
 
@@ -106,6 +125,8 @@ cat <path>                     # 新的未跟踪文件
 1. 获取其 diff（第 3 步）
 2. 参照匹配的规则组（第 2 步）作为审查清单
 3. 进行深入审查，按需探索上下文
+
+将每个 preview 中的 `(path, status)` 标为 `reviewed` 或 `skipped`，为跳过的条目说明原因。报告中包含 `total_files`、`reviewed_files`、`skipped_files` 和 `coverage_rate`。
 
 ### 第 5 步：报告
 
@@ -124,10 +145,12 @@ cat <path>                     # 新的未跟踪文件
 
 ## 通用标志
 
+两个子命令都支持将 `--from main` 作为 `--from main --to HEAD` 的简写。范围审查比较 `merge-base(from, to)..to`，不包含暂存、未暂存和未跟踪改动；省略范围及提交标志则使用工作区模式。向 `preview` 和 `rule` 传入相同的范围或提交标志，以使用相同目标。范围标志与提交标志互斥。
+
 | 标志 | 描述 |
 |------|------|
 | `--from <ref>` | Range 模式的源引用 |
-| `--to <ref>` | Range 模式的目标引用 |
+| `--to <ref>` | Range 模式的目标引用；指定 `--from` 时默认取 `HEAD` |
 | `-c, --commit <hash>` | 单次提交模式 |
 | `--repo <path>` | 仓库根目录（默认：cwd） |
 | `--rule <path>` | 自定义 rule.json 路径 |

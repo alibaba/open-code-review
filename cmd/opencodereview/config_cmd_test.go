@@ -220,6 +220,118 @@ func TestSetConfigValueProviderEntryNonPresetWritesCustomProvider(t *testing.T) 
 	}
 }
 
+func TestSetConfigValueDottedProviderName(t *testing.T) {
+	fields := []struct {
+		field string
+		value string
+	}{
+		{"url", "https://example.invalid/v1"},
+		{"protocol", llm.ProtocolAnthropicBedrock},
+		{"model", "some-model"},
+		{"api_key", "test-key"},
+		{"api_key_cmd", "secret-tool lookup service x"},
+		{"models", `["some-model","other-model"]`},
+		{"auth_header", "authorization"},
+		{"timeout_sec", "120"},
+		{"extra_body", `{"temperature":0.2}`},
+		{"extra_headers", "X-Gateway=test"},
+		{"retry_codes", "400,403"},
+		{"aws_region", "us-west-2"},
+		{"aws_profile", "test-profile"},
+	}
+	want := ProviderEntry{
+		URL:          "https://example.invalid/v1",
+		Protocol:     llm.ProtocolAnthropicBedrock,
+		Model:        "some-model",
+		APIKey:       "test-key",
+		APIKeyCmd:    "secret-tool lookup service x",
+		Models:       []string{"some-model", "other-model"},
+		AuthHeader:   "authorization",
+		TimeoutSec:   120,
+		ExtraBody:    map[string]any{"temperature": 0.2},
+		ExtraHeaders: map[string]string{"X-Gateway": "test"},
+		RetryCodes:   []int{400, 403},
+		AWSRegion:    "us-west-2",
+		AWSProfile:   "test-profile",
+	}
+	for _, prefix := range []string{"providers", "custom_providers"} {
+		for _, name := range []string{"mimo-v2.6-flash", "openai.gateway.v2", "foo.api_key"} {
+			t.Run(prefix+"."+name, func(t *testing.T) {
+				cfg := &Config{}
+				if err := setConfigValue(cfg, "provider", name); err != nil {
+					t.Fatal(err)
+				}
+				for _, tt := range fields {
+					key := prefix + "." + name + "." + tt.field
+					if err := setConfigValue(cfg, key, tt.value); err != nil {
+						t.Fatalf("setConfigValue(%q): %v", key, err)
+					}
+				}
+				if !reflect.DeepEqual(cfg.CustomProviders, map[string]ProviderEntry{name: want}) {
+					t.Errorf("CustomProviders = %#v, want only %q with %#v", cfg.CustomProviders, name, want)
+				}
+				if len(cfg.Providers) != 0 || cfg.Provider != name {
+					t.Errorf("Providers = %#v, Provider = %q", cfg.Providers, cfg.Provider)
+				}
+			})
+		}
+	}
+}
+
+func TestSetConfigValueRejectsInvalidProviderNames(t *testing.T) {
+	for _, name := range []string{" ", ".a", "a.", "a..b", "a. .b", "anthropic."} {
+		for _, key := range []string{"provider", "providers." + name + ".url", "custom_providers." + name + ".url"} {
+			t.Run(key+"/"+name, func(t *testing.T) {
+				cfg := &Config{Provider: "openai", Model: "saved-model", CustomProviders: map[string]ProviderEntry{name: {}}}
+				before, err := json.Marshal(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				value := "https://example.invalid/v1"
+				if key == "provider" {
+					value = name
+				}
+				if err := setConfigValue(cfg, key, value); err == nil || !strings.Contains(err.Error(), "invalid provider name") {
+					t.Fatalf("setConfigValue(%q, %q) = %v, want invalid provider name", key, value, err)
+				}
+				after, err := json.Marshal(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(after) != string(before) {
+					t.Fatalf("configuration changed after rejected write: %s", after)
+				}
+			})
+		}
+	}
+}
+
+func TestSetConfigValueDottedProviderRequiresExistingEntry(t *testing.T) {
+	for _, prefix := range []string{"providers", "custom_providers"} {
+		for _, name := range []string{"mimo-v2.6-flash", "foo.api_key", "openai.extra_body"} {
+			key := prefix + "." + name + ".model"
+			t.Run(key, func(t *testing.T) {
+				cfg := &Config{Provider: "openai", Model: "saved-model"}
+				want := *cfg
+				err := setConfigValue(cfg, key, "some-model")
+				if err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "ocr config set provider "+name) {
+					t.Fatalf("setConfigValue(%q) = %v, want explicit creation guidance", key, err)
+				}
+				if !reflect.DeepEqual(*cfg, want) {
+					t.Fatalf("configuration changed after rejected write: %#v", cfg)
+				}
+				cfg.CustomProviders = map[string]ProviderEntry{name: {}}
+				if err := setConfigValue(cfg, key, "some-model"); err != nil {
+					t.Fatal(err)
+				}
+				if cfg.Provider != "openai" || cfg.CustomProviders[name].Model != "some-model" {
+					t.Fatalf("unexpected configuration: %#v", cfg)
+				}
+			})
+		}
+	}
+}
+
 func TestSetConfigValueProviderEntryModelsJSON(t *testing.T) {
 	cfg := &Config{}
 
@@ -364,10 +476,15 @@ func TestSetConfigValueProviderEntryInvalidKey(t *testing.T) {
 }
 
 func TestSetConfigValueProviderEntryInvalidPath(t *testing.T) {
-	cfg := &Config{}
-
-	if err := setConfigValue(cfg, "providers.anthropic", "value"); err == nil {
-		t.Fatal("expected error for incomplete provider path")
+	for _, prefix := range []string{"providers", "custom_providers"} {
+		for _, suffix := range []string{"", "anthropic", ".url", "anthropic.", "mimo-v2.6-flash."} {
+			key := prefix + "." + suffix
+			t.Run(key, func(t *testing.T) {
+				if err := setConfigValue(&Config{}, key, "value"); err == nil || !strings.Contains(err.Error(), "invalid") {
+					t.Fatalf("setConfigValue(%q) = %v, want invalid path error", key, err)
+				}
+			})
+		}
 	}
 }
 
@@ -832,6 +949,59 @@ func TestSetMCPServerValue_ExistingServer(t *testing.T) {
 	}
 	if cfg.MCPServers["srv"].Command != "new-cmd" {
 		t.Errorf("Command = %q, want %q", cfg.MCPServers["srv"].Command, "new-cmd")
+	}
+}
+
+func TestSetMCPServerValue_DottedServerName(t *testing.T) {
+	cfg := &Config{}
+	// The last dot separates the field, so a dotted server name is
+	// addressable the way dotted provider names are (#1661), and stays
+	// deletable through `config unset mcp_servers.<name>`.
+	if err := setMCPServerValue(cfg, "mcp_servers.github.v2.type", "stdio"); err != nil {
+		t.Fatalf("setMCPServerValue dotted name: %v", err)
+	}
+	if err := setMCPServerValue(cfg, "mcp_servers.github.v2.command", "npx"); err != nil {
+		t.Fatalf("setMCPServerValue dotted name field: %v", err)
+	}
+	entry, exists := cfg.MCPServers["github.v2"]
+	if !exists {
+		t.Fatalf("dotted server name not stored: %+v", cfg.MCPServers)
+	}
+	if entry.Type != "stdio" || entry.Command != "npx" {
+		t.Errorf("entry = %+v, want type stdio and command npx", entry)
+	}
+
+	// Dot-free names keep their previous meaning.
+	if err := setMCPServerValue(cfg, "mcp_servers.docs.command", "npx"); err != nil {
+		t.Fatalf("setMCPServerValue dot-free name: %v", err)
+	}
+	if _, exists := cfg.MCPServers["docs"]; !exists {
+		t.Fatalf("dot-free server name not stored: %+v", cfg.MCPServers)
+	}
+	if _, exists := cfg.MCPServers["github"]; exists {
+		t.Errorf("dotted name leaked a prefix entry: %+v", cfg.MCPServers)
+	}
+}
+
+func TestSetMCPServerValue_DottedServerNameRejectsEmptySegments(t *testing.T) {
+	cfg := &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"keep": {Command: "cmd"},
+		},
+	}
+	for _, key := range []string{
+		"mcp_servers..command",
+		"mcp_servers.github..command",
+		"mcp_servers. .command",
+		"mcp_servers.type",
+		"mcp_servers.docs.",
+	} {
+		if err := setMCPServerValue(cfg, key, "val"); err == nil {
+			t.Errorf("key %q: expected error", key)
+		}
+	}
+	if len(cfg.MCPServers) != 1 || cfg.MCPServers["keep"].Command != "cmd" {
+		t.Fatalf("rejected writes mutated config: %+v", cfg.MCPServers)
 	}
 }
 
