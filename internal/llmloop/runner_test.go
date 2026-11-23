@@ -295,7 +295,7 @@ func TestPartitionMessages_CompressionNeeded(t *testing.T) {
 		msg("system", "sys"),
 		msg("user", "prompt"),
 	}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		messages = append(messages, msg("assistant", strings.Repeat("word ", 200)))
 		messages = append(messages, msg("tool", strings.Repeat("data ", 100)))
 	}
@@ -331,8 +331,8 @@ func TestRunCompression_EmptyTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 2 {
-		t.Errorf("expected 2 (frozen only), got %d", len(got))
+	if len(got) != len(msgs) {
+		t.Errorf("expected unchanged history, got %d messages", len(got))
 	}
 }
 
@@ -379,7 +379,7 @@ func TestRunCompression_Success(t *testing.T) {
 		msg("system", "sys"),
 		msg("user", "prompt"),
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		msgs = append(msgs, msg("assistant", strings.Repeat("word ", 100)))
 		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
 	}
@@ -416,7 +416,7 @@ func TestRunCompression_LLMError(t *testing.T) {
 		msg("system", "sys"),
 		msg("user", "prompt"),
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		msgs = append(msgs, msg("assistant", strings.Repeat("word ", 100)))
 		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
 	}
@@ -452,7 +452,7 @@ func TestRunCompression_EmptySummary(t *testing.T) {
 		msg("system", "sys"),
 		msg("user", "prompt"),
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		msgs = append(msgs, msg("assistant", strings.Repeat("word ", 100)))
 		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
 	}
@@ -489,7 +489,7 @@ func TestTriggerAsyncCompression(t *testing.T) {
 		msg("system", "sys"),
 		msg("user", "prompt"),
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		msgs = append(msgs, msg("assistant", strings.Repeat("word ", 100)))
 		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
 	}
@@ -530,7 +530,7 @@ func TestCompression_CrossFileIsolation(t *testing.T) {
 	r := newTestRunner(gated, tpl)
 
 	msgsA := []llm.Message{msg("system", "sys"), msg("user", "file A prompt")}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		msgsA = append(msgsA, msg("assistant", strings.Repeat("word ", 100)))
 		msgsA = append(msgsA, msg("tool", strings.Repeat("data ", 50)))
 	}
@@ -643,10 +643,10 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 	}}
 
 	st := &compressionState{}
-	ok := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), calls, llm.NativeTurn{}, "", results, &msgs, "f.go", st)
+	stop := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), calls, llm.NativeTurn{}, "", results, &msgs, "f.go", st)
 
-	if !ok {
-		t.Error("expected true: sync compression should bring the count under the warning threshold")
+	if stop != StopNone {
+		t.Errorf("sync compression should bring the count under the warning threshold, got %v", stop)
 	}
 	if got := gated.canceled.Load(); got != 0 {
 		t.Errorf("compression requests canceled mid-flight = %d, want 0", got)
@@ -686,7 +686,7 @@ func TestRunMainTask_ConcurrentFilesCompression_Race(t *testing.T) {
 	// thresholds repeatedly; the real assertion is -race cleanliness.
 	var wg sync.WaitGroup
 	errs := make([]error, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

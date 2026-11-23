@@ -81,6 +81,7 @@ func TestBudgetGate_StopsBeforeExceeding(t *testing.T) {
 	fake := &fakeBudgetClient{perCallTokens: perCall}
 
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		Template:         budgetTestTemplate(),
 		LLMClient:        fake,
 		CommentCollector: tool.NewCommentCollector(),
@@ -149,6 +150,7 @@ func TestBudgetGate_PlanThreshold(t *testing.T) {
 			budget := estimateFileTokens(item, func(model.ScanItem) bool { return testCase.includePlan })
 			client := &fakeBudgetClient{}
 			agent := NewAgent(Args{
+				MainToolDefs:    []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 				Template:        *scanTemplate,
 				LLMClient:       client,
 				MaxConcurrency:  1,
@@ -182,6 +184,7 @@ func TestBudgetGate_PlanThreshold(t *testing.T) {
 func TestBudgetGate_Unlimited(t *testing.T) {
 	fake := &fakeBudgetClient{perCallTokens: 50_000}
 	a := NewAgent(Args{
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 		Template:         budgetTestTemplate(),
 		LLMClient:        fake,
 		CommentCollector: tool.NewCommentCollector(),

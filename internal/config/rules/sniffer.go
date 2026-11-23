@@ -107,8 +107,14 @@ func (s *sniffer) peekFirstLine(path string) string {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	firstLine := true
 	for scanner.Scan() {
-		if line := strings.TrimSpace(scanner.Text()); line != "" {
+		line := scanner.Text()
+		if firstLine {
+			line = strings.TrimPrefix(line, "\ufeff")
+			firstLine = false
+		}
+		if line = strings.TrimSpace(line); line != "" {
 			return line
 		}
 	}
@@ -172,7 +178,8 @@ func looksLikeObjC(firstLine string) bool {
 }
 
 func firstNonBlankLine(content string) string {
-	for _, line := range strings.Split(content, "\n") {
+	content = strings.TrimPrefix(content, "\ufeff")
+	for line := range strings.SplitSeq(content, "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			return trimmed
 		}

@@ -107,8 +107,11 @@ inputs:
       integer; empty or 0 means unlimited. Checked before every LLM round:
       a group already over the cap gets one final round to submit findings,
       no further groups are dispatched, over-budget and skipped files are
-      reported as failed(budget), partial results are still published, and
-      the review exits 0.
+      reported as failed(budget). A budget-only partial review with usable
+      coverage exits 0. Operational failures (such as timeouts or provider
+      errors) and fully failed reviews (including budget-only failures) exit
+      non-zero. The CLI emits available results. On a non-zero exit, the Action
+      can upload the raw output as an artifact but skips posting PR comments.
     required: false
     default: ''
   stream_progress:
@@ -136,8 +139,9 @@ inputs:
   incremental:
     description: >-
       Incremental dimension. true = only append inline comments whose (path,
-      line range) does not overlap an existing bot review comment. History is
-      never deleted (non-destructive).
+      line range) does not overlap an existing bot review comment. Among new
+      inline candidates, more severe findings take precedence when ranges
+      overlap; ties keep report order. History is never deleted.
     required: false
     default: 'false'
   incremental_overlap_threshold:

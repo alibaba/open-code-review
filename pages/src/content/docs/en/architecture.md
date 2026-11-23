@@ -223,12 +223,21 @@ on the prompt budget defined by `MAX_TOKENS = 200000`:
 > **`MAX_TOKENS` is an *input* ceiling.** It bounds the prompt — the
 > context-window budget the message buffer is compressed against — and
 > nothing else. The model's *output* cap is a separate knob,
-> `MAX_COMPLETION_TOKENS = 16384`, sent as `max_completion_tokens` on
-> every request (`Template.CompletionTokenLimit()`). Keeping them apart
+> `MAX_COMPLETION_TOKENS = 16384` (`Template.CompletionTokenLimit()`). Keeping them apart
 > means raising the prompt ceiling with `--max-tokens` for a
 > large-context model never silently inflates the output budget. When
 > `MAX_COMPLETION_TOKENS` is unset, `MAX_TOKENS` is used as the output
 > cap for backwards compatibility.
+
+Before selecting active rounds, OCR reserves space for the **visible summary**:
+at most the configured completion limit, the 20% context margin, and the room
+beside the fixed prompt and summary wrapper. Some providers count reasoning
+tokens as output too. When the compression request itself has room below the
+80% warning threshold, OCR can request a larger generation budget (up to the
+configured completion limit) and asks the model to keep its final summary within
+the reservation. The rebuilt history must still fit. These limits are independent of the
+aggregate `--max-tokens-budget`; setting that budget to zero does not
+disable context compression.
 
 ### The three zones
 
@@ -245,29 +254,28 @@ flowchart LR
 
 A "round" is one assistant message plus the tool result messages that
 followed it. `partitionMessages` walks rounds from the end, keeping as
-many as fit within `(0.80 × MAX_TOKENS) - reservedTokens`. Everything
-older becomes the **compress zone**.
+many as fit strictly below `(0.80 × MAX_TOKENS) - reservedTokens`.
+The reservation includes the first two messages (including earlier
+summaries), the visible summary reservation, and its wrapper. Everything
+older becomes the **compress zone**. An empty compress zone leaves the
+conversation unchanged. The budget includes retry instructions between
+rounds, not just assistant messages and tool results. A background pass
+does not summarize the entire live tail below the warning limit. At or
+above that limit, even the latest round may be summarized if it cannot
+fit alongside the reserved summary.
 
 The compress zone is rendered as XML and fed to the model with the
 `MEMORY_COMPRESSION_TASK` prompt; the returned summary is appended to
 the original user message inside `<previous_review_summary>` tags.
 
-After compression: `messages = frozen[2] + compressed_user_msg + active`.
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … call MEMORY_COMPRESSION_TASK …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+After compression: `messages = system + (original_user + summary) + active`.
+The rebuilt conversation is checked against the same local token estimate
+and must be smaller than the original. A missing compression template,
+empty summary, or non-shrinking result leaves the original history intact.
+Only a visible summary is used; reasoning alone never replaces history.
+A response cut off by its output limit, an unusable summary template, or
+an oversized rebuilt result returns an error without dropping any original
+messages.
 
 ### Async vs sync
 
@@ -275,8 +283,12 @@ The async path lets the main loop keep emitting tool calls while
 compression runs in the background; when the next token check happens, a
 ready summary is swapped in via `tryApplyPendingCompression`. If the
 ratio crosses the warning threshold before the async job finishes, the
-loop stalls and runs `runCompression` synchronously — guaranteeing the
-next request always fits.
+loop stalls and runs `runCompression` synchronously. Messages appended
+after a background snapshot are retained when its summary is applied.
+If the conversation still cannot fit strictly below the local warning
+limit, the loop stops with `StopCompression`; it does not silently discard
+uncompressed history. This estimate is not a guarantee of the provider's
+actual context-window capacity.
 
 ## Comment processing pipeline
 

@@ -15,41 +15,46 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/workflow"
 	"github.com/spf13/cobra"
 
 	"go.opentelemetry.io/otel/codes"
 )
 
 type reviewOptions struct {
-	rulePath              string
-	repoDir               string
-	from                  string
-	to                    string
-	commit                string
-	resume                string
-	excludes              string
-	outputFormat          string
-	audience              string
-	outputPath            string
-	background            string
-	backgroundFile        string
-	provider              string
-	model                 string
-	concurrency           int
-	concurrentTaskTimeout int
-	maxTools              int
-	maxGitProcs           int
-	maxTokens             int
-	maxTokensBudget       int
-	effort                string
-	noFilter              bool
-	preview               bool
+	rulePath                string
+	repoDir                 string
+	from                    string
+	to                      string
+	commit                  string
+	resume                  string
+	excludes                string
+	outputFormat            string
+	audience                string
+	outputPath              string
+	background              string
+	backgroundFile          string
+	provider                string
+	model                   string
+	concurrency             int
+	concurrentTaskTimeout   int
+	maxTools                int
+	maxGitProcs             int
+	maxTokens               int
+	maxTokensBudget         int
+	effort                  string
+	noFilter                bool
+	preview                 bool
+	analysis                bool
+	analysisMaxTokensBudget int
 }
 
 var reviewOpts reviewOptions
@@ -66,9 +71,16 @@ var reviewCmd = &cobra.Command{
   # Review a branch against its base (merge-base mode)
   ocr review --from master --to dev-ref
 
+  # Review the current branch against main (--to defaults to HEAD)
+  ocr review --from main
+
   # Review a specific commit
   ocr review --commit abc123
   ocr review -c abc123
+
+  # Review with peer Behavior/Impact and maintainer decision reports
+  ocr review --commit HEAD --analysis
+  ocr review --from master --to dev-ref --analysis --format json
 
   # Resume a previous range review
   ocr review --from master --to dev-ref --resume <session-id>
@@ -209,14 +221,25 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		sealedInput = &sealed.Resolution
 	}
 
-	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
-	fileReader := &tool.FileReader{
-		RepoDir: cc.RepoDir,
-		Mode:    mode,
-		Ref:     fileReadRef(mode, opts, sealedInput),
-		Runner:  cc.GitRunner,
+	codeTools, err := prepareReviewCodeTools(ctx, cc.RepoDir, opts, cc.GitRunner, sealedInput)
+	if err != nil {
+		return fmt.Errorf("prepare code tools: %w", err)
 	}
-	tools := buildToolRegistry(rt.Collector, fileReader)
+	if codeTools.access != nil {
+		withSides := toolsconfig.WithComparisonSides
+		if codeTools.reader.Mode == tool.ModeWorkspace {
+			withSides = toolsconfig.WithWorkspaceSides
+		}
+		mainToolDefs, err = withSides(mainToolDefs)
+		if err != nil {
+			return err
+		}
+		planToolDefs, err = withSides(planToolDefs)
+		if err != nil {
+			return err
+		}
+	}
+	tools := buildToolRegistryWithCodeAccess(rt.Collector, codeTools.reader, codeTools.access)
 
 	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
 	defer closeReviewMCPClients(mcpClients)
@@ -226,6 +249,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	mainToolDefs = append(mainToolDefs, mcpToolDefs...)
 
 	ag := agent.New(agent.Args{
+		AnalysisEnabled:       opts.analysis,
 		RepoDir:               cc.RepoDir,
 		From:                  opts.from,
 		To:                    opts.to,
@@ -248,7 +272,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
-		SealedInput:           sealedInput,
+		SealedInput:           codeTools.resolution,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
@@ -277,7 +301,21 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	startTime := time.Now()
 
-	comments, runErr := ag.Run(runCtx)
+	var resultProvider ResultProvider = ag
+	var comments []model.LlmComment
+	var runErr error
+	if opts.analysis {
+		execution := newAnalysisExecution(analysisInputForReview(cc, opts, rt, ag.Session().SessionID, *codeTools.resolution))
+		outcome := workflow.Run(runCtx, ag.Run, execution.run)
+		comments, runErr = outcome.Comments, outcome.ReviewError
+		report := execution.report(outcome.Analysis, outcome.AnalysisError)
+		resultProvider = &combinedResult{Agent: ag, report: report, reviewErr: runErr, reviewElapsed: outcome.ReviewElapsed}
+		if report.Status != "completed" {
+			fmt.Fprintf(os.Stderr, "[ocr] warning: analysis execution %s; see the Analysis diagnostics in the result\n", report.Status)
+		}
+	} else {
+		comments, runErr = ag.Run(runCtx)
+	}
 	manifest := ag.RunManifest()
 
 	// Freeze the retry report at the same boundary as the manifest: ag.Run has
@@ -296,6 +334,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 
 	resultErr := reviewResultError(runErr, manifest)
+	if opts.analysis && resultErr == nil {
+		resultErr = ctx.Err()
+	}
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
 		span.RecordError(resultErr)
@@ -305,9 +346,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	// session delivery failed. Emit it first, then return the independent process
 	// error so JSON consumers retain the complete coverage diagnosis.
 	var emitErr error
-	emitted := manifest != nil || runErr == nil
+	emitted := manifest != nil || runErr == nil || opts.analysis
 	if emitted {
-		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, retryReport)
+		emitErr = emitRunResult(runCtx, resultProvider, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		} else {
@@ -326,9 +367,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		if emitted {
 			failureReport = nil
 		}
-		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
+		emitFailureUsage(resultProvider, reviewDuration(resultProvider, startTime), opts.outputFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
-			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			if opts.analysis {
+				fmt.Fprintf(os.Stderr, "[ocr] Review session: %s (--analysis requires a fresh run)\n", id)
+			} else {
+				fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			}
 		}
 		return errors.Join(resultErr, emitErr)
 	}
@@ -346,15 +391,13 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 	if runErr != nil {
 		return fmt.Errorf("review failed: %w", runErr)
 	}
-	if manifest != nil && manifest.TerminalState == session.StateFailed {
-		// The exit contract is: non-zero only for a run-level failure, or when
-		// every selected item failed. Any usable coverage — even incomplete — exits
-		// 0, so complete/partial/skipped all succeed and only failed lands here.
-		// That makes a budget stop exit 0 whenever anything was covered (it is a
-		// controlled truncation recording no run_failure) and non-zero only when
-		// the cap left nothing covered at all. Partial results are published
-		// regardless: runReview emits the frozen manifest before this error decides
-		// the exit status.
+	if reviewManifestRequiresNonZeroExit(manifest) {
+		// Operational item failures make a partial review fail the process so CI
+		// cannot mistake incomplete coverage for success. A controlled budget stop
+		// remains the sole partial-success case; when every item failed, StateFailed
+		// still exits non-zero regardless of classification. Partial and failed
+		// results remain publishable because runReview emits the frozen manifest
+		// before this error decides the process status.
 		//
 		// Reasons stored in the manifest already went through sanitizeReason, so
 		// they are safe to echo on stderr.
@@ -364,10 +407,37 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 			}
 			return fmt.Errorf("review failed (%s)", rf.Classification)
 		}
-		return fmt.Errorf("review failed: %d of %d selected item(s) failed",
+		prefix := "review failed"
+		if manifest.TerminalState == session.StatePartial {
+			prefix = "review incomplete"
+		}
+		return fmt.Errorf("%s: %d of %d selected item(s) failed", prefix,
 			len(manifest.Coverage.Failed), len(manifest.Coverage.Selected))
 	}
 	return nil
+}
+
+// reviewManifestRequiresNonZeroExit is the shared CLI/SARIF success policy.
+// A partial review caused exclusively by declared budget limits keeps its
+// historical successful exit, but timeout, provider, configuration, panic and
+// unknown item failures are operational failures even when sibling items
+// completed. A fully failed manifest always fails the process.
+func reviewManifestRequiresNonZeroExit(manifest *session.RunManifest) bool {
+	if manifest == nil {
+		return false
+	}
+	if manifest.TerminalState == session.StateFailed {
+		return true
+	}
+	if manifest.TerminalState != session.StatePartial {
+		return false
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureBudget {
+			return true
+		}
+	}
+	return false
 }
 
 func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeState, error) {
@@ -379,9 +449,6 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 		DiffFrom:   opts.from,
 		DiffTo:     opts.to,
 		DiffCommit: opts.commit,
-	}
-	if current.ReviewMode == session.ReviewModeWorkspace {
-		return nil, fmt.Errorf("resume requires --from/--to or --commit; workspace resume is not supported")
 	}
 	state, err := session.LoadReviewResumeState(repoDir, opts.resume)
 	if err != nil {
@@ -629,11 +696,21 @@ var closeReviewMCPClients = func(clients []*mcp.Client) {
 }
 
 func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {
+	return buildToolRegistryWithCodeAccess(collector, fr, nil)
+}
+
+func buildToolRegistryWithCodeAccess(collector *tool.CommentCollector, fr *tool.FileReader, access *tool.CodeAccess) *tool.Registry {
 	reg := tool.NewRegistry()
-	reg.Register(tool.NewFileRead(fr))
-	reg.Register(tool.NewFileFind(fr))
+	reader := tool.NewFileRead(fr)
+	reader.Access = access
+	finder := tool.NewFileFind(fr)
+	finder.Access = access
+	search := tool.NewCodeSearch(fr)
+	search.Access = access
+	reg.Register(reader)
+	reg.Register(finder)
 	reg.Register(tool.NewFileReadDiff(tool.DiffMap{}))
-	reg.Register(tool.NewCodeSearch(fr))
+	reg.Register(search)
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	return reg
 }

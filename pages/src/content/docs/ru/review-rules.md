@@ -209,6 +209,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -303,6 +307,8 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/build.gradle`                               | `build_gradle.md` — зависимости Gradle.                                                          |
 | `**/package.json`                               | `package_json.md` — зависимости / скрипты NPM.                                                   |
 | `**/Cargo.toml`                                 | `cargo_toml.md` — манифест Rust.                                                                 |
+| `**/Move.toml` | `move_toml.md` — манифест пакета Move. |
+| `**/*.move` | `move.md` — исходный код Move. |
 | `**/composer.json`                              | `composer_json.md` — зависимости Composer, автозагрузка, скрипты, плагины и конфигурация пакета. |
 | `**/*.{json,json5,jsonc}`                       | `json.md` — обычный JSON (также совпадает `.json5` и `.jsonc`). |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md` — YAML workflow GitHub Actions.                                            |
@@ -319,16 +325,18 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.erb`                                      | `erb.md` — шаблоны ERB (SSTI / XSS / экранирование / пробелы и структура вывода). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                  |
 | `**/*.astro`                                    | `astro.md` — компоненты и islands Astro.                                                         |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                               |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                                               |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                      |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — файлы реализации, сигнатур и скриптов F#.                                          |
 | `**/*.cs`                                       | `csharp.md` — исходные файлы C#. |
 | `**/*.rs`                                       | `rust.md`                                                                                        |
-| `**/*.R`                                        | `r.md`                                                                                           |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                         |
 | `**/*.c`                                        | `c.md`                                                                                           |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md` — ядра и заголовки CUDA.                                                           |
+| `**/*.hip`                                      | `cuda_hip.md` — ядра HIP (AMD ROCm).                                                             |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — исходный код Python.                                                               |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md` — исходный код Ruby, задачи Rake, gemspec, Gemfile и Rakefile. |
 | `**/*.{php,phtml}`                              | `php.md` — исходный код PHP и шаблоны PHP.                                                       |
 | `**/*.proto`                                    | `protobuf.md` — совместимость Protocol Buffers на уровне wire.                                   |
 | `**/*.po`                                       | `po.md` — исходные каталоги переводов gettext.                                                   |
@@ -336,8 +344,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{graphql,gql}`                            | `graphql.md` — схема и операции GraphQL.                                                         |
 | `**/*.prisma`                                   | `prisma.md` — схема Prisma.                                                                      |
 | `**/*.jl`                                       | `julia.md` — исходный код Julia.                                                                 |
+| `**/*.R`                                        | `r.md`                                                                                           |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                |
 | `**/*.bicep`                                    | `bicep.md` — шаблоны Bicep (Azure).                                                              |
+| `**/*.dhall` | `dhall.md` — язык конфигурации Dhall. |
 | `**/*.nix`                          | `nix.md` — выражения Nix и flake.                                                                |
 | `**/*.{hs,lhs}`                     | `haskell.md` — исходный код Haskell.                                                             |
 | `**/*.{nim,nims,nimble}`            | `nim.md` — исходный код Nim и манифесты пакетов.                                                 |
@@ -351,7 +361,6 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.capnp`                                    | `capnp.md` — совместимость схем Cap'n Proto на уровне wire.                                      |
 | `**/*.{ml,mli}`                     | `ocaml.md` — исходный код OCaml.                                                                 |
 | `**/*.{re,rei}`                     | `ocaml.md` — исходный код ReasonML.                                                              |
-| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
 | `**/*.{v,sv,vh}`                                | `verilog.md` — RTL на Verilog и SystemVerilog.                                                   |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md` — RTL на VHDL.                                                                         |
 | `**/*.m`                                        | `matlab.md` (или `objc.md` через [определение содержимого](#content-sniffing-for-m-files))       |
@@ -359,8 +368,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.sol`                                      | `solidity.md` — смарт-контракты Solidity.                                                        |
 | `**/*.vy`                                       | `vyper.md` — смарт-контракты Vyper.                                                              |
 | `**/*.rego`                                     | `rego.md` — политики Rego (OPA).                                                                 |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell.                          |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — исходный код Clojure / ClojureScript и данные EDN. |
+| `**/*.sql`                                      | `sql.md` — SQL-миграции и запросы. |
 | _(fallback)_                                    | `default.md`                                                                                     |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

@@ -5,6 +5,7 @@ package gitcmd
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -42,6 +43,24 @@ func initRepo(t *testing.T) string {
 	return dir
 }
 
+func TestLocalOnlySharesSlotsAndDisablesFetching(test *testing.T) {
+	runner := New(1)
+	local := runner.LocalOnly()
+	if err := runner.acquire(test.Context()); err != nil {
+		test.Fatal(err)
+	}
+	defer runner.release()
+	ctx, cancel := context.WithCancel(test.Context())
+	cancel()
+	if local.acquire(ctx) == nil {
+		test.Fatal("independent Git semaphore")
+	}
+	env := strings.Join(local.command(test.Context(), ".", "status").Env, "\n")
+	if !strings.Contains(env, "GIT_NO_LAZY_FETCH=1") || !strings.Contains(env, "GIT_ALLOW_PROTOCOL=") {
+		test.Fatal("local-only Git command permits network access")
+	}
+}
+
 func TestRunner_New(t *testing.T) {
 	r := New(0)
 	if r == nil {
@@ -54,6 +73,62 @@ func TestRunner_New(t *testing.T) {
 	r2 := New(4)
 	if cap(r2.sem) != 4 {
 		t.Errorf("capacity = %d, want 4", cap(r2.sem))
+	}
+}
+
+func TestLocalRepositoryRejectsRedirectsAndDisablesFilters(t *testing.T) {
+	repo, other := initRepo(t), initRepo(t)
+	runner := New(1)
+	if _, err := runner.Run(t.Context(), repo, "config", "filter.fixture.clean", "unavailable-fixture-executable"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte("hello.txt filter=fixture\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, other)
+			var view *UnsupportedViewError
+			if _, err := runner.LocalForRepository(t.Context(), repo); !errors.As(err, &view) || view.variable != key {
+				t.Fatal(err)
+			}
+		})
+	}
+	local, err := runner.LocalForRepository(t.Context(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitDir, err := local.Output(t.Context(), repo, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := os.Stat(strings.TrimSpace(string(gitDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.Stat(filepath.Join(repo, ".git"))
+	if err != nil || !os.SameFile(actual, want) {
+		t.Fatalf("wrong Git directory: %q", gitDir)
+	}
+	for _, check := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"ls-files", "hello.txt"}, "hello.txt"},
+		{[]string{"config", "--get", "filter.fixture.clean"}, ""},
+		{[]string{"config", "--get", "filter.fixture.required"}, "true"},
+	} {
+		output, err := local.Output(t.Context(), repo, check.args...)
+		if err != nil || strings.TrimSpace(string(output)) != check.want {
+			t.Fatalf("%v: %q %v", check.args, output, err)
+		}
+	}
+	if _, err := local.Output(t.Context(), repo, "hash-object", "hello.txt"); err == nil {
+		t.Fatal("configured content filter silently skipped")
+	}
+	reused, err := local.LocalForRepository(t.Context(), repo)
+	if err != nil || reused != local || reused.sem != runner.sem {
+		t.Fatal("local runner was not shared")
 	}
 }
 

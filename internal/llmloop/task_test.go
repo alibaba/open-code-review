@@ -14,6 +14,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/tool"
 )
 
 type taskClient func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error)
@@ -78,7 +79,7 @@ func TestTaskStructuredSubmissionAndRetry(t *testing.T) {
 	}{
 		{"submit_test_result", `{"value":0}`, "Invalid result; submit value 42."},
 		{"submit_test_result", `{`, "Invalid result; submit value 42."},
-		{"unavailable", `{}`, "Tool unavailable; choose a test tool."},
+		{"unavailable", `{}`, tool.NotAvailableMsg},
 	} {
 		t.Run(invalid.name+invalid.arguments, func(t *testing.T) {
 			var requests []llm.ChatRequest
@@ -216,29 +217,49 @@ func TestTaskOwnCompressionAndEmptyResponse(t *testing.T) {
 }
 
 func TestTaskModelErrors(t *testing.T) {
-	for _, grace := range []bool{false, true} {
-		t.Run(strconv.FormatBool(grace), func(t *testing.T) {
+	unavailable := errors.New("model unavailable")
+	for _, fixture := range []struct {
+		name         string
+		maxRounds    int
+		tokenBudget  int64
+		reportErrors bool
+		stop         MainLoopStop
+		wantErr      error
+	}{
+		{"main request", 1, 1, true, StopNone, unavailable},
+		{"round limit", 1, 0, false, StopMaxRounds, nil},
+		{"round limit error", 1, 0, true, StopMaxRounds, unavailable},
+		{"token limit", 5, 1, true, StopTokenBudget, unavailable},
+		{"best effort final submission", 5, 1, false, StopTokenBudget, nil},
+		{"cancelled final submission", 5, 1, true, StopTokenBudget, context.Canceled},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 			task := testTask()
-			task.MaxRounds = 1
+			task.MaxRounds = fixture.maxRounds
+			task.Grace.ReportErrors = fixture.reportErrors
+			requestErr := unavailable
 			requests := 0
 			client := taskClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
 				requests++
-				if grace && requests == 1 {
+				if fixture.stop != StopNone && requests == 1 {
 					return testTaskResponse("read_test_data", `{}`), nil
 				}
-				return nil, errors.New("model unavailable")
+				if fixture.wantErr == context.Canceled {
+					cancel()
+					requestErr = ctx.Err()
+				}
+				return nil, requestErr
 			})
 			history := session.New(t.TempDir(), "main", "fake", session.SessionOptions{})
-			runner := NewRunner(Deps{LLMClient: client, Session: history}, task)
-			result, err := runner.Run(context.Background(), taskMessages(), "data")
-			if result.Completed || (err == nil) != grace {
+			runner := NewRunner(Deps{LLMClient: client, Session: history, MaxTokensBudget: fixture.tokenBudget}, task)
+			result, err := runner.Run(ctx, taskMessages(), "data")
+			if result.Completed || !errors.Is(err, fixture.wantErr) || result.StopReason != fixture.stop {
 				t.Fatalf("Run = %+v, %v", result, err)
 			}
-			if grace && result.StopReason != StopMaxRounds {
-				t.Fatalf("grace stop = %v", result.StopReason)
-			}
 			records := history.GetOrCreateFileSession("data").TaskRecords[session.MainTask]
-			if records[len(records)-1].Error != "model unavailable" {
+			if records[len(records)-1].Error != requestErr.Error() {
 				t.Fatal("model failure was not recorded")
 			}
 		})
@@ -250,6 +271,9 @@ func TestTaskGraceOutcomes(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			task := testTask()
 			task.MaxRounds = 1
+			if scenario == "mixed" {
+				task.Grace.Tools = append(task.Grace.Tools, llm.ToolDef{Type: "function", Function: llm.FunctionDef{Name: "abort"}})
+			}
 			if scenario == "no_tools" {
 				task.Grace.Tools = nil
 			}
@@ -306,5 +330,41 @@ func TestTaskEmptyToolResultsStopWithoutGrace(t *testing.T) {
 	result, err := runner.Run(context.Background(), taskMessages(), "data")
 	if err != nil || result.Completed || result.StopReason != StopEmptyRounds || requests != 3 {
 		t.Fatalf("Run = %+v, %v; requests = %d", result, err, requests)
+	}
+}
+
+func TestTaskMainCannotUseGraceOnlyTool(t *testing.T) {
+	task := testTask()
+	task.ToolDefs = task.ToolDefs[:1]
+	task.MaxRounds = 1
+	executions := 0
+	original := task.ExecuteTool
+	task.ExecuteTool = func(ctx context.Context, key string, call llm.ToolCall, record *session.TaskRecord, thinking string) ToolOutcome {
+		executions++
+		return original(ctx, key, call, record, thinking)
+	}
+	requests := 0
+	client := taskClient(func(_ context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
+		requests++
+		if requests == 2 {
+			if executions != 0 {
+				t.Fatal("main request executed a grace-only tool")
+			}
+			found := false
+			for _, message := range request.Messages {
+				if message.Role == "tool" && message.ExtractText() == tool.NotAvailableMsg {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("missing rejection in grace history")
+			}
+		}
+		return testTaskResponse("submit_test_result", `{"value":42}`), nil
+	})
+	runner := NewRunner(Deps{LLMClient: client, Session: session.New(t.TempDir(), "main", "fake", session.SessionOptions{})}, task)
+	result, err := runner.Run(context.Background(), taskMessages(), "data")
+	if err != nil || !result.Completed || executions != 1 || requests != 2 {
+		t.Fatalf("Run=%+v, err=%v, executions=%d, requests=%d", result, err, executions, requests)
 	}
 }

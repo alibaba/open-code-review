@@ -84,7 +84,10 @@ func TestScanInputsFreezeRulesForPlanAndMain(t *testing.T) {
 			tpl.PlanTask = &template.LlmConversation{
 				Messages: []template.ChatMessage{{Role: "user", Content: "plan rule={{system_rule}}"}},
 			}
-			a := NewAgent(Args{RepoDir: t.TempDir(), Template: tpl, SystemRule: resolver, LLMClient: client})
+			a := NewAgent(Args{
+				RepoDir: t.TempDir(), Template: tpl, SystemRule: resolver, LLMClient: client,
+				MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
+			})
 			t.Cleanup(func() { _ = a.Session().Finalize() })
 			item := model.ScanItem{Path: "a.go", Content: "package a\n", LineCount: 1}
 			a.initScanInputs([]model.ScanItem{item})
@@ -158,8 +161,9 @@ func TestScanResumeRuleCheckpoints(t *testing.T) {
 				client := &fakeScanClient{responses: []*llm.ChatResponse{scanTaskDoneResponse()}}
 				a := NewAgent(Args{
 					RepoDir: repo, Template: makeTemplateWithFullScan(), LLMClient: client,
-					SystemRule: scanRuleFunc(func(string) string { return tc.current }),
-					Resume:     state, MaxConcurrency: 1, SkipPlan: true, SkipDedup: true, SkipSummary: true,
+					MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
+					SystemRule:   scanRuleFunc(func(string) string { return tc.current }),
+					Resume:       state, MaxConcurrency: 1, SkipPlan: true, SkipDedup: true, SkipSummary: true,
 				})
 				t.Cleanup(func() { _ = a.Session().Finalize() })
 				a.items = []model.ScanItem{item}
