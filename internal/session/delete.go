@@ -264,6 +264,11 @@ func resolveLocationPath(loc Location) (string, error) {
 
 // ListAllSessionIDs returns every saved session id.
 func ListAllSessionIDs() ([]Location, error) {
+	return ListSessionIDs("")
+}
+
+// ListSessionIDs returns saved session ids matching prefix.
+func ListSessionIDs(prefix string) ([]Location, error) {
 	root, err := sessionsRoot()
 	if err != nil {
 		return nil, err
@@ -291,7 +296,7 @@ func ListAllSessionIDs() ([]Location, error) {
 				continue
 			}
 			id := strings.TrimSuffix(name, ".jsonl")
-			if ValidateSessionID(id) != nil {
+			if !strings.HasPrefix(id, prefix) || ValidateSessionID(id) != nil {
 				continue
 			}
 			path := filepath.Join(root, entry.Name(), name)

@@ -156,7 +156,7 @@ func completeSessionIDsAnywhere(cmd *cobra.Command, args []string, toComplete st
 	if repo, _ := cmd.Flags().GetString("repo"); strings.TrimSpace(repo) != "" {
 		return completeSessionIDs(cmd, args, toComplete)
 	}
-	locations, err := session.ListAllSessionIDs()
+	locations, err := session.ListSessionIDs(toComplete)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
