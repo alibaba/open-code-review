@@ -4,7 +4,6 @@
 package session
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -216,9 +215,9 @@ func walkSessionFile(path string, apply func(summaryRecord)) error {
 	}
 	defer f.Close()
 
-	reader := bufio.NewReader(f)
+	reader := newSessionRecordReader(f)
 	for {
-		line, readErr := reader.ReadBytes('\n')
+		line, readErr := reader.readRecord()
 		if len(line) > 0 {
 			var rec summaryRecord
 			if err := json.Unmarshal(line, &rec); err == nil {

@@ -4,7 +4,6 @@
 package session
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -124,9 +123,9 @@ func loadResumeState(repoDir, sessionID string, skipUnparseable bool) (*ResumeSt
 		RepoDir:   repoDir,
 		Items:     make(map[string]ResumeItem),
 	}
-	reader := bufio.NewReader(f)
+	reader := newSessionRecordReader(f)
 	for {
-		line, readErr := reader.ReadBytes('\n')
+		line, readErr := reader.readRecord()
 		if readErr == io.EOF {
 			// Bytes returned alongside EOF have no trailing newline: they are an
 			// unterminated record from a torn write. Drop and stop without parsing.
