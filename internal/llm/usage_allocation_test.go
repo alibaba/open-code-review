@@ -59,6 +59,54 @@ func TestResolveUsageFlatAndFallbackFields(t *testing.T) {
 	}
 }
 
+func TestResolveUsageRequiresValidResponseJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		raw   string
+		valid bool
+	}{
+		{
+			name: "invalid escape in skipped completion",
+			raw:  `{"choices":[{"message":{"content":"\q"}}],"usage":{"total_tokens":7}}`,
+		},
+		{
+			name: "trailing comma in skipped completion",
+			raw:  `{"usage":{"total_tokens":7},"choices":[1,]}`,
+		},
+		{
+			name: "trailing non-JSON content",
+			raw:  `{"usage":{"total_tokens":7}} trailing`,
+		},
+		{
+			name: "second JSON value",
+			raw:  `{"usage":{"total_tokens":7}} {}`,
+		},
+		{
+			name:  "valid escaped completion",
+			raw:   `{"choices":[{"message":{"content":"\\q"}}],"usage":{"total_tokens":7}}`,
+			valid: true,
+		},
+		{
+			name:  "valid trailing whitespace",
+			raw:   "{\"usage\":{\"total_tokens\":7}}\n\t\r ",
+			valid: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveUsage([]byte(tc.raw))
+			if !tc.valid {
+				if got != nil {
+					t.Fatalf("invalid response produced usage: %+v", got)
+				}
+				return
+			}
+			if got == nil || *got != (UsageInfo{TotalTokens: 7}) {
+				t.Fatalf("valid response produced usage %+v, want total_tokens 7", got)
+			}
+		})
+	}
+}
+
 func BenchmarkResolveUsageLargeCompletion(b *testing.B) {
 	raw := []byte(`{"choices":[{"message":{"role":"assistant","content":"` + strings.Repeat("a", 1<<20) + `"}}],"usage":{"prompt_tokens":100,"completion_tokens":200,"total_tokens":300}}`)
 	b.SetBytes(int64(len(raw)))
