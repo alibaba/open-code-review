@@ -22,7 +22,7 @@ ocr review
 ocr viewer --open=never
 ```
 
-相対パスは CLI の作業ディレクトリを基準に解決されます。プロセスやコンテナ間で保存先を共有する場合は絶対パスを指定してください。
+`OCR_HOME` には絶対パスを指定してください。
 IDE 拡張機能は `ocr config path --json` を実行し、返されたパスの絶対親ディレクトリを後続の CLI 呼び出しの保存先として固定します。
 プロジェクト内の `.opencodereview/rule.json` の場所は変わりません。
 

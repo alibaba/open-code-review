@@ -16,11 +16,6 @@ func TestConfigPathCommand(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Chdir(t.TempDir())
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
 	custom := filepath.Join(t.TempDir(), "ocr data")
 	for _, tc := range []struct {
 		name string
@@ -29,7 +24,7 @@ func TestConfigPathCommand(t *testing.T) {
 	}{
 		{"default", "", filepath.Join(home, ".opencodereview", "config.json")},
 		{"custom", custom, filepath.Join(custom, "config.json")},
-		{"relative", "ocr-state", filepath.Join(cwd, "ocr-state", "config.json")},
+		{"relative", "ocr-state", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("OCR_HOME", tc.env)
@@ -42,7 +37,14 @@ func TestConfigPathCommand(t *testing.T) {
 					args = append(args, "--json")
 				}
 				cmd.SetArgs(args)
-				if err := cmd.Execute(); err != nil {
+				err := cmd.Execute()
+				if tc.want == "" {
+					if err == nil || !strings.Contains(err.Error(), "OCR_HOME must be an absolute path") {
+						t.Fatalf("relative OCR_HOME: %v", err)
+					}
+					continue
+				}
+				if err != nil {
 					t.Fatal(err)
 				}
 				got := strings.TrimSpace(out.String())
@@ -58,6 +60,9 @@ func TestConfigPathCommand(t *testing.T) {
 				if got != tc.want {
 					t.Fatalf("config path = %q, want %q", got, tc.want)
 				}
+			}
+			if tc.want == "" {
+				return
 			}
 			if _, err := os.Stat(filepath.Dir(tc.want)); !os.IsNotExist(err) {
 				t.Fatalf("path lookup created storage: %v", err)

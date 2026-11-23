@@ -24,8 +24,7 @@ ocr review
 ocr viewer --open=never
 ```
 
-Relative paths are resolved against the CLI's working directory. Use an absolute
-path when sharing storage between processes or containers. The IDE extensions
+`OCR_HOME` must be an absolute path. The IDE extensions
 query `ocr config path --json` and pin its absolute parent directory for subsequent
 CLI calls. Project-local `.opencodereview/rule.json` stays in the project directory.
 

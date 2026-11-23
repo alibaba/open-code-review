@@ -22,7 +22,7 @@ ocr review
 ocr viewer --open=never
 ```
 
-相对路径以 CLI 的工作目录为基准解析。跨进程或容器共享存储时，请使用绝对路径。
+`OCR_HOME` 必须是绝对路径。
 IDE 插件会查询 `ocr config path --json`，并将返回路径的绝对父目录固定为后续 CLI 调用的存储目录。
 项目内的 `.opencodereview/rule.json` 仍位于项目目录。
 

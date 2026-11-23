@@ -48,16 +48,9 @@ func TestDirOverrideWithoutUserHome(t *testing.T) {
 }
 
 func TestDirRelativeOverride(t *testing.T) {
-	t.Chdir(t.TempDir())
 	t.Setenv("OCR_HOME", filepath.Join("state", "ocr"))
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(cwd, "state", "ocr")
-	got, err := Dir()
-	if err != nil || got != want {
-		t.Fatalf("Dir() = %q, %v; want %q", got, err, want)
+	if _, err := Dir(); err == nil {
+		t.Fatal("Dir accepted a relative OCR_HOME")
 	}
 }
 

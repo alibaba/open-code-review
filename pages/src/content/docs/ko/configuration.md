@@ -22,7 +22,7 @@ ocr review
 ocr viewer --open=never
 ```
 
-상대 경로는 CLI의 작업 디렉터리를 기준으로 해석됩니다. 프로세스나 컨테이너 간에 저장소를 공유할 때는 절대 경로를 사용하세요.
+`OCR_HOME`에는 절대 경로를 지정해야 합니다.
 IDE 확장은 `ocr config path --json`을 실행하고, 반환된 경로의 절대 부모 디렉터리를 이후 CLI 호출의 저장 위치로 고정합니다.
 프로젝트의 `.opencodereview/rule.json` 위치는 바뀌지 않습니다.
 

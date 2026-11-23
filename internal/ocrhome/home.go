@@ -11,11 +11,14 @@ import (
 )
 
 // Dir returns OCR_HOME when non-empty, otherwise ~/.opencodereview.
-// Relative overrides are resolved against the current working directory.
+// Overrides must be absolute.
 // It does not create the directory or migrate existing data.
 func Dir() (string, error) {
 	if dir := os.Getenv("OCR_HOME"); dir != "" {
-		return filepath.Abs(dir)
+		if !filepath.IsAbs(dir) {
+			return "", fmt.Errorf("OCR_HOME must be an absolute path: %q", dir)
+		}
+		return filepath.Clean(dir), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
