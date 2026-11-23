@@ -47,7 +47,7 @@ class CliService(private val cliPath: String = "ocr", private val configPathTime
         val pending = configPathPending?.takeUnless { it.isCompletedExceptionally } ?: CompletableFuture.supplyAsync {
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(configPathTimeoutMs)
             val env = ShellEnv.env()
-            val invocation = configPathInvocation(cliPath, cwd, env)
+            val invocation = configPathInvocation(cliPath, env)
             val result = captureConfigPathQuery(invocation.command, cwd, invocation.env,
                 TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()))
             val path = Json.parseToJsonElement(result).jsonObject["path"]?.jsonPrimitive?.content?.let(::File)

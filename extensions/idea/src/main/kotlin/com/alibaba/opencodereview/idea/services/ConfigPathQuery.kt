@@ -20,18 +20,19 @@ fun configPathFailure(error: Throwable): ConfigPathStatus = ConfigPathStatus(
 internal data class ConfigPathInvocation(val command: List<String>, val env: Map<String, String>)
 
 internal fun configPathInvocation(
-    bin: String, cwd: File, env: Map<String, String>,
+    bin: String, env: Map<String, String>,
     windows: Boolean = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true),
 ): ConfigPathInvocation {
     require(bin.none { it == '"' || it == '\r' || it == '\n' }) { "Invalid OCR executable path" }
     val names = if (windows && '.' !in bin) listOf("$bin.exe", "$bin.cmd", "$bin.bat", "$bin.com", bin) else listOf(bin)
-    val executable = if (File(bin).isAbsolute || '/' in bin || '\\' in bin) bin else {
+    val executable = if (File(bin).isAbsolute) bin else {
+        if ('/' in bin || '\\' in bin || ':' in bin) throw CliException("OCR executable path must be absolute")
         env.entries.firstOrNull { it.key.equals("PATH", ignoreCase = windows) }?.value.orEmpty()
             .split(if (windows) ';' else File.pathSeparatorChar)
-            .asSequence().flatMap { directory ->
-                val folder = File(directory).let { if (it.isAbsolute) it else File(cwd, directory) }
+            .asSequence().map(::File).filter { it.isAbsolute }.flatMap { folder ->
                 names.asSequence().map { File(folder, it) }
-            }.firstOrNull { it.isFile && (windows || it.canExecute()) }?.absolutePath ?: bin
+            }.firstOrNull { it.isFile && (windows || it.canExecute()) }?.absolutePath
+            ?: throw CliException("OCR executable not found on PATH")
     }
     if (!windows) return ConfigPathInvocation(listOf(executable, "config", "path", "--json"), env)
     // Keep quotes in the environment value so strict JDK launchers see no embedded quotes in the command argument.

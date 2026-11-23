@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class ConfigServiceNpmTest {
@@ -57,12 +58,15 @@ class ConfigServiceNpmTest {
         val root = Files.createTempDirectory("ocr-query-command-").toFile()
         try {
             val launcher = File(root, "ocr.cmd").apply { writeText("@echo off") }
-            val invocation = configPathInvocation("ocr", root, mapOf("Path" to root.path), windows = true)
+            assertFailsWith<CliException> {
+                configPathInvocation("ocr", mapOf("Path" to ".;bin"), windows = true)
+            }
+            val invocation = configPathInvocation("ocr", mapOf("Path" to root.path), windows = true)
             assertEquals("\"${launcher.path}\"", invocation.env["OCR_CONFIG_PATH_COMMAND"])
             assertEquals(listOf("cmd.exe", "/d", "/v:off", "/s", "/c"), invocation.command.dropLast(1))
             assertEquals("\"%OCR_CONFIG_PATH_COMMAND% config path --json\"", invocation.command.last())
-            val special = "C:\\Program Files\\OCR & tools\\%literal%!\\ocr.cmd"
-            val quoted = configPathInvocation(special, root, emptyMap(), windows = true)
+            val special = File(root, "OCR & tools %literal%!.cmd").absolutePath
+            val quoted = configPathInvocation(special, emptyMap(), windows = true)
             assertEquals("\"$special\"", quoted.env["OCR_CONFIG_PATH_COMMAND"])
             assertFalse(quoted.command.any { it.contains(special) })
         } finally { root.deleteRecursively() }
