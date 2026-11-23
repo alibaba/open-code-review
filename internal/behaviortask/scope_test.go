@@ -132,6 +132,11 @@ func TestScopedSearchBatchesAndPatterns(test *testing.T) {
 		content := "unmatched\n"
 		if index%4 == 0 {
 			content = "batch needle\n"
+		} else if index%4 == 1 {
+			content = "\x00"
+		}
+		if index%8 < 2 {
+			content += "shared needle\n"
 		}
 		if err := os.WriteFile(filepath.Join(input.RepoDir, paths[index]), []byte(content), 0600); err != nil {
 			test.Fatal(err)
@@ -164,6 +169,11 @@ func TestScopedSearchBatchesAndPatterns(test *testing.T) {
 		if err != nil || len(observation.Locations) != fixture.count || observation.Truncated != fixture.truncated {
 			test.Fatalf("patterns %v: matches=%d truncated=%t error=%v", fixture.patterns, len(observation.Locations), observation.Truncated, err)
 		}
+	}
+	mixed, err := code.execute(test.Context(), "code_search", map[string]any{"search_text": "shared needle"})
+	binaryCount := strings.Count(mixed.ReturnedContent, "\nBinary file matches; content not shown\n")
+	if err != nil || !mixed.Truncated || len(mixed.Locations) != 50 || binaryCount != 50 {
+		test.Fatalf("batched mixed search: truncated=%t text=%d binary=%d error=%v", mixed.Truncated, len(mixed.Locations), binaryCount, err)
 	}
 	for _, patterns := range [][]any{{"../escape"}, {strings.Repeat("x", scopedPathBytes+1)}, {":(invalid-magic)"}} {
 		if _, err := code.execute(test.Context(), "code_search", map[string]any{"search_text": "needle", "file_patterns": patterns}); err == nil {

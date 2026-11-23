@@ -63,6 +63,7 @@ func TestSearchProviderBoundaryFiltering(test *testing.T) {
 						"File: " + otherSidePath, "Match lines: 1", "3|OTHER_SIDE_PRIVATE_SENTINEL",
 						"File: missing.go", "Match lines: 1", "4|MISSING_PRIVATE_SENTINEL",
 						"File: .env", "Match lines: 1", "5|SECRET_PRIVATE_SENTINEL",
+						"File: excluded.bin", "Binary file matches; content not shown",
 						"UNNUMBERED_PRIVATE_SENTINEL",
 						"Error: simulated search failure",
 						"File: main.go", "Match lines: 1", "9|AUTHORIZED_LAST",
@@ -90,6 +91,35 @@ func TestSearchProviderBoundaryFiltering(test *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestScopedSearchBinaryMatches(test *testing.T) {
+	input := fixture(test)
+	for _, path := range []string{"build artifact.bin", "excluded.bin"} {
+		writeSearchBoundaryFile(test, input.RepoDir, path, "\x00new value\n")
+	}
+	git(test, input.RepoDir, "add", ".")
+	git(test, input.RepoDir, "commit", "-qm", "Add binary search fixtures")
+	input.Resolution.ResolvedHead = git(test, input.RepoDir, "rev-parse", "HEAD")
+	input.ExcludePatterns = append(input.ExcludePatterns, "excluded.bin")
+	code, err := prepareCodeTools(test.Context(), input)
+	if err != nil {
+		test.Fatal(err)
+	}
+
+	args := map[string]any{"search_text": "new value", "file_patterns": []any{"*.bin"}}
+	binary, err := code.execute(test.Context(), "code_search", args)
+	want := "File: build artifact.bin\nBinary file matches; content not shown\n\n"
+	if err != nil || binary.ReturnedContent != want || len(binary.Locations) != 0 || binary.Truncated || binary.ErrorClass != "" {
+		test.Fatalf("binary search returned %+v, error=%v; want %q with no locations", binary, err, want)
+	}
+
+	delete(args, "file_patterns")
+	mixed, err := code.execute(test.Context(), "code_search", args)
+	if err != nil || !strings.Contains(mixed.ReturnedContent, want) || strings.Contains(mixed.ReturnedContent, "excluded.bin") ||
+		len(mixed.Locations) != 1 || mixed.Locations[0].Path != "main.go" || mixed.Locations[0].StartLine != 1 {
+		test.Fatalf("mixed search returned %+v, error=%v", mixed, err)
 	}
 }
 

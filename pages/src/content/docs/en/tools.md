@@ -408,7 +408,7 @@ understands `pathspec` syntax and respects `.gitignore`.
 
 ### Output
 
-Results are grouped by file. Each group starts with `File: <path>` and
+Results are grouped by file. Each text result starts with `File: <path>` and
 `Match lines: <n>`, followed by one `line|content` line per hit:
 
 ```
@@ -421,6 +421,9 @@ File: path/to/other.java
 Match lines: 1
 22|      var req = new ToolRequest();
 ```
+
+Binary matches show `File: <path>` followed by `Binary file matches; content not shown`.
+The tool returns up to 100 matches in total. Each matching text line or binary file counts as one match.
 
 When there are no matches, the tool returns the literal string
 `No matches found`.

@@ -356,7 +356,7 @@ src/main/java/com/example/internal/UserServiceImpl.java
 
 ### 出力
 
-結果はファイルごとにグループ化されます。各グループは `File: <path>` と `Match lines: <n>` で始まり、続いて各ヒットが
+結果はファイルごとにグループ化されます。テキストの結果は `File: <path>` と `Match lines: <n>` で始まり、続いて各ヒットが
 `line|content` の 1 行で表されます：
 
 ```
@@ -369,6 +369,9 @@ File: path/to/other.java
 Match lines: 1
 22|      var req = new ToolRequest();
 ```
+
+バイナリファイルのマッチは `File: <path>` と `Binary file matches; content not shown` で表示されます。
+結果は合計で最大 100 件です。マッチしたテキストの 1 行またはバイナリファイル 1 個を 1 件として数えます。
 
 マッチがない場合、ツールはリテラル文字列 `No matches found` を返します。
 

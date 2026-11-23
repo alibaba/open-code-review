@@ -342,7 +342,7 @@ src/main/java/com/example/internal/UserServiceImpl.java
 
 ### 输出
 
-结果按文件分组。每组以 `File: <path>` 和 `Match lines: <n>` 开头，随后每条命中
+结果按文件分组。文本结果以 `File: <path>` 和 `Match lines: <n>` 开头，随后每条命中
 一行 `line|content`：
 
 ```
@@ -355,6 +355,9 @@ File: path/to/other.java
 Match lines: 1
 22|      var req = new ToolRequest();
 ```
+
+二进制命中显示 `File: <path>` 和 `Binary file matches; content not shown`。
+工具最多返回 100 条结果。每行命中的文本或每个命中的二进制文件各计一条。
 
 无匹配时，工具返回字面字符串 `No matches found`。
 

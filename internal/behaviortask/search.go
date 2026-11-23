@@ -15,7 +15,6 @@ import (
 )
 
 const scopedPathBytes = 16 * 1024
-const searchMatchLimit = 100
 
 func literalPathBatches(groups [][]string) ([][]string, error) {
 	return pathBatches(groups, func(name string) string { return ":(top,literal)" + name })
@@ -122,24 +121,32 @@ func (code *codeTools) search(ctx context.Context, provider tool.Provider, args 
 		}
 		filePath := ""
 		var matches []string
+		binaryMatch := false
 		flush := func() {
 			if len(matches) > 0 {
 				fmt.Fprintf(&body, "File: %s\nMatch lines: %d\n%s\n\n", filePath, len(matches), strings.Join(matches, "\n"))
-				matches = nil
+			} else if binaryMatch {
+				fmt.Fprintf(&body, "File: %s\n%s\n\n", filePath, tool.CodeSearchBinaryMatch)
 			}
+			matches = nil
+			binaryMatch = false
 		}
 		for line := range strings.SplitSeq(stripSide(content), "\n") {
 			switch {
 			case strings.HasPrefix(line, "File: "):
 				flush()
 				filePath = strings.TrimPrefix(line, "File: ")
-			case numberedLine.MatchString(line) && code.allowed[side][filePath]:
-				if count < searchMatchLimit {
-					matches = append(matches, line)
-					count++
-				} else {
+			case code.allowed[side][filePath] && (line == tool.CodeSearchBinaryMatch || numberedLine.MatchString(line)):
+				if count >= tool.CodeSearchMatchLimit {
 					truncated = true
+					continue
 				}
+				if line == tool.CodeSearchBinaryMatch {
+					binaryMatch = true
+				} else {
+					matches = append(matches, line)
+				}
+				count++
 			case strings.HasPrefix(line, "Note: Showing the first "):
 				truncated = true
 			case strings.HasPrefix(line, "Error:") || strings.HasPrefix(line, "Warning:"):
@@ -157,7 +164,7 @@ func (code *codeTools) search(ctx context.Context, provider tool.Provider, args 
 		result = "No matches found"
 	}
 	if truncated {
-		result = fmt.Sprintf("Note: Showing the first %d matches. Narrow file_patterns to see the rest.\n", searchMatchLimit) + result
+		result = fmt.Sprintf("Note: Showing the first %d matches. Narrow file_patterns to see the rest.\n", tool.CodeSearchMatchLimit) + result
 	}
 	if side == "old" {
 		prefix := "SIDE: old\nREVISION: " + code.comparison.Old + "\n"

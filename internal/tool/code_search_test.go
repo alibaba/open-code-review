@@ -181,10 +181,11 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 			{name: "single_file_exact_limit", firstCount: 100, wantCount: 100},
 			{name: "across_files", firstCount: 60, secondCount: 60, wantCount: 100, truncated: true, wantFiles: 2},
 			{name: "single_file", firstCount: 101, wantCount: 100, truncated: true, wantFiles: 1},
-			{name: "binary_before_text", binaryCount: 100, firstCount: 1, wantCount: 1},
-			{name: "binary_with_exact_limit", binaryCount: 1, firstCount: 100, wantCount: 100},
-			{name: "binary_with_truncation", binaryCount: 100, firstCount: 101, wantCount: 100, truncated: true, wantFiles: 1},
-			{name: "binary_only", binaryCount: 101},
+			{name: "binary_before_text", binaryCount: 100, firstCount: 1, truncated: true, wantFiles: 101},
+			{name: "binary_with_exact_limit", binaryCount: 1, firstCount: 99, wantCount: 99},
+			{name: "binary_with_truncation", binaryCount: 2, firstCount: 101, wantCount: 98, truncated: true, wantFiles: 3},
+			{name: "binary_only", binaryCount: 1},
+			{name: "binary_only_truncated", binaryCount: 101, truncated: true, wantFiles: 101},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
 				dir := t.TempDir()
@@ -198,7 +199,7 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 				}
 				for i := 0; i < tc.binaryCount; i++ {
 					// Sort binary diagnostics before valid text matches.
-					path := filepath.Join(dir, fmt.Sprintf("0_binary_%03d.bin", i))
+					path := filepath.Join(dir, fmt.Sprintf("0 binary %03d matches.bin", i))
 					if err := os.WriteFile(path, []byte("\x00result_limit_needle\n"), 0o644); err != nil {
 						t.Fatal(err)
 					}
@@ -232,13 +233,21 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 						t.Errorf("expected note to report %q, got:\n%s", want, got)
 					}
 				}
+				wantBinary := min(tc.binaryCount, CodeSearchMatchLimit)
+				if count := strings.Count(got, "\nBinary file matches; content not shown\n"); count != wantBinary {
+					t.Errorf("returned %d binary matches, want %d", count, wantBinary)
+				}
+				if wantBinary > 0 && !strings.Contains(got, "File: 0 binary 000 matches.bin\nBinary file matches; content not shown\n") {
+					t.Errorf("missing first binary path in result:\n%s", got)
+				}
 				if tc.name == "binary_only" {
-					// Every hit is in a binary file. The tool must still answer
-					// with its documented no-match string rather than an empty
-					// result, which the tool-use loop reads as a failed call.
-					if got != "No matches found" {
-						t.Errorf("binary-only search = %q, want %q", got, "No matches found")
+					want := "File: 0 binary 000 matches.bin\nBinary file matches; content not shown\n\n"
+					if got != want {
+						t.Errorf("binary-only search = %q, want %q", got, want)
 					}
+				}
+				if tc.name == "binary_with_exact_limit" && !strings.HasPrefix(got, "File: 0 binary 000 matches.bin\n") {
+					t.Error("expected the first binary file before the text results")
 				}
 				if tc.name == "across_files" {
 					if !strings.Contains(got, "File: a.go\nMatch lines: 60\n") || !strings.Contains(got, "File: b.go\nMatch lines: 40\n") {

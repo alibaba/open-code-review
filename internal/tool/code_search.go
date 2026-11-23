@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	gitGrepMaxCount = 100
-	gitGrepTimeout  = 10 * time.Second
+	gitGrepTimeout = 10 * time.Second
+
+	CodeSearchMatchLimit  = 100
+	CodeSearchBinaryMatch = "Binary file matches; content not shown"
 )
 
 // CodeSearchProvider performs text search across the repository using git grep.
@@ -69,12 +71,7 @@ func (p *CodeSearchProvider) execute(ctx context.Context, args map[string]any) (
 func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string) []string {
 	// core.quotepath=false reports non-ASCII paths literally instead of as
 	// quoted octal escapes, which file_read cannot open.
-	//
-	// -I keeps binary files out of the match set. Without it git answers a
-	// binary hit with "Binary file <path> matches", a line with no line number
-	// that the parser below drops, so a search whose hits are all binary would
-	// return an empty result instead of the documented no-match string.
-	cmdArgs := []string{"--no-pager", "-c", "core.quotepath=false", "grep", "-I"}
+	cmdArgs := []string{"--no-pager", "-c", "core.quotepath=false", "grep"}
 
 	if noIndex {
 		// Non-git directory: search the working tree directly while still
@@ -96,7 +93,7 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	cmdArgs = append(cmdArgs, "-n", "--no-color")
 	// git grep limits matches per file. Fetch one extra to distinguish an exact
 	// limit from truncated results, then enforce the global limit below.
-	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
+	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", CodeSearchMatchLimit+1))
 
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
@@ -193,72 +190,74 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		}
 	}
 
-	lines := strings.Split(strings.TrimRight(outStr, "\n"), "\n")
-
 	type match struct {
 		lineNum int
 		content string
 	}
 	fileMatches := make(map[string][]match)
 	var fileOrder []string
-	seen := make(map[string]bool)
 
-	hasRef := p.FileReader.Ref != ""
-	splitN := 3
-	offset := 0
-	if hasRef {
-		splitN = 4
-		offset = 1
+	refPrefix := ""
+	if ref := p.FileReader.Ref; ref != "" {
+		refPrefix = ref + ":"
 	}
 
 	matchCount := 0
 	truncated := false
 	matchedFiles := make(map[string]bool)
-	for _, line := range lines {
-		if line == "" {
-			continue
+	binaryPrefix := "Binary file " + refPrefix
+	for line := range strings.SplitSeq(outStr, "\n") {
+		text, hasRefPrefix := strings.CutPrefix(line, refPrefix)
+		parts := strings.SplitN(text, ":", 3)
+		var ln int
+		var parseErr error
+		if hasRefPrefix && len(parts) == 3 {
+			ln, parseErr = strconv.Atoi(parts[1])
 		}
-		parts := strings.SplitN(line, ":", splitN)
-		if len(parts) < splitN {
-			continue
+		var fname string
+		if ln > 0 && parseErr == nil {
+			fname = parts[0]
+		} else {
+			path, hasPrefix := strings.CutPrefix(line, binaryPrefix)
+			path, hasSuffix := strings.CutSuffix(path, " matches")
+			if !hasPrefix || !hasSuffix || path == "" {
+				continue
+			}
+			fname, ln = path, 0
 		}
-		fname := parts[offset]
-		ln, parseErr := strconv.Atoi(parts[offset+1])
-		if parseErr != nil {
-			// Skip lines whose line-number field is not numeric.
-			continue
-		}
-		// Count every file with a text match, including those beyond the render
-		// budget, so the truncation note can report the true matched-file count.
+		seen := matchedFiles[fname]
 		matchedFiles[fname] = true
-		if matchCount >= gitGrepMaxCount {
+		if matchCount >= CodeSearchMatchLimit {
 			// Keep scanning to finish counting matched files, but render no more.
 			truncated = true
 			continue
 		}
-		m := match{lineNum: ln, content: parts[offset+2]}
-		if !seen[fname] {
-			seen[fname] = true
+		if !seen {
 			fileOrder = append(fileOrder, fname)
 		}
-		fileMatches[fname] = append(fileMatches[fname], m)
+		if ln > 0 {
+			fileMatches[fname] = append(fileMatches[fname], match{lineNum: ln, content: parts[2]})
+		}
 		matchCount++
 	}
 
 	var sb strings.Builder
 	if truncated {
-		sb.WriteString(fmt.Sprintf("Note: Showing the first %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", gitGrepMaxCount, len(matchedFiles)))
+		sb.WriteString(fmt.Sprintf("Note: Showing the first %d matches across %d matching files. Some files are partially shown or omitted entirely. Narrow file_patterns to see the rest.\n", CodeSearchMatchLimit, len(matchedFiles)))
 	}
 
 	for _, path := range fileOrder {
 		matches := fileMatches[path]
+		if len(matches) == 0 {
+			fmt.Fprintf(&sb, "File: %s\n%s\n\n", path, CodeSearchBinaryMatch)
+			continue
+		}
 		sb.WriteString(fmt.Sprintf("File: %s\nMatch lines: %d\n", path, len(matches)))
 		for _, m := range matches {
 			sb.WriteString(fmt.Sprintf("%d|%s\n", m.lineNum, m.content))
 		}
 		sb.WriteString("\n")
 	}
-
 	if err != nil && errStr != "" {
 		sb.WriteString(fmt.Sprintf("Warning: %s\n", strings.TrimSpace(errStr)))
 	}
