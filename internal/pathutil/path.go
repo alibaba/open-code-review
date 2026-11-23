@@ -18,17 +18,17 @@ func CanonicalPath(path string) (string, error) {
 	return filepath.EvalSymlinks(abs)
 }
 
+// LexicallyWithinBase reports whether the cleaned path is base or a descendant.
+func LexicallyWithinBase(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	// Rel folds case on Windows even when the filesystem distinguishes those paths.
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) &&
+		filepath.Join(base, rel) == filepath.Clean(target)
+}
+
 // WithinBase reports whether target is base itself or contained under base.
 func WithinBase(base, target string) bool {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		rel = ".."
-	}
-	if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))) {
-		return true
-	}
-
-	return sameFileWithinBase(base, target)
+	return LexicallyWithinBase(base, target) || sameFileWithinBase(base, target)
 }
 
 func sameFileWithinBase(base, target string) bool {
