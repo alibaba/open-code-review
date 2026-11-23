@@ -18,6 +18,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func TestSessionListHelpMentionsReviewAndScanResume(t *testing.T) {
+	for _, command := range []string{"ocr review --resume <id>", "ocr scan --resume <id>"} {
+		if !strings.Contains(sessionListCmd.Long, command) {
+			t.Errorf("session list help does not mention %q", command)
+		}
+	}
+}
+
 func TestRunSessionList_TextIncludesSessionID(t *testing.T) {
 	tmpHome := t.TempDir()
 	setTestHome(t, tmpHome)

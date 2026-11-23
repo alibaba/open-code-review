@@ -21,18 +21,18 @@ func addRuleFlag(cmd *cobra.Command, target *string) {
 }
 
 func addDiffFlags(cmd *cobra.Command, from, to, commit *string) {
-	cmd.Flags().StringVar(from, "from", "", "source ref to start diff from (e.g., 'main')")
-	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch'; defaults to HEAD when --from is given)")
-	cmd.Flags().StringVarP(commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
+	cmd.Flags().StringVar(from, "from", "", "source ref to start diff from (e.g., 'main'; mutually exclusive with --commit)")
+	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch'; defaults to HEAD when --from is given; mutually exclusive with --commit)")
+	cmd.Flags().StringVarP(commit, "commit", "c", "", "single commit hash or tag to review (vs its parent; mutually exclusive with --from/--to)")
 }
 
 func addBackgroundFlags(cmd *cobra.Command, background, backgroundFile *string) {
 	cmd.Flags().StringVarP(background, "background", "b", "", "optional requirement/business context for the review")
-	cmd.Flags().StringVarP(backgroundFile, "background-file", "B", "", "path to a Markdown file used as review background (takes precedence over --background)")
+	cmd.Flags().StringVarP(backgroundFile, "background-file", "B", "", "path to a background file (takes precedence over --background; relative paths resolve from the repository root)")
 }
 
 func addOutputFlags(cmd *cobra.Command, format, audience *string) {
-	cmd.Flags().StringVarP(format, "format", "f", "text", "output format: text, json, or sarif")
+	cmd.Flags().StringVarP(format, "format", "f", "text", "output format: text, json, or sarif (sarif is not supported with --preview)")
 	cmd.Flags().StringVar(audience, "audience", "human", "output audience: human (show progress; on stderr for json/sarif) or agent (summary only)")
 	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json", "sarif"))
 	cmd.RegisterFlagCompletionFunc("audience", completeEnum("human", "agent"))
@@ -49,7 +49,7 @@ func addExcludeFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 }
 
-const taskTimeoutHelp = "concurrent task budget in minutes, including LLM requests and retries (0 = unlimited); independent per-request timeout: OCR_LLM_TIMEOUT or provider timeout_sec in seconds (default 300)"
+const taskTimeoutHelp = "concurrent task budget in minutes, including LLM requests and retries (0 = unlimited); review multiplies it by the configured effort's review rounds (low/medium/high = 1/2/3), so the default 15 becomes 15/30/45 minutes; independent per-request timeout: OCR_LLM_TIMEOUT or provider timeout_sec in seconds (default 300)"
 
 func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, maxGitProcs, maxTokens, maxTokensBudget *int) {
 	cmd.Flags().IntVar(concurrency, "concurrency", 8, "max concurrent subtasks")
