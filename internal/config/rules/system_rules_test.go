@@ -485,6 +485,48 @@ func TestNewResolver_CustomRuleOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestNewResolver_CustomRuleFileReference(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	workDir := t.TempDir()
+	repoDir := t.TempDir()
+	t.Chdir(workDir)
+
+	const customConfig = `{"rules":[{"path":"main.go","rule":"team.md"}]}`
+	writeFile(t, workDir, "rules.json", customConfig)
+	writeFile(t, workDir, "team.md", "CUSTOM_TEAM_RULE")
+	writeFile(t, workDir, "profile/rules.json", customConfig)
+	writeFile(t, workDir, "profile/team.md", "PROFILE_TEAM_RULE")
+	writeFile(t, workDir, "missing.json", `{"rules":[{"path":"main.go","rule":"missing.md"}]}`)
+	writeFile(t, repoDir, "team.md", "REPO_TEAM_RULE")
+	writeFile(t, repoDir, ".opencodereview/rule.json", `{"rules":[{"path":"main.go","rule":"PROJECT_RULE"}]}`)
+
+	tests := []struct {
+		name       string
+		configPath string
+		wantRule   string
+		wantSource string
+	}{
+		{"relative", "rules.json", "CUSTOM_TEAM_RULE", "custom"},
+		{"dot relative", "./rules.json", "CUSTOM_TEAM_RULE", "custom"},
+		{"nested relative", "profile/rules.json", "PROFILE_TEAM_RULE", "custom"},
+		{"absolute", filepath.Join(workDir, "rules.json"), "CUSTOM_TEAM_RULE", "custom"},
+		{"missing reference", "missing.json", "PROJECT_RULE", "project"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver, _, err := NewResolver(repoDir, tt.configPath, ResolverOptions{})
+			if err != nil {
+				t.Fatalf("NewResolver: %v", err)
+			}
+			detail := resolver.(DetailResolver).ResolveDetail("main.go")
+			if detail.Rule != tt.wantRule || detail.Source != tt.wantSource {
+				t.Errorf("ResolveDetail rule = %q, source = %q; want rule %q, source %q",
+					detail.Rule, detail.Source, tt.wantRule, tt.wantSource)
+			}
+		})
+	}
+}
+
 func TestNewResolver_EmptyRuleSkippedAndFallsBack(t *testing.T) {
 	setTestHome(t, t.TempDir())
 

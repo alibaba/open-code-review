@@ -610,9 +610,9 @@ func tryReadRuleFile(rule string, repoDir string, confineRoot string) *string {
 	}
 
 	// Relative path: resolve against repoDir, validate no traversal.
-	resolved := filepath.Clean(filepath.Join(repoDir, rule))
-	cleanRepo := filepath.Clean(repoDir)
-	if !strings.HasPrefix(resolved, cleanRepo+string(os.PathSeparator)) {
+	resolved := filepath.Join(repoDir, rule)
+	relative, err := filepath.Rel(repoDir, resolved)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: rule file path escapes repo dir: %s\n", rule)
 		return nil
 	}
