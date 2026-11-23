@@ -92,6 +92,32 @@ Security review: flag hardcoded secrets, unvalidated redirects, and missing auth
 
 心に留めておくべき制約: マージが及ぶのは**システム**層だけです。自分自身の 2 つのエントリが同じファイルに一致した場合、依然として最初のものが完全に勝ちます — `merge_system_rule` はそれらをお互いに結合しません。
 
+### ルール違反だけを報告する: `scope`
+
+ルールエントリは OCR に何をチェックするかを伝えるもので、何を除外するかは伝えません。レビュアーは気づいたバグやリスクを引き続き報告するため、自分たちの規約だけをチェックするために書いたルールファイルでも `bug` や `security` の指摘が出ます。
+
+エントリに `"scope": "rules_only"` を設定すると、そのエントリが一致したファイルのレビューを、そのルールへの違反だけに限定できます:
+
+```json
+{
+  "rules": [
+    {
+      "path": "src/**/*.ts",
+      "rule": "Exported functions declare an explicit return type. Errors are returned as values, never thrown.",
+      "scope": "rules_only"
+    }
+  ]
+}
+```
+
+OCR はルールテキストの上に必須のスコープ指示を置きます。ルールに違反するコードだけを報告し、違反がなければ何も報告しない、という指示です。`ocr rules check` は、この指示を解決済みルールの一部として表示します。
+
+- このフィールドは任意です。設定しなければ、レビューは変わりません。
+- 受け付ける値は `rules_only` だけです。それ以外の値は、ルールファイルの読み込み時に実行を失敗させます。
+- `merge_system_rule: true` と併用すると、スコープはマージ後のテキストを対象にするため、組み込みの言語ルールもルールとして扱われます。
+- スコープはエントリに属し、そのエントリが勝ったファイルにだけ適用されます。同じレビュー内の他のファイルは通常どおりフルレビューされます。
+- スコープはプロンプトの指示です。モデルが報告する内容を絞り込むもので、指摘の後段フィルターではありません。
+
 ### glob の機能
 
 OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4) でマッチングを行います:

@@ -107,6 +107,34 @@ Security review: flag hardcoded secrets, unvalidated redirects, and missing auth
 需要牢记的限制：合并只触及**系统**层。如果你自己的两条条目匹配同一个文件，
 靠前的那条仍然完全胜出——`merge_system_rule` 不会把它们彼此合并。
 
+### 只报告违反规则的问题：`scope`
+
+规则条目告诉 OCR 要检查什么，而不是要忽略什么。审查者仍会报告它发现的任何 bug 或风险，
+所以一个只为检查团队约定而写的规则文件，也会收到 `bug` 和 `security` 类的发现。
+
+在条目上设置 `"scope": "rules_only"`，即可把它所匹配文件的审查限定为违反该规则的问题：
+
+```json
+{
+  "rules": [
+    {
+      "path": "src/**/*.ts",
+      "rule": "Exported functions declare an explicit return type. Errors are returned as values, never thrown.",
+      "scope": "rules_only"
+    }
+  ]
+}
+```
+
+OCR 随后会在规则文本上方加入一条强制的范围指令：只报告违反规则的代码，没有违反时什么都不报告。
+`ocr rules check` 会把该指令作为解析后规则的一部分显示出来。
+
+- 该字段是可选的。不设置时，审查行为不变。
+- 唯一接受的值是 `rules_only`。其他任何值都会在加载规则文件时让运行失败。
+- 与 `merge_system_rule: true` 同时使用时，范围覆盖合并后的文本，内置的语言规则也算作规则。
+- 范围属于条目本身，只作用于该条目胜出的文件。同一次审查中的其他文件仍进行完整审查。
+- 范围是一条提示词指令。它收窄模型报告的内容，并不是对发现结果的事后过滤。
+
 ### glob 能力
 
 OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)

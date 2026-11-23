@@ -121,6 +121,42 @@ only. If two of your own entries match the same file, the first one
 still wins outright — `merge_system_rule` does not combine them with
 each other.
 
+### Reporting only rule breaches: `scope`
+
+A rule entry tells OCR what to check, not what to leave out. The
+reviewer still reports any bug or risk it notices, so a rule file
+written to check only your conventions also gets `bug` and `security`
+findings.
+
+Set `"scope": "rules_only"` on an entry to limit the review of the files
+it matches to breaches of its rule:
+
+```json
+{
+  "rules": [
+    {
+      "path": "src/**/*.ts",
+      "rule": "Exported functions declare an explicit return type. Errors are returned as values, never thrown.",
+      "scope": "rules_only"
+    }
+  ]
+}
+```
+
+OCR then puts a mandatory scope directive above the rule text: report
+only code that breaches the rules, and nothing when none is breached.
+`ocr rules check` shows the directive as part of the resolved rule.
+
+- The field is optional. Without it, the review is unchanged.
+- `rules_only` is the only accepted value. Any other value fails the
+  run when the rule file loads.
+- With `merge_system_rule: true`, the scope covers the merged text, so
+  the built-in language rules count as rules too.
+- The scope belongs to the entry, so it applies only to the files that
+  entry wins. Other files in the same review keep a full review.
+- The scope is a prompt instruction. It narrows what the model reports;
+  it is not a post-filter on findings.
+
 ### Glob features
 
 OCR uses [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)
