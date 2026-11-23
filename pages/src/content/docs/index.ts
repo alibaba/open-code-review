@@ -26,6 +26,7 @@ const DOC_SLUG_ORDER: readonly DocSlug[] = [
   'chatgpt-preview',
   'cli-reference',
   'review-rules',
+  'reviewing-requirements',
   'architecture',
   'tools',
   'mcp',
@@ -50,6 +51,7 @@ const availableTranslations: Record<Language, readonly DocSlug[]> = {
   ja: DOC_SLUG_ORDER,
   ko: DOC_SLUG_ORDER,
   ru: DOC_SLUG_ORDER,
+  tr: DOC_SLUG_ORDER,
 };
 
 export function hasTranslation(slug: DocSlug, language: Language): boolean {
@@ -60,7 +62,7 @@ export function isPartialLocale(language: Language): boolean {
   return availableTranslations[language].length !== DOC_SLUG_ORDER.length;
 }
 
-/* One import() boundary per language so webpack emits five independent
+/* One import() boundary per language so webpack emits independent
  * chunks; a computed specifier would merge them into a single context. */
 const languageLoaders: Record<Language, () => Promise<{ default: LocalizedDocs }>> = {
   en: () => import('./en'),
@@ -68,6 +70,7 @@ const languageLoaders: Record<Language, () => Promise<{ default: LocalizedDocs }
   ja: () => import('./ja'),
   ko: () => import('./ko'),
   ru: () => import('./ru'),
+  tr: () => import('./tr'),
 };
 
 /* Successful loads stay cached for the session; concurrent callers share the
@@ -135,6 +138,24 @@ export function getDocTitle(slug: DocSlug, loaded: LoadedDocContent): string {
   return slug;
 }
 
+function turkishSearchPattern(query: string): RegExp {
+  const literal = query.normalize().toLocaleLowerCase('tr').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(literal.replace(/[i\u0131]/gu, letter => `[${letter}I]`));
+}
+
+declare const __ENGLISH_DOC_IDENTIFIERS__: string[];
+const englishDocIdentifiers = new Set(__ENGLISH_DOC_IDENTIFIERS__);
+
+function foldTurkishDocument(content: string): string {
+  const englishIdentifier = /^(?:AI|ANSI|API|CI|CLI|ID|IDE|IDEA|Intel|Linux|SARIF|TUI|UI|URI|UUID|Windows)$/i;
+  return content.replace(/[\p{L}\p{M}\p{N}_]+/gu, word => {
+    if (!/[Ii\u0130]/u.test(word)) return word.toLowerCase();
+    const lower = word.toLowerCase();
+    if (englishDocIdentifiers.has(lower) || englishIdentifier.test(word)) return lower.replace(/i/g, 'I');
+    return word.toLocaleLowerCase('tr');
+  });
+}
+
 /**
  * Search the loaded language docs for a query string. Returns matching slugs
  * with context. Iterates the canonical slug order so partial locales with
@@ -145,12 +166,14 @@ export function searchDocs(query: string, loaded: LoadedDocContent): DocSearchRe
   if (!query.trim()) return [];
   const results: DocSearchResult[] = [];
   const lowerQuery = query.toLowerCase();
+  const turkishPattern = loaded.language === 'tr' ? turkishSearchPattern(query) : undefined;
   for (const slug of DOC_SLUG_ORDER) {
     const raw = rawFor(slug, loaded);
     if (!raw) continue;
-    const content = stripFrontmatter(raw);
-    const lowerContent = content.toLowerCase();
-    const idx = lowerContent.indexOf(lowerQuery);
+    const isTurkish = turkishPattern !== undefined && loaded.docs[slug] !== undefined;
+    const body = stripFrontmatter(raw);
+    const content = isTurkish ? body.normalize() : body;
+    const idx = isTurkish ? foldTurkishDocument(content).search(turkishPattern) : content.toLowerCase().indexOf(lowerQuery);
     if (idx !== -1) {
       // Extract snippet around match
       const start = Math.max(0, idx - 30);

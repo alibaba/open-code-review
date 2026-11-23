@@ -11,6 +11,7 @@ import koConfiguration from './ko/configuration.md';
 import koChatGPTPreview from './ko/chatgpt-preview.md';
 import koCliReference from './ko/cli-reference.md';
 import koReviewRules from './ko/review-rules.md';
+import koReviewingRequirements from './ko/reviewing-requirements.md';
 import koArchitecture from './ko/architecture.md';
 import koTools from './ko/tools.md';
 import koMcp from './ko/mcp.md';
@@ -32,6 +33,7 @@ const koDocs: CompleteLocalizedDocs = {
   'chatgpt-preview': koChatGPTPreview,
   'cli-reference': koCliReference,
   'review-rules': koReviewRules,
+  'reviewing-requirements': koReviewingRequirements,
   'architecture': koArchitecture,
   'tools': koTools,
   'mcp': koMcp,

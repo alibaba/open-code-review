@@ -53,6 +53,7 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
+	AnalysisEnabled bool
 	// RepoDir is the root of the git repository.
 	RepoDir string
 
@@ -225,13 +226,14 @@ func New(args Args) *Agent {
 			mode = reviewModeString(args.From, args.To, args.Commit)
 		}
 		args.Session = session.New(args.RepoDir, gitBranch, args.Model, session.SessionOptions{
-			ReviewMode:  mode,
-			DiffFrom:    args.From,
-			DiffTo:      args.To,
-			DiffCommit:  args.Commit,
-			ResumedFrom: resumedFromSession(args.Resume),
-			Operation:   session.OperationReview,
-			LLMSource:   args.EndpointSource,
+			AnalysisEnabled: args.AnalysisEnabled,
+			ReviewMode:      mode,
+			DiffFrom:        args.From,
+			DiffTo:          args.To,
+			DiffCommit:      args.Commit,
+			ResumedFrom:     resumedFromSession(args.Resume),
+			Operation:       session.OperationReview,
+			LLMSource:       args.EndpointSource,
 		})
 	}
 	a := &Agent{
@@ -1932,10 +1934,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		all := a.args.CommentCollector.CommentsForPath(d.NewPath)
 		start := 0
 		if from != nil {
-			start = from[d.NewPath]
-			if start > len(all) {
-				start = len(all)
-			}
+			start = min(from[d.NewPath], len(all))
 		}
 		for i := start; i < len(all); i++ {
 			candidates = append(candidates, filterCandidate{cm: all[i], pathIdx: i})

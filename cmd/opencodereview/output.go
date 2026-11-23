@@ -23,7 +23,21 @@ import (
 	"github.com/alibaba/open-code-review/internal/reviewtask"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/suggestdiff"
+	"github.com/alibaba/open-code-review/internal/workflow"
 )
+
+func inCommentSeverityOrder[T any](comments []model.LlmComment, findings []T) []T {
+	if len(findings) < 2 {
+		return findings
+	}
+	levels := [...]string{"low", "medium", "high", "critical"}
+	var buckets [len(levels) + 1][]T
+	for index, comment := range comments {
+		rank := 1 + slices.Index(levels[:], comment.Severity)
+		buckets[rank] = append(buckets[rank], findings[index])
+	}
+	return slices.Concat(buckets[:]...)
+}
 
 func outputText(comments []model.LlmComment) {
 	if len(comments) == 0 {
@@ -207,7 +221,7 @@ func wrapByRunes(text string, maxW int) []string {
 		return nil
 	}
 	var result []string
-	for _, para := range strings.Split(text, "\n") {
+	for para := range strings.SplitSeq(text, "\n") {
 		result = append(result, wrapSingleRuneLine(para, maxW)...)
 	}
 	return result
@@ -363,6 +377,11 @@ type jsonLLMIdentity struct {
 }
 
 type jsonOutput struct {
+	SchemaVersion  string                `json:"schema_version,omitempty"`
+	ReviewStatus   string                `json:"review_status,omitempty"`
+	Analysis       *string               `json:"analysis,omitempty"`
+	AnalysisRaw    *string               `json:"analysis_raw,omitempty"`
+	AnalysisMeta   *workflow.Report      `json:"analysis_meta,omitempty"`
 	Status         string                `json:"status"`
 	LLM            *jsonLLMIdentity      `json:"llm,omitempty"`
 	TraceID        string                `json:"trace_id,omitempty"`
@@ -402,7 +421,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
 	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, costUSD *float64, costBudgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
-	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
+	retryReport *llm.RetryReport, groups []agent.FileGroupInfo, analysis ...*analysisOutput) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	payload := jsonOutput{
 		Status:   "success",
@@ -459,6 +478,19 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	// and the budget reason stays observable through three deterministic outlets:
 	// summary.budget_exceeded, the token_budget_reached warning, and
 	// coverage.failed[].classification == "budget".
+	if len(analysis) > 0 && analysis[0] != nil {
+		combined := analysis[0]
+		display := analysisMarkdownForDisplay(combined.Report.Markdown)
+		payload.SchemaVersion = "ocr.review-with-analysis/v2"
+		payload.Analysis = &display
+		payload.AnalysisRaw = &combined.Report.Markdown
+		payload.AnalysisMeta = combined.Report
+		payload.ReviewStatus = combined.ReviewStatus
+		if manifest == nil && combined.ReviewStatus == string(session.StateFailed) {
+			payload.Status = combined.ReviewStatus
+			payload.Message = "Review failed before a manifest was available."
+		}
+	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)

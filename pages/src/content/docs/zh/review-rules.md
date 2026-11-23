@@ -184,6 +184,10 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -291,7 +295,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.erb`                                      | `erb.md`——ERB 模板（SSTI / XSS / 转义 / 空白与输出结构）。 |
 | `**/*.ets`                                      | `arkts.md`——ArkTS / HarmonyOS。                                       |
 | `**/*.astro`                                    | `astro.md`——Astro 组件与 islands。                                    |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                    |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                    |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                           |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md`——F# 实现、签名和脚本文件。                                |

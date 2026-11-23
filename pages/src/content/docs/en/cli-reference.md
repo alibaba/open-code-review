@@ -93,7 +93,11 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 The main command. Resolves a Git diff, groups the changed files
 semantically, dispatches one sub-agent per group, collects review
-comments, and prints them.
+comments, and prints them. Final `review` and `scan` reports list findings
+from least to most severe in text, JSON, and SARIF: `low`, `medium`, `high`,
+then `critical`. Findings whose reported severity is missing or unrecognized
+come before `low`. Ties keep their collection order, which can vary between
+parallel runs.
 
 ### Synopsis
 
@@ -127,13 +131,15 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per subtask. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. A resolved positive value sets the cap exactly. |
-| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
+| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask in both Review and Analysis; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
+| `--analysis` | — | off | Run a separate Behavior/Impact analysis alongside a commit or range review (`--commit` or `--from`, text or JSON only). Omit this flag for workspace reviews of uncommitted changes. Not compatible with preview or resume. Analysis has 300 investigation rounds, independent of `--max-tools`, plus at most one submission-only round if the budget is exhausted. A failed or skipped analysis does not change the Review exit status. |
+| `--analysis-max-tokens-budget <n>` | — | `0` (unlimited) | Set a soft limit on total input and output tokens for Analysis only. One additional model request can run concurrently with Review. Inspect `analysis_meta.usage` and `analysis_meta.execution_status` in JSON. |
 | `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Checked before every LLM round: a subtask already over budget gets one final round to submit findings and is reported as `failed(budget)`, no further subtasks are dispatched, and the CLI emits available results. |
 | `--max-cost-budget <usd>` | - | `max_cost_budget` or `0` (unlimited) | Cap the review's LLM spend in USD, measured at the model's price (see [Cost budget](../configuration/#cost-budget)). Checked where `--max-tokens-budget` is, with the same final round, `failed(budget)` items and partial results. JSON output reports `summary.cost_usd` and, when the cap stopped the run, `summary.cost_budget_exceeded` (with `budget_exceeded`). |
 | `--price-per-m <price>` | - | provider price table | The model's price in USD per million tokens, as `input=3,cache_read=0.3,cache_write=3.75,output=15`. A missing cache price defaults to `input`. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
-| `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
+| `--max-git-procs <n>` | — | `16` | Maximum number of concurrent Git subprocesses across Review and Analysis combined. |
 
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
@@ -201,6 +207,22 @@ ocr review -c abc123
 
 Reviews the diff produced by `git show abc123` (i.e., the changes that
 single commit introduced).
+
+Commit and range reviews omit changed paths matched by the root `.gitignore`
+in the target commit (`--commit` or the resolved `--to`), not the working tree.
+Analysis uses the same rule for its change list. An ignored file can still be
+read as context; use `--exclude` to prevent Analysis from reading it.
+
+With `--analysis`, one session ID opens a single report with Review and Analysis
+tabs in `ocr viewer`. The Analysis tab shows the investigation's execution status,
+changed files in scope (not files read), model assessment, and cited evidence.
+Select a numbered reference in the text to read its evidence, or expand
+**Evidence** to browse both cited and uncited observations.
+Expand **Conversations** to inspect each recorded Analysis request, its model
+response, and tool calls and results. This trace stays out of HTML exports.
+Its Markdown, result metadata, evidence, and execution trace live under
+`~/.opencodereview/sessions/<encoded-repo>/<session-id>/analysis/`. Evidence and
+logs can contain source text. An unfinished run may have no final status.
 
 ### Resuming interrupted reviews
 
@@ -540,7 +562,8 @@ treat the file with the same care as the repository itself before publishing it.
 
 ### `ocr session rm`
 
-Deletes one persisted session from `~/.opencodereview/sessions/`.
+Deletes one persisted session from `~/.opencodereview/sessions/`, including its
+attached Analysis report, evidence and logs if present.
 
 ```bash
 ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b

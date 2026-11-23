@@ -48,7 +48,7 @@ type workspaceResumeFixture struct {
 func workspaceResumeBody(name, marker, variant string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "package p\n\n// %s\n// variant %s\n", marker, variant)
-	for i := 0; i < workspaceResumeFileLines; i++ {
+	for i := range workspaceResumeFileLines {
 		fmt.Fprintf(&b, "// padding %03d\n", i)
 	}
 	fmt.Fprintf(&b, "\nfunc %s() int { return 1 }\n", strings.TrimSuffix(name, ".go"))

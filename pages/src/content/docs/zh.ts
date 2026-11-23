@@ -11,6 +11,7 @@ import zhConfiguration from './zh/configuration.md';
 import zhChatGPTPreview from './zh/chatgpt-preview.md';
 import zhCliReference from './zh/cli-reference.md';
 import zhReviewRules from './zh/review-rules.md';
+import zhReviewingRequirements from './zh/reviewing-requirements.md';
 import zhArchitecture from './zh/architecture.md';
 import zhTools from './zh/tools.md';
 import zhMcp from './zh/mcp.md';
@@ -32,6 +33,7 @@ const zhDocs: CompleteLocalizedDocs = {
   'chatgpt-preview': zhChatGPTPreview,
   'cli-reference': zhCliReference,
   'review-rules': zhReviewRules,
+  'reviewing-requirements': zhReviewingRequirements,
   'architecture': zhArchitecture,
   'tools': zhTools,
   'mcp': zhMcp,
