@@ -1140,6 +1140,21 @@ func authHeaderFormError(raw string) string {
 
 const manualAuthTokenRequiredError = "Auth token is required (configure it or set llm.auth_token_cmd; whitespace-only input is not accepted)"
 
+const manualURLRequiredError = "URL is required (for example https://api.example.com/v1)"
+
+// manualURLFormError words a rejected Base URL so the manual form can keep the
+// cursor on the URL field; applyManualConfig still validates at save time.
+func manualURLFormError(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return manualURLRequiredError
+	}
+	if err := validateBaseURL(trimmed); err != nil {
+		return fmt.Sprintf("Invalid URL: %v", err)
+	}
+	return ""
+}
+
 // manualAuthTokenCmd returns the configured llm.auth_token_cmd, which the
 // resolver runs when llm.auth_token is empty. Trimmed for the same reason as
 // apiKeyCmdForStep: the resolver treats a whitespace-only command as unset.
@@ -1739,9 +1754,14 @@ func (m *providerTUIModel) reloadConfigAfterSaveFailure() bool {
 func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
 	switch m.manualStep {
 	case manualStepURL:
-		if m.manualURLInput.Value() == "" {
+		// Reject a bad URL here so a typo is fixed in place instead of after the
+		// model and credentials have been typed in.
+		if msg := manualURLFormError(m.manualURLInput.Value()); msg != "" {
+			m.formError = msg
 			return m, nil
 		}
+		m.formError = ""
+		m.manualURLInput.SetValue(strings.TrimSpace(m.manualURLInput.Value()))
 		m.manualURLInput.Blur()
 		m.manualStep = manualStepProtocol
 		return m, nil
@@ -2404,6 +2424,11 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 			case manualStepAuthHeader:
 				s.WriteString("    " + m.manualAuthHeaderInput.View() + "\n")
 			}
+			// The error belongs to the field the user can still fix, so it sits
+			// under the active input rather than below the whole form.
+			if m.formError != "" {
+				s.WriteString(tuiErrorStyle.Render("    "+m.formError) + "\n")
+			}
 		} else {
 			display := f.value
 			if display == "" && f.label == "Auth Header" {
@@ -2415,12 +2440,6 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 				s.WriteString("  " + tuiDimStyle.Render(f.label+": "+display) + "\n")
 			}
 		}
-	}
-
-	if m.formError != "" {
-		s.WriteString("\n")
-		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
-		s.WriteString("\n")
 	}
 }
 

@@ -285,19 +285,33 @@ func TestApplyManualConfig_MissingModel(t *testing.T) {
 func TestApplyManualConfig_InvalidURL(t *testing.T) {
 	for _, value := range []string{"api.example.com/v1", "ftp://gateway.internal/v1"} {
 		t.Run(value, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.json")
 			cfg := &Config{Provider: "openai", Model: "saved-model"}
-			err := applyManualConfig(filepath.Join(t.TempDir(), "config.json"), cfg, providerTUIResult{url: value, model: "some-model"})
+			cfg.Llm.URL = "https://gateway.internal/v1"
+			if err := saveConfig(configPath, cfg); err != nil {
+				t.Fatalf("saveConfig: %v", err)
+			}
+
+			err := applyManualConfig(configPath, cfg, providerTUIResult{url: value, model: "some-model"})
 			if err == nil {
 				t.Fatal("expected error for invalid URL")
 			}
-			if cfg.Provider != "openai" || cfg.Model != "saved-model" || cfg.Llm.URL != "" {
+			if cfg.Provider != "openai" || cfg.Model != "saved-model" || cfg.Llm.URL != "https://gateway.internal/v1" {
 				t.Fatalf("configuration changed after rejected write: %#v", cfg)
+			}
+			diskCfg, err := loadOrCreateConfig(configPath)
+			if err != nil {
+				t.Fatalf("load config: %v", err)
+			}
+			if diskCfg.Provider != "openai" || diskCfg.Model != "saved-model" || diskCfg.Llm.URL != "https://gateway.internal/v1" {
+				t.Fatalf("persisted configuration changed after rejected write: %#v", diskCfg)
 			}
 		})
 	}
 }
 
 func TestApplyManualConfig_TrimsURL(t *testing.T) {
+	isolateLLMConnectionTest(t)
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	cfg := &Config{}
 
@@ -307,6 +321,28 @@ func TestApplyManualConfig_TrimsURL(t *testing.T) {
 	}
 	if cfg.Llm.URL != "https://gateway.internal:8000/v1" {
 		t.Errorf("llm.url = %q, want the trimmed URL", cfg.Llm.URL)
+	}
+	diskCfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if diskCfg.Llm.URL != "https://gateway.internal:8000/v1" {
+		t.Errorf("persisted llm.url = %q, want the trimmed URL", diskCfg.Llm.URL)
+	}
+}
+
+// A local endpoint is the common manual-configuration case for a self-hosted
+// gateway, so the shared validator must not narrow what "valid" means.
+func TestApplyManualConfig_AcceptsLocalhostURL(t *testing.T) {
+	isolateLLMConnectionTest(t)
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{}
+
+	if err := applyManualConfig(configPath, cfg, providerTUIResult{url: "http://localhost:8000/v1", model: "some-model"}); err != nil {
+		t.Fatalf("applyManualConfig rejected a localhost URL: %v", err)
+	}
+	if cfg.Llm.URL != "http://localhost:8000/v1" {
+		t.Errorf("llm.url = %q, want the localhost URL unchanged", cfg.Llm.URL)
 	}
 }
 
