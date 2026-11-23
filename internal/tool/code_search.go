@@ -254,8 +254,10 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		sb.WriteString("\n")
 	}
 
-	if err != nil && errStr != "" {
-		sb.WriteString(fmt.Sprintf("Warning: %s\n", strings.TrimSpace(errStr)))
+	// Git can return success after finding a match even if another blob was
+	// unreadable. Preserve that diagnostic so partial results stay explicit.
+	if warning := strings.TrimSpace(errStr); warning != "" {
+		sb.WriteString(fmt.Sprintf("Warning: %s\n", warning))
 	}
 
 	return sb.String(), nil
