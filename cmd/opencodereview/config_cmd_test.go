@@ -1339,6 +1339,28 @@ func TestSetConfigValueUnknownKey(t *testing.T) {
 	}
 }
 
+func TestConfigSetHelpListsKeysAndValueFormats(t *testing.T) {
+	for _, text := range []string{
+		strings.Join(supportedConfigKeys, ", "),
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models",
+		"MCP server fields: type, command, args, env, url, headers, tools, setup",
+		"args, env and tools use JSON arrays",
+		"headers use JSON objects",
+	} {
+		if !strings.Contains(configSetCmd.Long, text) {
+			t.Errorf("config set help does not contain %q", text)
+		}
+	}
+}
+
+func TestConfigUnsetHelpListsAllSupportedKeys(t *testing.T) {
+	for _, key := range []string{"provider", "max_tokens", "effort", "custom_providers.<name>", "mcp_servers.<name>"} {
+		if !strings.Contains(configUnsetCmd.Long, key) {
+			t.Errorf("config unset help does not contain %q", key)
+		}
+	}
+}
+
 func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 	// The unknown-key error message must stay byte-identical after extracting
 	// supportedConfigKeys, and must be generated from that list.
