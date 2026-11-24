@@ -2,7 +2,7 @@
 
 Cảm ơn bạn đã quan tâm đến việc đóng góp cho OpenCodeReview! Mọi đóng góp đều quan trọng — dù là sửa lỗi chính tả, báo cáo lỗi, hay triển khai một tính năng mới.
 
-[English Version](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md)
+[English Version](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md) | [Türkçe](CONTRIBUTING.tr-TR.md)
 
 ## Quy tắc ứng xử
 
@@ -199,7 +199,7 @@ Tài liệu là một phần quan trọng của OpenCodeReview. Chúng tôi hoan
 - Làm rõ các giải thích gây khó hiểu hoặc bổ sung ngữ cảnh còn thiếu
 - Thêm ví dụ sử dụng cho các lệnh hoặc tùy chọn cấu hình
 - Cập nhật nội dung lỗi thời (ví dụ: sau khi một tính năng thay đổi)
-- Dịch hoặc cải thiện tài liệu bản địa hóa (`docs/i18n/README.zh-CN.md`, `docs/i18n/README.ja-JP.md`, `docs/i18n/README.ko-KR.md`, `docs/i18n/README.ru-RU.md`, `docs/i18n/README.vi-VN.md`, `docs/i18n/CONTRIBUTING.zh-CN.md`, `docs/i18n/CONTRIBUTING.ja-JP.md`, `docs/i18n/CONTRIBUTING.ko-KR.md`, `docs/i18n/CONTRIBUTING.ru-RU.md`, `docs/i18n/CONTRIBUTING.vi-VN.md`)
+- Dịch hoặc cải thiện các file README và hướng dẫn đóng góp đã bản địa hóa trong `docs/i18n/`
 
 ### Quy trình tài liệu
 
