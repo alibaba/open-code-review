@@ -23,7 +23,7 @@ func TestPreparePreservesInventoryAcrossRenameLimit(test *testing.T) {
 	}
 	for _, source := range []string{"alpha-old.go", "vendor/beta-old.go"} {
 		var content strings.Builder
-		for index := 0; index < 30; index++ {
+		for index := range 30 {
 			fmt.Fprintf(&content, "%s distinctive payload number %d\n", source, index)
 		}
 		if err := os.WriteFile(filepath.Join(repo, source), []byte(content.String()), 0600); err != nil {

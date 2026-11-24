@@ -112,7 +112,7 @@ func TestRenderMarkdownCodeBlockBackslashesMixedContent(test *testing.T) {
 	markdown := "Before \\*literal\\*.\n\n```text\n^example\\.com$\n\\\\server\\share\n```\n\nAnd `inline\\.code`.\n\n    ^other\\.com$\n\nAfter \\*literal\\*.\n"
 	plain := ansi.Strip(renderMarkdown(markdown, 120))
 	var lines []string
-	for _, line := range strings.Split(plain, "\n") {
+	for line := range strings.SplitSeq(plain, "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			lines = append(lines, trimmed)
 		}
@@ -134,7 +134,7 @@ func TestRenderMarkdownWrapAndRetention(test *testing.T) {
 		if expectedWidth == 0 {
 			expectedWidth = 80
 		}
-		for _, line := range strings.Split(rendered, "\n") {
+		for line := range strings.SplitSeq(rendered, "\n") {
 			if ansi.StringWidth(line) > expectedWidth {
 				test.Fatalf("line exceeds width %d: %q", expectedWidth, line)
 			}

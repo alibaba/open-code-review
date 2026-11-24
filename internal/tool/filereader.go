@@ -164,6 +164,9 @@ func (fr *FileReader) resolveWorkspacePath(rawPath string) (string, string, erro
 		if !pathutil.WithinBase(repoRoot, resolvedPrimary) {
 			return "", "", fmt.Errorf("file path %q is outside repository", rawPath)
 		}
+		if err := validateWorkspaceFile(rawPath, resolvedPrimary); err != nil {
+			return "", "", err
+		}
 		return resolvedPrimary, cleanRel, nil
 	}
 	if !os.IsNotExist(err) {
@@ -193,6 +196,9 @@ func (fr *FileReader) resolveWorkspacePath(rawPath string) (string, string, erro
 			if !pathutil.WithinBase(repoRoot, resolvedWin) {
 				return "", "", fmt.Errorf("file path %q is outside repository", rawPath)
 			}
+			if err := validateWorkspaceFile(rawPath, resolvedWin); err != nil {
+				return "", "", err
+			}
 			return resolvedWin, winNorm, nil
 		}
 		if !os.IsNotExist(winErr) {
@@ -210,6 +216,9 @@ func (fr *FileReader) resolveWorkspacePath(rawPath string) (string, string, erro
 			if !pathutil.WithinBase(repoRoot, resolvedMatch) {
 				return "", "", fmt.Errorf("file path %q is outside repository", rawPath)
 			}
+			if err := validateWorkspaceFile(rawPath, resolvedMatch); err != nil {
+				return "", "", err
+			}
 			return resolvedMatch, matchRel, nil
 		}
 		if os.IsNotExist(matchErr) {
@@ -223,6 +232,22 @@ func (fr *FileReader) resolveWorkspacePath(rawPath string) (string, string, erro
 			candidates: matches,
 		}
 	}
+}
+
+func validateWorkspaceFile(rawPath, resolvedPath string) error {
+	info, err := os.Stat(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("stat file %q: %w", rawPath, err)
+	}
+	return validateWorkspaceFileMode(rawPath, info.Mode())
+}
+
+func validateWorkspaceFileMode(path string, mode os.FileMode) error {
+	// Opening a FIFO can block before a reader is available to observe cancellation.
+	if mode&os.ModeNamedPipe != 0 {
+		return fmt.Errorf("file %q is a named pipe", path)
+	}
+	return nil
 }
 
 func findWorkspaceNormalizedMatches(repoRoot, winNorm string) []string {

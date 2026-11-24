@@ -84,7 +84,7 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list %s revision: %w", side, err)
 		}
-		for _, entry := range strings.Split(string(data), "\x00") {
+		for entry := range strings.SplitSeq(string(data), "\x00") {
 			if entry == "" {
 				continue
 			}
@@ -136,7 +136,7 @@ func safePath(filePath string) bool {
 	if !fs.ValidPath(filePath) || !filepath.IsLocal(filePath) || filePath == "." || strings.ContainsAny(filePath, "\\:\x00\r\n\t") {
 		return false
 	}
-	for _, component := range strings.Split(lower, "/") {
+	for component := range strings.SplitSeq(lower, "/") {
 		if component == ".." || component == ".git" || component == ".ssh" || component == ".aws" || component == ".gnupg" {
 			return false
 		}
@@ -222,7 +222,7 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 	}
 	if name == "file_read" || name == "code_search" {
 		filePath, _ := args["file_path"].(string)
-		for _, line := range strings.Split(stripSide(content), "\n") {
+		for line := range strings.SplitSeq(stripSide(content), "\n") {
 			if name == "code_search" && strings.HasPrefix(line, "File: ") {
 				filePath = strings.TrimPrefix(line, "File: ")
 			}

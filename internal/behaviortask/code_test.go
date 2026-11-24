@@ -86,7 +86,7 @@ func TestTruncationAndObservationRanges(test *testing.T) {
 	if err := os.WriteFile(filepath.Join(input.RepoDir, "large.go"), []byte(strings.Repeat("needle\n", 600)), 0600); err != nil {
 		test.Fatal(err)
 	}
-	for index := 0; index < 101; index++ {
+	for index := range 101 {
 		if err := os.WriteFile(filepath.Join(input.RepoDir, fmt.Sprintf("listed-%03d.go", index)), []byte("text"), 0600); err != nil {
 			test.Fatal(err)
 		}

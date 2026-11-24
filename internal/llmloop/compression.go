@@ -116,9 +116,8 @@ func stripMarkdownFences(s string) string {
 		}
 	}
 	s = strings.TrimSpace(s)
-	if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimSpace(s)
+	if before, ok := strings.CutSuffix(s, "```"); ok {
+		s = strings.TrimSpace(before)
 	}
 	return s
 }
@@ -393,9 +392,7 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 
 	// Registered before the goroutine starts so WaitBackground can never miss
 	// a job that was launched but has not run yet.
-	r.bg.Add(1)
-	go func() {
-		defer r.bg.Done()
+	r.bg.Go(func() {
 		defer cancel()
 		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, taskKey)
 
@@ -418,7 +415,7 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 		}
 		job.rebuilt = rebuilt
 		close(job.done)
-	}()
+	})
 }
 
 // tryApplyPendingCompression checks whether a background compression has

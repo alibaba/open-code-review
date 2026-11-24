@@ -706,7 +706,7 @@ func TestExecute_ResultBudgetCountsFormattedLine(t *testing.T) {
 	if i := strings.Index(body, "\nNote:"); i >= 0 {
 		body = body[:i]
 	}
-	for k := 0; k < 3; k++ {
+	for range 3 {
 		body = body[strings.IndexByte(body, '\n')+1:]
 	}
 	if len(body) > fileReadMaxResultBytes {

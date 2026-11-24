@@ -4,9 +4,30 @@
 package tool
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestValidateWorkspaceFileMode(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		mode    os.FileMode
+		wantErr bool
+	}{
+		{"regular", 0644, false},
+		{"named pipe", os.ModeNamedPipe | 0600, true},
+		{"irregular", os.ModeIrregular | 0644, false},
+		{"irregular named pipe", os.ModeIrregular | os.ModeNamedPipe | 0600, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateWorkspaceFileMode("source.go", tt.mode)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateWorkspaceFileMode(%v) = %v, want error %v", tt.mode, err, tt.wantErr)
+			}
+		})
+	}
+}
 
 func TestParseReviewMode(t *testing.T) {
 	tests := []struct {

@@ -380,7 +380,7 @@ func (p *Provider) resolveSelector(want string) (string, error) {
 	// on-disk spelling of every component still has to come from the
 	// directory listing.
 	resolved := ""
-	for _, part := range strings.Split(rel, "/") {
+	for part := range strings.SplitSeq(rel, "/") {
 		name, err := onDiskName(filepath.Join(root, filepath.FromSlash(resolved)), part)
 		if err != nil {
 			return "", err

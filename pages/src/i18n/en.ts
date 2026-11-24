@@ -196,7 +196,7 @@ export const en = {
   'docs.reviewFlag10Desc': 'Max tool call rounds per file; only takes effect when greater than template default',
   'docs.reviewFlag10Default': 'Built-in',
   'docs.reviewFlag11Desc': 'Max concurrent git subprocesses',
-  'docs.reviewNote': 'Note: <code>--from/--to</code> and <code>--commit</code> cannot be used together. When specifying <code>--from</code>, <code>--to</code> must also be specified.',
+  'docs.reviewNote': 'Note: <code>--from/--to</code> and <code>--commit</code> cannot be used together. With <code>--from</code> alone, the target defaults to <code>HEAD</code>.',
   'docs.scanTitle': 'ocr scan',
   'docs.scanDesc': '<code>ocr scan</code> reviews whole files instead of a diff - no Git history or meaningful diff required. Use it to audit an unfamiliar codebase, sweep a directory before a migration, or review any project where there is nothing to diff against.',
   'docs.scanVsTitle': 'ocr scan vs. ocr review',
