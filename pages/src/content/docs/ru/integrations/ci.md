@@ -86,7 +86,8 @@ curl -o .github/workflows/ocr-review.yml \
 
 С [2 декабря 2026 года](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/) событие `pull_request_target` будет по умолчанию блокироваться в публичных репозиториях на GitHub, если применимая политика событий Actions явно его не разрешает. Если вам нужно, чтобы OCR по-прежнему запускался автоматически при создании, обновлении или повторном открытии PR, откройте в репозитории **Settings → Actions → Policies** и [создайте или обновите политику для рабочего процесса](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
 
-- При создании политики нажмите **Add target** в разделе **Target workflows** и укажите `.github/workflows/ocr-review.yml`. Перед обновлением существующей политики убедитесь, что она применяется только к этому рабочему процессу.
+- При создании политики нажмите **Add target** в разделе **Target workflows** и укажите `.github/workflows/ocr-review.yml`.
+- Перед обновлением существующей политики убедитесь, что она применяется только к `.github/workflows/ocr-review.yml`.
 - В разделе **Restrict events** разрешите `pull_request_target` для автоматического ревью и `issue_comment` для повторного ревью по комментарию. При обновлении политики сохраните остальные необходимые события в списке разрешённых.
 - Выберите **Active** в поле **Enforcement status** и сохраните политику.
 
