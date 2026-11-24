@@ -115,7 +115,22 @@ func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
 	if !pathutil.WithinBase(repoRoot, resolvedPath) {
 		return "", fmt.Errorf("file path %q is outside repository", path)
 	}
+	info, err := os.Stat(resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("stat file %q: %w", path, err)
+	}
+	if err := validateWorkspaceFileMode(path, info.Mode()); err != nil {
+		return "", err
+	}
 	return resolvedPath, nil
+}
+
+func validateWorkspaceFileMode(path string, mode os.FileMode) error {
+	// Opening a FIFO can block before a reader is available to observe cancellation.
+	if mode&os.ModeNamedPipe != 0 {
+		return fmt.Errorf("file %q is a named pipe", path)
+	}
+	return nil
 }
 
 func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (string, error) {

@@ -1041,7 +1041,7 @@ func isAuxiliaryProviderField(field string) bool {
 }
 
 func validateProviderName(name string) error {
-	for _, segment := range strings.Split(name, ".") {
+	for segment := range strings.SplitSeq(name, ".") {
 		if strings.TrimSpace(segment) == "" {
 			return fmt.Errorf("invalid provider name %q: dot-separated segments must not be empty or whitespace", name)
 		}
@@ -1075,7 +1075,7 @@ func setCustomProviderField(cfg *Config, name, field, key, value string) error {
 // contain dots, but each dot-separated segment must be non-empty so a
 // mistyped key like mcp_servers..command cannot create a bogus entry.
 func validateMCPServerName(name string) error {
-	for _, segment := range strings.Split(name, ".") {
+	for segment := range strings.SplitSeq(name, ".") {
 		if strings.TrimSpace(segment) == "" {
 			return fmt.Errorf("invalid MCP server name %q: dot-separated segments must not be empty or whitespace", name)
 		}

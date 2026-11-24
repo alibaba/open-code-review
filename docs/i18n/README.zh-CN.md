@@ -35,7 +35,7 @@
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="../../README.md">English</a> | 简体中文 | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a> | <a href="README.vi-VN.md">Tiếng Việt</a>
+  <a href="../../README.md">English</a> | 简体中文 | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a> | <a href="README.tr-TR.md">Türkçe</a> | <a href="README.fr-FR.md">Français</a> | <a href="README.vi-VN.md">Tiếng Việt</a>
 </p>
 
 ---
@@ -102,8 +102,11 @@ Open Code Review 的核心设计理念是将确定性工程与 Agent 结合，�
 
 ## 如何使用
 
+<a id="supported-platforms"></a>
+
 ### 前置条件
 
+- **操作系统：** Windows、macOS 或 Linux。
 - **Git >= 2.41** — Open Code Review 依赖 Git 进行 diff 生成、代码搜索和仓库操作。
 
 <a id="supported-agents"></a>

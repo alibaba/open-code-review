@@ -2,7 +2,7 @@
 
 感谢你对 OpenCodeReview 的关注！无论是修复拼写错误、报告 Bug，还是实现新功能，每一份贡献都很有价值。
 
-[English version](../../CONTRIBUTING.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md) | [Tiếng Việt](CONTRIBUTING.vi-VN.md)
+[English version](../../CONTRIBUTING.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md) | [Türkçe](CONTRIBUTING.tr-TR.md) | [Tiếng Việt](CONTRIBUTING.vi-VN.md)
 
 ## 行为准则
 
@@ -189,7 +189,7 @@ make build
 - 完善表述不清的说明或补充缺失的上下文
 - 为命令或配置项添加使用示例
 - 更新过时的内容（例如功能变更后的文档同步）
-- 翻译或改进中英文文档（`docs/i18n/README.zh-CN.md`、`docs/i18n/CONTRIBUTING.zh-CN.md`）
+- 翻译 `docs/i18n/` 下的 README 和贡献指南，或改进已有译文
 
 ### 文档贡献流程
 
@@ -203,8 +203,11 @@ make build
 | --------------------------------- | ------------------ |
 | `README.md`                       | 项目主文档（英文） |
 | `docs/i18n/README.zh-CN.md`       | 中文翻译           |
+| `docs/i18n/README.tr-TR.md`       | 土耳其语翻译       |
+| `docs/i18n/README.fr-FR.md`       | 法语翻译           |
 | `CONTRIBUTING.md`                 | 贡献指南（英文）   |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | 贡献指南（中文）   |
+| `docs/i18n/CONTRIBUTING.tr-TR.md` | 贡献指南（土耳其语） |
 
 ## 提交变更
 

@@ -295,7 +295,7 @@ func (c *Client) Login(ctx context.Context, s Store, account string, newAccount,
 	}
 	registration := old
 	var auth *Auth
-	for n := 0; n < 2; n++ {
+	for n := range 2 {
 		var issued string
 		auth, err = c.loginAttempt(ctx, host, registration, old, noBrowser, consent, out, &issued, newCallbackServer)
 		var oauth *OAuthError
@@ -616,7 +616,7 @@ func (c *Client) credentials(ctx context.Context, s Store, account string) (*Aut
 
 func (c *Client) revokeSession(ctx context.Context, auth *Auth) error {
 	var err error
-	for n := 0; n < 3; n++ {
+	for n := range 3 {
 		var config discovery
 		err = c.discover(ctx, &config)
 		if err == nil {

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,9 +57,7 @@ type fakeLLM struct {
 // file. rateLimitOnce and hardFail are set by the caller before use.
 func newFakeLLM() *fakeLLM {
 	fileMarkers := make(map[string]string, len(markers))
-	for marker, name := range markers {
-		fileMarkers[marker] = name
-	}
+	maps.Copy(fileMarkers, markers)
 	return &fakeLLM{
 		mainInputTokens: 10,
 		attemptsByFile:  map[string]int{},
@@ -106,9 +105,7 @@ func (f *fakeLLM) attemptCounts() map[string]int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make(map[string]int, len(f.attemptsByFile))
-	for k, v := range f.attemptsByFile {
-		out[k] = v
-	}
+	maps.Copy(out, f.attemptsByFile)
 	return out
 }
 

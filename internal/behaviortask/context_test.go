@@ -94,7 +94,7 @@ func TestUTF8PageAndContextValidation(test *testing.T) {
 func TestLargeInventoryIsPagedBeforeFirstRequest(test *testing.T) {
 	runner := newTestRunner(test, fixture(test), nil, nil)
 	runner.deps.Template.MaxTokens = 16000
-	for index := 0; index < 2000; index++ {
+	for range 2000 {
 		runner.code.scope = append(runner.code.scope, Change{NewPath: "package/component.go"})
 	}
 	messages, err := runner.messages()

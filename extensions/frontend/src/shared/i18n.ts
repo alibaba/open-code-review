@@ -9,9 +9,10 @@
  * - `zh-cn` — Simplified Chinese (matches VS Code `zh-cn` / `zh-CN`)
  * - `ja-jp` — Japanese (matches VS Code `ja` / `ja-JP`)
  * - `ko-kr` — Korean (matches VS Code `ko` / `ko-KR`)
+ * - `tr-tr` — Turkish (matches VS Code `tr` / `tr-TR`)
  * - `ru-ru` — Russian (matches VS Code `ru` / `ru-RU`)
  */
-export type SupportedLocale = 'en' | 'zh-cn' | 'ja-jp' | 'ko-kr' | 'ru-ru';
+export type SupportedLocale = 'en' | 'zh-cn' | 'ja-jp' | 'ko-kr' | 'ru-ru' | 'tr-tr';
 
 const messages: Record<SupportedLocale, Record<string, string>> = {
   en: {
@@ -173,6 +174,138 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     'ext.git.workspaceVsHead': 'Workspace ↔ HEAD',
     'ext.cli.installOk': '✓ Install complete',
     'ext.cli.installFail': '✗ Install failed (exit ',
+  },
+
+  'tr-tr': {
+    "view.idle.configFirst": "Önce modeli yapılandırın",
+    "view.idle.reviewing": "İnceleniyor…",
+    "view.idle.selectBranch": "Karşılaştırılacak dalı seçin",
+    "view.idle.selectCommit": "Bir commit seçin",
+    "view.idle.noFiles": "İncelenecek dosya yok",
+    "view.idle.reviewAll": "Tüm değişiklikleri incele",
+    "view.idle.workspace": "Çalışma alanı",
+    "view.idle.branch": "Dalları karşılaştır",
+    "view.idle.commit": "Tek commit",
+    "view.idle.baseRef": "Temel referans",
+    "view.idle.targetRef": "Hedef referans",
+    "view.idle.chooseBranch": "Dal seçin",
+    "view.idle.commitHistory": "Commit geçmişi",
+    "view.idle.customPrompt": "Özel inceleme istemi (isteğe bağlı)",
+    "view.idle.manageCustom": "Özel sağlayıcıları yönet",
+    "view.idle.modelConfig": "Model ayarları",
+    "view.running.reviewLog": "İnceleme günlüğü",
+    "view.running.cancel": "İptal",
+    "view.done.comments": "yorum",
+    "view.done.files": "dosya",
+    "view.done.processLog": "İşlem günlüğü",
+    "view.empty.noIssues": "Sorun bulunamadı · Başarılı",
+    "view.empty.processLog": "İşlem günlüğü",
+    "view.cancelled.title": "İnceleme iptal edildi",
+    "view.failed.title": "İnceleme başarısız oldu.",
+    "view.failed.checkConfig": "Model ayarlarını kontrol edip yeniden deneyin.",
+    "view.failed.checkApiKey": "API anahtarını ve ağ bağlantısını kontrol edin.",
+    "view.failed.retry": "Yeniden dene",
+    "view.failed.processLog": "İşlem günlüğü",
+    "view.config.title": "Model yapılandırması",
+    "view.config.desc": "Kod incelemesine başlamak için bir LLM sağlayıcısı bağlayın",
+    "view.config.close": "Kapat",
+    "view.config.step1": "Ortam kurulumu",
+    "view.config.step2": "Sağlayıcı ayarları",
+    "view.config.checking": "ocr kontrol ediliyor…",
+    "view.config.notInstalled": "ocr yüklü değil",
+    "view.config.official": "Resmî sağlayıcı",
+    "view.config.custom": "Özel sağlayıcı",
+    "view.config.currentUse": "Şu anda kullanılan",
+    "view.config.notConfigured": "Yapılandırılmış sağlayıcı yok",
+    "view.config.officialLabel": "Resmî",
+    "view.config.customLabel": "Özel",
+    "view.config.legacyLabel": "Eski",
+    "view.config.model": "Model",
+    "view.config.customModel": "Özel model adı girin…",
+    "view.config.apiKey": "API anahtarı",
+    "view.config.apiKeyEnvHint": "Ortam değişkeniyle de ayarlanabilir",
+    "view.config.apiKeySaved": "Kaydedildi (korumak için boş bırakın)",
+    "view.config.testing": "Bağlantı sınanıyor…",
+    "view.config.testOk": "✓ Bağlandı",
+    "view.config.testFail": "✗ Bağlantı başarısız",
+    "view.config.previous": "Önceki",
+    "view.config.testFailDetail": "✗ Bağlantı başarısız: {message}",
+    "view.config.test": "Bağlantıyı sına",
+    "view.config.save": "Kaydet",
+    "view.config.continueProvider": "Sağlayıcı ayarlarına geç",
+    "view.config.providerName": "Sağlayıcı adı",
+    "view.config.protocol": "Protokol",
+    "view.config.baseUrl": "Temel URL",
+    "view.config.modelList": "Model listesi",
+    "view.config.modelListPlaceholder": "Virgülle ayırın; ör. model-a, model-b",
+    "view.config.authHeader": "Kimlik doğrulama başlığı",
+    "view.config.authHeaderHint": "Anthropic protokolü için isteğe bağlı x-api-key veya authorization",
+    "view.config.authHeaderDefault": "Varsayılan (Authorization)",
+    "view.config.backToList": "← Listeye dön",
+    "view.config.optional": "(isteğe bağlı)",
+    "view.config.ocrVersionTooltip": "Open Code Review CLI sürümü",
+    "view.env.installing": "ocr CLI yükleniyor…",
+    "view.env.checking": "Kontrol ediliyor, lütfen bekleyin…",
+    "view.env.ready": "Ortam hazır. Sağlayıcı ayarlarına geçin.",
+    "view.env.stepLead": "Adımları sırayla tamamlayın. Her adım başarılı olduğunda bir sonrakine geçin.",
+    "view.env.nodeHint": "Node.js bulunamadı. nodejs.org adresinden LTS sürümünü yükleyip VS Code'u yeniden başlatın.",
+    "view.env.npmHint": "npm bulunamadı. npm genellikle Node.js ile birlikte gelir; Node kurulumunuzu kontrol edin.",
+    "view.env.ocrHint": "OCR'yi tüm projeler için yüklemek üzere aşağıdaki npm komutunu terminalde çalıştırın veya “Tek tıkla yükle” düğmesine basın.",
+    "view.env.oneClickInstall": "Tek tıkla yükle",
+    "view.env.redetect": "Yeniden algıla",
+    "view.env.checkingStatus": "Kontrol ediliyor",
+    "view.env.readyStatus": "Hazır",
+    "view.env.notReady": "Hazır değil",
+    "view.env.pass": "Başarılı",
+    "view.env.fail": "Başarısız",
+    "view.env.waitPrev": "Önceki adım bekleniyor",
+    "view.env.copy": "Kopyala",
+    "view.env.copiedToast": "Kopyalandı ✓",
+    "cmp.custom.title": "Özel sağlayıcılar",
+    "cmp.custom.desc": "Kendi barındırdığınız LLM ağ geçitlerini ve uyumlu uç noktaları yönetin. Etkin inceleme modelini değiştirin.",
+    "cmp.custom.add": "Ekle",
+    "cmp.custom.empty": "Özel sağlayıcı yok",
+    "cmp.custom.addFirst": "Özel sağlayıcı ekle",
+    "cmp.custom.currentUse": "Şu anda kullanılan",
+    "cmp.custom.model": "Model",
+    "cmp.custom.edit": "Düzenle",
+    "cmp.custom.setCurrent": "Etkinleştir",
+    "cmp.custom.delete": "Sil",
+    "cmp.fileList.pending": "Bekleyen dosyalar",
+    "cmp.fileList.noChanges": "Değişen dosya yok",
+    "cmp.fileList.viewDiff": "Farkı görmek için tıklayın",
+    "cmp.log.waiting": "Çıktı bekleniyor",
+    "cmp.comment.view": "Görüntüle",
+    "cmp.comment.discard": "Reddet",
+    "cmp.password.hideSecret": "Gizli bilgiyi gizle",
+    "cmp.password.showSecret": "Gizli bilgiyi göster",
+    "cmp.select.placeholder": "Seçin",
+    "ext.commentController": "Open Code Review",
+    "ext.configPanelTitle": "Model yapılandırması",
+    "ext.config.legacyDisplayName": "Eski LLM uç noktası",
+    "ext.comment.threadLabel": "Kod incelemesi",
+    "ext.comment.pending": "⏳ [Bekliyor]",
+    "ext.comment.noSuggestion": "_💡 Kod önerisi yok; lütfen elle düzenleyin_",
+    "ext.comment.applyFailedStale": "Uygulanamadı: kodun konumu güncel değil. Yenileyip tekrar deneyin.",
+    "ext.comment.applyFailedLocked": "Uygulanamadı: dosya değiştirilemiyor. Salt okunur veya kilitli olup olmadığını kontrol edin.",
+    "ext.comment.statusApplied": "✅ [Uygulandı]",
+    "ext.comment.statusDiscarded": "✅ [Reddedildi]",
+    "ext.comment.statusFalsePositive": "✅ [Yanlış pozitif]",
+    "ext.comment.jumpFailed": "Konum bulunamadı: ",
+    "ext.comment.jumpNotAFile": ": açılabilir bir dosya değil.",
+    "ext.comment.jumpLineUnresolved": "{path} konumuna gidilemiyor: satır numarası belirlenemedi.",
+    "ext.comment.jumpFileMissing": "{path} konumuna gidilemiyor: dosya inceleme anlık görüntüsünde bulunamadı.",
+    "ext.comment.applyWorkspaceOnly": "Önerileri uygulama yalnızca çalışma alanı inceleme modunda kullanılabilir.",
+    "ext.deleteProviderConfirm": "“{name}” özel sağlayıcısı silinsin mi?",
+    "ext.deleteProviderConfirmBtn": "Sil",
+    "ext.git.justNow": "az önce",
+    "ext.git.hoursAgo": "{h} saat önce",
+    "ext.git.hourAgo": "1 saat önce",
+    "ext.git.yesterday": "dün",
+    "ext.git.daysAgo": "{d} gün önce",
+    "ext.git.workspaceVsHead": "Çalışma alanı ↔ HEAD",
+    "ext.cli.installOk": "✓ Yükleme tamamlandı",
+    "ext.cli.installFail": "✗ Yükleme başarısız (çıkış kodu ",
   },
 
   'zh-cn': {
@@ -812,7 +945,7 @@ export function t(locale: SupportedLocale, key: string): string {
 /**
  * Resolve a VS Code locale string to a {@link SupportedLocale}.
  * VS Code reports the display language either as a plain language code
- * (`ja`, `ko`, `ru`) or as a language/region pair (`zh-cn`), so both spellings
+ * (`ja`, `ko`, `ru`, `tr`) or as a language/region pair (`zh-cn`), so both spellings
  * map to the same translation. Matching is case-insensitive; variants without
  * a translation, such as `zh-tw` / `zh-hk`, fall back to English until their
  * translations are added.
@@ -827,6 +960,9 @@ export function resolveLocale(raw: string): SupportedLocale {
     case 'ko':
     case 'ko-kr':
       return 'ko-kr';
+    case 'tr':
+    case 'tr-tr':
+      return 'tr-tr';
     case 'ru':
     case 'ru-ru':
       return 'ru-ru';

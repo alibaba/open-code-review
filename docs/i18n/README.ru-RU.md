@@ -35,7 +35,7 @@
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский | <a href="README.vi-VN.md">Tiếng Việt</a>
+  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский | <a href="README.tr-TR.md">Türkçe</a> | <a href="README.fr-FR.md">Français</a> | <a href="README.vi-VN.md">Tiếng Việt</a>
 </p>
 
 ---
@@ -102,8 +102,11 @@ Open Code Review — это CLI-инструмент для код-ревью н
 
 ## Как использовать
 
+<a id="supported-platforms"></a>
+
 ### Предварительные требования
 
+- **Операционная система:** Windows, macOS или Linux.
 - **Git >= 2.41** — Open Code Review использует Git для генерации diff, поиска по коду и операций с репозиторием.
 
 <a id="supported-agents"></a>

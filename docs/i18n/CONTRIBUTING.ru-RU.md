@@ -2,7 +2,7 @@
 
 Спасибо за интерес к развитию OpenCodeReview! Важен любой вклад — будь то исправленная опечатка, сообщение о баге или новая функциональность.
 
-[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | Русский | [Tiếng Việt](CONTRIBUTING.vi-VN.md)
+[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | Русский | [Türkçe](CONTRIBUTING.tr-TR.md) | [Tiếng Việt](CONTRIBUTING.vi-VN.md)
 
 ## Кодекс поведения
 
@@ -191,7 +191,7 @@ make build
 - Прояснение запутанных объяснений и добавление недостающего контекста
 - Добавление примеров использования команд и параметров конфигурации
 - Обновление устаревшего содержимого (например, после изменения функциональности)
-- Перевод и улучшение локализованной документации (`docs/i18n/README.zh-CN.md`, `docs/i18n/README.ja-JP.md`, `docs/i18n/README.ko-KR.md`, `docs/i18n/README.ru-RU.md`, `docs/i18n/CONTRIBUTING.zh-CN.md`, `docs/i18n/CONTRIBUTING.ja-JP.md`, `docs/i18n/CONTRIBUTING.ko-KR.md`, `docs/i18n/CONTRIBUTING.ru-RU.md`)
+- Перевод или улучшение README и руководств для участников в `docs/i18n/`
 
 ### Процесс работы с документацией
 
@@ -208,11 +208,14 @@ make build
 | `docs/i18n/README.ja-JP.md`       | Японский перевод                           |
 | `docs/i18n/README.ko-KR.md`       | Корейский перевод                          |
 | `docs/i18n/README.ru-RU.md`       | Русский перевод                            |
+| `docs/i18n/README.tr-TR.md`       | Турецкий перевод                           |
+| `docs/i18n/README.fr-FR.md`       | Французский перевод                        |
 | `CONTRIBUTING.md`                 | Руководство контрибьютора (английский)     |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | Руководство контрибьютора (китайский)      |
 | `docs/i18n/CONTRIBUTING.ja-JP.md` | Руководство контрибьютора (японский)       |
 | `docs/i18n/CONTRIBUTING.ko-KR.md` | Руководство контрибьютора (корейский)      |
 | `docs/i18n/CONTRIBUTING.ru-RU.md` | Руководство контрибьютора (русский)        |
+| `docs/i18n/CONTRIBUTING.tr-TR.md` | Руководство контрибьютора (турецкий)       |
 
 ## Отправка изменений
 

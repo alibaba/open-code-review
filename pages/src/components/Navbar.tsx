@@ -15,6 +15,7 @@ const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'zh', label: '中文' }, // allow-non-english: language options are labelled in their own language
   { value: 'ja', label: '日本語' }, // allow-non-english: language options are labelled in their own language
   { value: 'ko', label: '한국어' }, // allow-non-english: language options are labelled in their own language
+  { value: 'tr', label: 'Türkçe' }, // allow-non-english: language options are labelled in their own language
   { value: 'ru', label: 'Русский' }, // allow-non-english: language options are labelled in their own language
   { value: 'vi', label: 'Tiếng Việt' }, // allow-non-english: language options are labelled in their own language
 ];
@@ -25,6 +26,7 @@ const LANG_BADGE: Record<Language, string> = {
   ja: 'あ', // allow-non-english: single-glyph locale badge
   ko: '한', // allow-non-english: single-glyph locale badge
   ru: 'Ru',
+  tr: 'Tr',
   vi: 'Vi',
 };
 
