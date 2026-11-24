@@ -81,7 +81,7 @@ curl -o .github/workflows/ocr-review.yml \
 
 - 새 정책을 만드는 경우 **Target workflows**에서 **Add target**을 클릭하고 `.github/workflows/ocr-review.yml`을 지정하세요.
 - 기존 정책을 업데이트하기 전에 `.github/workflows/ocr-review.yml`만 대상으로 하는지 확인하세요.
-- **Restrict events**에서 자동 리뷰용 `pull_request_target`과 댓글로 리뷰를 다시 요청할 때 쓰는 `issue_comment`를 허용하세요. 기존 정책을 업데이트할 때는 다른 필수 이벤트도 허용 목록에 남겨 두세요.
+- **Restrict events**에서 자동 리뷰용 `pull_request_target`과 댓글로 리뷰를 다시 요청할 때 쓰는 `issue_comment`를 허용하세요.
 - **Enforcement status**를 **Active**로 설정하고 정책을 저장하세요.
 
 ### 필요한 시크릿 {#required-secrets}

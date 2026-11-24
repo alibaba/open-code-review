@@ -15,7 +15,7 @@ Starting [December 2, 2026](https://github.blog/changelog/2026-11-02-pull_reques
 
 - For a new policy, click **Add target** under **Target workflows** and specify `.github/workflows/ocr-review.yml`.
 - Before updating an existing policy, check that it applies only to `.github/workflows/ocr-review.yml`.
-- Under **Restrict events**, allow `pull_request_target` for automatic reviews and `issue_comment` for comment-triggered re-reviews. When updating a policy, keep any other required events in the allowlist.
+- Under **Restrict events**, allow `pull_request_target` for automatic reviews and `issue_comment` for comment-triggered re-reviews.
 - Set **Enforcement status** to **Active** and save the policy.
 
 The core of the demo is a single action step:

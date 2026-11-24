@@ -88,7 +88,7 @@ curl -o .github/workflows/ocr-review.yml \
 
 - При создании политики нажмите **Add target** в разделе **Target workflows** и укажите `.github/workflows/ocr-review.yml`.
 - Перед обновлением существующей политики убедитесь, что она применяется только к `.github/workflows/ocr-review.yml`.
-- В разделе **Restrict events** разрешите `pull_request_target` для автоматического ревью и `issue_comment` для повторного ревью по комментарию. При обновлении политики сохраните остальные необходимые события в списке разрешённых.
+- В разделе **Restrict events** разрешите `pull_request_target` для автоматического ревью и `issue_comment` для повторного ревью по комментарию.
 - Выберите **Active** в поле **Enforcement status** и сохраните политику.
 
 ### Необходимые секреты

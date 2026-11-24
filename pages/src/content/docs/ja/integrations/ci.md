@@ -59,7 +59,7 @@ curl -o .github/workflows/ocr-review.yml \
 
 - ポリシーを作成する場合は、**Target workflows** の **Add target** をクリックし、`.github/workflows/ocr-review.yml` を指定します。
 - 既存のポリシーを更新する前に、`.github/workflows/ocr-review.yml` だけが対象になっていることを確認します。
-- **Restrict events** を選択し、自動レビュー用に `pull_request_target`、コメントによる再レビュー用に `issue_comment` を許可します。既存のポリシーを更新する場合は、ほかに必要なイベントも残します。
+- **Restrict events** を選択し、自動レビュー用に `pull_request_target`、コメントによる再レビュー用に `issue_comment` を許可します。
 - **Enforcement status** を **Active** に設定し、ポリシーを保存します。
 
 ### 必須の secret

@@ -73,7 +73,7 @@ curl -o .github/workflows/ocr-review.yml \
 
 - 新建策略时，在 **Target workflows** 下点击 **Add target**，指定 `.github/workflows/ocr-review.yml`。
 - 在更新已有策略之前，请先确认它只适用于 `.github/workflows/ocr-review.yml`。
-- 勾选 **Restrict events**，允许 `pull_request_target`（自动评审）和 `issue_comment`（通过评论触发复审）。更新已有策略时，保留其他必要事件。
+- 勾选 **Restrict events**，允许 `pull_request_target`（自动评审）和 `issue_comment`（通过评论触发复审）。
 - 将 **Enforcement status** 设为 **Active**，然后保存策略。
 
 ### 必需 secret

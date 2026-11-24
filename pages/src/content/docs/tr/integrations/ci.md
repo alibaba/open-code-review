@@ -54,7 +54,7 @@ curl -o .github/workflows/ocr-review.yml \
 
 - Yeni politika oluştururken **Target workflows** altında **Add target** düğmesine tıklayın ve `.github/workflows/ocr-review.yml` dosyasını belirtin.
 - Mevcut bir politikayı güncellemeden önce yalnızca `.github/workflows/ocr-review.yml` dosyasını hedeflediğini doğrulayın.
-- **Restrict events** altında, otomatik incelemeler için `pull_request_target`, yorumla tetiklenen yeniden incelemeler için `issue_comment` olayına izin verin. Mevcut bir politikayı güncellerken gerekli diğer olayları da izin verilenler listesinde tutun.
+- **Restrict events** altında, otomatik incelemeler için `pull_request_target`, yorumla tetiklenen yeniden incelemeler için `issue_comment` olayına izin verin.
 - **Enforcement status** ayarını **Active** olarak değiştirin ve politikayı kaydedin.
 
 ### Gerekli sırlar {#required-secrets}
