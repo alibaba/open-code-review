@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -161,10 +162,26 @@ func TestBuildSummaryCommentsList_TruncatesAndOneLines(t *testing.T) {
 	if !strings.Contains(got, "...") {
 		t.Errorf("expected truncation marker on long content, got:\n%s", got)
 	}
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if len(line) > 320 { // 280 content + small path/prefix overhead
 			t.Errorf("line not capped: len=%d %q", len(line), line)
 		}
+	}
+}
+
+func TestBuildSummaryCommentsList_TruncatesOnRuneBoundary(t *testing.T) {
+	// U+7A7A is three bytes in UTF-8, so 280 bytes ends one byte into the
+	// 94th rune.
+	const wide = "\u7a7a"
+	cs := []model.LlmComment{{Path: "a.go", Content: strings.Repeat(wide, 200)}}
+	got := buildSummaryCommentsList(cs)
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("summary list is not valid UTF-8: %q", got)
+	}
+	want := "- `a.go`: " + strings.Repeat(wide, 93) + "...\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -193,6 +210,45 @@ func TestMaybeRunPlan_SkipPathsDoNotCallLLM(t *testing.T) {
 	guidance2 := a2.maybeRunPlan(t.Context(), model.ScanItem{Path: "x.go", Content: "package x"}, "rule")
 	if !strings.Contains(guidance2, "no pre-scan plan") {
 		t.Errorf("SkipPlan should suppress plan, got %q", guidance2)
+	}
+}
+
+func TestPlanEnabledFor(t *testing.T) {
+	tpl := makeTemplateWithFullScan()
+	tpl.PlanTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "plan {{file_content}}"}},
+	}
+	tpl.PlanModeLineThreshold = 200
+	a := newAgentForTest(t, tpl)
+
+	cases := []struct {
+		name     string
+		item     model.ScanItem
+		expected bool
+	}{
+		{name: "below threshold", item: model.ScanItem{Content: "content", LineCount: 199}},
+		{name: "boundary", item: model.ScanItem{Content: "content", LineCount: 200}, expected: true},
+		{name: "above threshold", item: model.ScanItem{Content: "content", LineCount: 201}, expected: true},
+		{name: "empty", item: model.ScanItem{LineCount: 200}},
+		{name: "binary", item: model.ScanItem{Content: "content", LineCount: 200, IsBinary: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := a.planEnabledFor(tc.item); got != tc.expected {
+				t.Errorf("planEnabledFor(%+v) = %v, want %v", tc.item, got, tc.expected)
+			}
+		})
+	}
+
+	a.args.SkipPlan = true
+	if a.planEnabledFor(model.ScanItem{Content: "content", LineCount: 200}) {
+		t.Error("SkipPlan should suppress planning for every file")
+	}
+
+	a.args.SkipPlan = false
+	a.args.Template.PlanModeLineThreshold = 0
+	if !a.planEnabledFor(model.ScanItem{Content: "content", LineCount: 1}) {
+		t.Error("non-positive threshold should allow planning for eligible files")
 	}
 }
 
@@ -237,7 +293,7 @@ func TestRenderMessages(t *testing.T) {
 	}
 }
 
-func TestFilterLargeScans(t *testing.T) {
+func TestSelectScanItems_Large(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	tpl.MaxTokens = 40 // threshold = 32
 	a := newAgentForTest(t, tpl)
@@ -249,7 +305,7 @@ func TestFilterLargeScans(t *testing.T) {
 		{Path: "huge.go", Content: huge},
 		{Path: "b.go", Content: short},
 	}
-	out := a.filterLargeScans(in)
+	out := selectScanItemsForTest(t, a, in)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 kept, got %d", len(out))
 	}
@@ -260,23 +316,22 @@ func TestFilterLargeScans(t *testing.T) {
 	}
 }
 
-// exactNTokens builds a string that llm.CountTokens reports as exactly n
-// tokens, failing loudly if the tokenizer disagrees so fixture drift cannot
-// silently weaken the boundary assertions below.
+// exactNTokens uses a four-byte fragment that is one cl100k_base token, so it
+// also stays exact under CountTokens' four-bytes-per-token fallback.
 func exactNTokens(t *testing.T, n int) string {
 	t.Helper()
-	s := strings.TrimSpace(strings.Repeat("a ", n))
+	s := strings.Repeat("test", n)
 	if got := llm.CountTokens(s); got != n {
 		t.Fatalf("fixture drift: llm.CountTokens(<%d-token string>) = %d, want %d", n, got, n)
 	}
 	return s
 }
 
-// TestFilterLargeScans_Boundary pins the 80% threshold exactly: with
+// TestSelectScanItems_LargeBoundary pins the 80% threshold exactly: with
 // MaxTokens=100 the limit is 80, so an 80-token item is kept and an 81-token
-// one is dropped. TestFilterLargeScans above uses margins wide enough to pass
+// one is dropped. TestSelectScanItems_Large above uses margins wide enough to pass
 // at any threshold, so it does not pin the value.
-func TestFilterLargeScans_Boundary(t *testing.T) {
+func TestSelectScanItems_LargeBoundary(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	tpl.MaxTokens = 100 // threshold = 80
 	a := newAgentForTest(t, tpl)
@@ -285,7 +340,7 @@ func TestFilterLargeScans_Boundary(t *testing.T) {
 		{Path: "at-limit.go", Content: exactNTokens(t, 80)},
 		{Path: "over-limit.go", Content: exactNTokens(t, 81)},
 	}
-	out := a.filterLargeScans(in)
+	out := selectScanItemsForTest(t, a, in)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 kept, got %d", len(out))
 	}
@@ -294,7 +349,7 @@ func TestFilterLargeScans_Boundary(t *testing.T) {
 	}
 }
 
-func TestFilterLargeScans_NoLimit(t *testing.T) {
+func TestSelectScanItems_NoLimit(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	tpl.MaxTokens = 0
 	a := newAgentForTest(t, tpl)
@@ -302,37 +357,15 @@ func TestFilterLargeScans_NoLimit(t *testing.T) {
 		{Path: "a.go", Content: "anything"},
 		{Path: "b.go", Content: strings.Repeat("x ", 1000)},
 	}
-	out := a.filterLargeScans(in)
+	out := selectScanItemsForTest(t, a, in)
 	if len(out) != 2 {
 		t.Errorf("with MaxTokens=0 nothing should be filtered, got %d", len(out))
 	}
 }
 
-func TestInjectScanContentMap(t *testing.T) {
-	tpl := makeTemplateWithFullScan()
-	a := newAgentForTest(t, tpl)
-	a.args.Tools.Register(tool.NewFileReadDiff(tool.DiffMap{}))
-
-	a.items = []model.ScanItem{
-		{Path: "x.go", Content: "package x"},
-		{Path: "y.go", Content: "package y"},
-	}
-	a.injectScanContentMap()
-
-	p, ok := a.args.Tools.Get(tool.FileReadDiff.Name())
-	if !ok {
-		t.Fatal("file_read_diff not registered")
-	}
-	frd := p.(*tool.FileReadDiffProvider)
-	res, err := frd.Execute(t.Context(), map[string]any{
-		"path_array": []any{"x.go", "y.go", "missing.go"},
-	})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if !strings.Contains(res, "package x") || !strings.Contains(res, "package y") {
-		t.Errorf("missing scan content:\n%s", res)
-	}
+func selectScanItemsForTest(t *testing.T, a *Agent, items []model.ScanItem) []model.ScanItem {
+	t.Helper()
+	return selectedScanItems(a.selectScanItems(items))
 }
 
 func TestNewAgent_SetsSessionMode(t *testing.T) {
@@ -396,8 +429,8 @@ func (c *blockingScanCompressionClient) CompletionsWithCtx(ctx context.Context, 
 	r := c.round
 	c.mu.Unlock()
 
-	if r == 1 {
-		content := strings.Repeat("word ", 650)
+	if r <= 2 {
+		content := strings.Repeat("word ", 325)
 		return &llm.ChatResponse{
 			Choices: []llm.Choice{{
 				Message: llm.ResponseMessage{
@@ -416,7 +449,7 @@ func (c *blockingScanCompressionClient) CompletionsWithCtx(ctx context.Context, 
 		}, nil
 	}
 
-	// Round 2+: wait until the background compression goroutine has reached
+	// Round 3+: wait until the background compression goroutine has reached
 	// the mock (closed c.started) before returning task_done. This eliminates
 	// the race where the main loop finishes before compression starts,
 	// ensuring WaitBackground is the only thing holding Run open.
@@ -497,7 +530,7 @@ func TestScanAgent_WaitBackground_NoLeakOnRun(t *testing.T) {
 
 	// Verify that a.Run has NOT returned yet (held by a.runner.WaitBackground()).
 	// Use a timeout rather than default: the main goroutine's entire post-loop
-	// cleanup (RunPerFile return → dispatchSubtasks → Finalize) completes in
+	// cleanup (RunMainTask return → dispatchSubtasks → Finalize) completes in
 	// under 1ms on any machine, so 200ms is a generous upper bound. If Run
 	// returns within this window, WaitBackground is not holding it.
 	select {

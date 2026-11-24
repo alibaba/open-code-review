@@ -5,14 +5,21 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const (
+	SubprocessTerminateDuration = 800 * time.Millisecond
+	CloseAllTimeout             = 2800 * time.Millisecond
 )
 
 // Client wraps a single MCP server connection.
@@ -21,6 +28,12 @@ type Client struct {
 	session *mcp.ClientSession
 	tools   []*mcp.Tool
 }
+
+// subprocessTerminateDuration is the per-stage shutdown budget handed to every
+// CommandTransport. It defaults to SubprocessTerminateDuration and is widened
+// only by tests running under the race detector, whose re-exec'd children pay
+// ~1s of runtime overhead before noticing stdin EOF.
+var subprocessTerminateDuration = SubprocessTerminateDuration
 
 // NewClient starts an MCP server subprocess (stdio transport), initializes the
 // connection, and caches the list of available tools. The context governs the
@@ -39,7 +52,7 @@ func NewClient(ctx context.Context, name, command string, args, env []string, di
 		nil,
 	)
 
-	transport := &mcp.CommandTransport{Command: cmd}
+	transport := &mcp.CommandTransport{Command: cmd, TerminateDuration: subprocessTerminateDuration}
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("connect to MCP server %q: %w", name, err)
@@ -52,7 +65,7 @@ func NewClient(ctx context.Context, name, command string, args, env []string, di
 		}
 	}()
 
-	toolsResult, err := session.ListTools(ctx, nil)
+	tools, err := listAllTools(ctx, session)
 	if err != nil {
 		return nil, fmt.Errorf("list tools from MCP server %q: %w", name, err)
 	}
@@ -61,7 +74,7 @@ func NewClient(ctx context.Context, name, command string, args, env []string, di
 	return &Client{
 		name:    name,
 		session: session,
-		tools:   toolsResult.Tools,
+		tools:   tools,
 	}, nil
 }
 
@@ -108,7 +121,7 @@ func NewRemoteClient(ctx context.Context, name, url string, headers map[string]s
 		}
 	}()
 
-	toolsResult, err := session.ListTools(ctx, nil)
+	tools, err := listAllTools(ctx, session)
 	if err != nil {
 		return nil, fmt.Errorf("list tools from remote MCP server %q: %w", name, err)
 	}
@@ -117,8 +130,25 @@ func NewRemoteClient(ctx context.Context, name, url string, headers map[string]s
 	return &Client{
 		name:    name,
 		session: session,
-		tools:   toolsResult.Tools,
+		tools:   tools,
 	}, nil
+}
+
+// listAllTools returns every tool the server publishes. tools/list is a
+// paginated method: a result carries at most one page plus a nextCursor, and a
+// client that issues a single ListTools call sees only that first page. The
+// SDK's iterator follows the cursor to exhaustion, so a server that pages its
+// catalog (any explicit PageSize, or more tools than the SDK's default page)
+// does not silently lose the tools past the first page.
+func listAllTools(ctx context.Context, session *mcp.ClientSession) ([]*mcp.Tool, error) {
+	var tools []*mcp.Tool
+	for tool, err := range session.Tools(ctx, nil) {
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, tool)
+	}
+	return tools, nil
 }
 
 // headerTransport injects custom headers into every HTTP request and surfaces
@@ -175,6 +205,62 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 
 func (c *Client) Close() error {
 	return c.session.Close()
+}
+
+// CloseAll closes every client concurrently and returns all failures in
+// configuration order, or stops waiting when ctx expires. CommandTransport
+// bounds each client to at most three SubprocessTerminateDuration waits, so
+// concurrency keeps the phase bounded by the slowest server.
+//
+// The result channel is buffered to len(clients), so close goroutines that
+// are still running when ctx expires write their result and exit without
+// blocking — the CLI returns promptly while the SDK escalates to SIGKILL
+// in the background, and the OS reaps whatever outlives the process. On the
+// timeout path, errors already collected from servers that finished in time
+// are preserved alongside the deadline error.
+func CloseAll(ctx context.Context, clients []*Client) error {
+	if len(clients) == 0 {
+		return nil
+	}
+
+	type result struct {
+		idx int
+		err error
+	}
+	results := make(chan result, len(clients))
+	for i, c := range clients {
+		go func(idx int, cl *Client) {
+			var err error
+			if cerr := cl.Close(); cerr != nil {
+				err = fmt.Errorf("close MCP server %q: %w", cl.name, cerr)
+			}
+			results <- result{idx, err}
+		}(i, c)
+	}
+
+	errs := make([]error, len(clients))
+	for range clients {
+		select {
+		case r := <-results:
+			errs[r.idx] = r.err
+		case <-ctx.Done():
+			// Drain any results that arrived concurrently with the deadline,
+			// so errors from servers that finished in time are not lost.
+			for {
+				select {
+				case r := <-results:
+					errs[r.idx] = r.err
+				default:
+					timeoutErr := fmt.Errorf("timed out closing MCP server(s): %w", ctx.Err())
+					if joined := errors.Join(errs...); joined != nil {
+						return errors.Join(timeoutErr, joined)
+					}
+					return timeoutErr
+				}
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func contentToText(contents []mcp.Content) string {

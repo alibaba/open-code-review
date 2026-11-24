@@ -43,11 +43,17 @@ Output review spec for host-agent delegation (no LLM required).`,
 	Example: `  # Preview which files will be reviewed
   ocr delegate preview --from main --to feature
 
+  # Preview committed changes on the current branch against main
+  ocr delegate preview --from main
+
   # Preview workspace changes
   ocr delegate preview
 
   # Get rules for multiple files (grouped by content)
-  ocr delegate rule internal/agent/agent.go internal/llm/client.go`,
+  ocr delegate rule internal/agent/agent.go internal/llm/client.go
+
+  # Get rules at HEAD for the same range
+  ocr delegate rule --from main internal/agent/agent.go`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -117,6 +123,10 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 }
 
 // preview runs the agent's file-selection logic and returns the preview result.
+//
+// No Template is passed, which leaves the per-file diff-size ceiling disabled:
+// the host agent reviews with its own context window, so OCR's max_tokens is
+// not the limit that applies to delegated work.
 func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, error) {
 	return agent.Preview(ctx, agent.Args{
 		RepoDir:    dc.cc.RepoDir,

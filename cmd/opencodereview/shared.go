@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -21,6 +23,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
@@ -72,6 +75,23 @@ func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
 		return template.ParseEffort(cfg.Effort)
 	}
 	return template.EffortDefault, nil
+}
+
+// previewMaxTokens resolves the per-file prompt ceiling the way a real run
+// resolves it, but without building an LLM runtime: resolveMaxTokens needs only
+// the app config, which loads independently of endpoint resolution. A preview
+// therefore reports the limit its run would actually apply while keeping its
+// property of requiring no API key.
+func previewMaxTokens(templateDefault, cliOverride int) (int, error) {
+	cfgPath, err := defaultConfigPath()
+	if err != nil {
+		return 0, err
+	}
+	appCfg, err := LoadAppConfig(cfgPath)
+	if err != nil {
+		return 0, fmt.Errorf("load app config: %w", err)
+	}
+	return resolveMaxTokens(templateDefault, appCfg, cliOverride)
 }
 
 // loadCommonContext validates the working directory, loads the embedded
@@ -173,16 +193,16 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 }
 
 // llmRuntime bundles the LLM-side state both subcommands need once they've
-// decided to actually run a session: tool definitions, an app-language
+// decided to actually run a session: an app-language
 // adjusted template (mutated in place via ApplyLanguage), the LLM client,
 // the resolved model name, and a fresh comment collector.
 type llmRuntime struct {
-	Client       llm.LLMClient
-	Model        string
-	Provider     string // resolved provider name (non-secret label; empty for non-provider endpoints)
-	PlanToolDefs []llm.ToolDef
-	MainToolDefs []llm.ToolDef
-	Collector    *tool.CommentCollector
+	Endpoint  llm.ResolvedEndpoint
+	Client    llm.LLMClient
+	Model     string
+	Provider  string // resolved provider name (non-secret label; empty for non-provider endpoints)
+	Source    string // resolved configuration source (non-secret label)
+	Collector *tool.CommentCollector
 	// RetryCollector observes every LLM HTTP attempt this run makes. It is
 	// created here rather than on the session or the agent because the client is
 	// built before either exists, and it is per-run rather than package-level so
@@ -190,7 +210,11 @@ type llmRuntime struct {
 	// carry no RequestMeta, so every attempt is dropped and the frozen report is
 	// nil.
 	RetryCollector *llm.RetryCollector
-	AppCfg         *Config
+	// RawHolder is the opt-in raw LLM capture sink (OCR_RAW_LOGGING=1),
+	// created with the client because the middleware mounts at construction;
+	// the per-session writer is bound later by bindRawWriter. Nil when off.
+	RawHolder *llm.RawHolder
+	AppCfg    *Config
 	// RuntimeConfig holds the allowlisted, non-secret runtime settings (protocol,
 	// sanitized endpoint host, language, timeout) derived from the resolved
 	// endpoint and app config, for the run manifest's runtime_config_sha256. It
@@ -205,19 +229,12 @@ type llmRuntime struct {
 // so a well-behaved run can never produce one.
 var newRetryCollector = llm.NewRetryCollector
 
-// loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
+// loadLLMRuntime reads the app config
 // from the user's default config path (applying the configured language to
 // tpl — defaulting when the config file is absent), resolves the LLM
 // endpoint (honoring resolveOpts), and
 // returns the runtime bundle. tpl is mutated in place.
-func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts llm.ResolveOptions) (*llmRuntime, error) {
-	toolEntries, err := toolsconfig.Load(toolConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("load tools: %w", err)
-	}
-	planToolDefs := agent.BuildToolDefs(toolEntries, true)
-	mainToolDefs := agent.BuildToolDefs(toolEntries, false)
-
+func loadLLMRuntime(tpl *template.Template, resolveOpts llm.ResolveOptions) (*llmRuntime, error) {
 	cfgPath, err := defaultConfigPath()
 	if err != nil {
 		return nil, err
@@ -241,14 +258,20 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 
 	retryCollector := newRetryCollector()
 
+	var rawHolder *llm.RawHolder
+	if llm.RawLoggingEnabled() {
+		rawHolder = llm.NewRawHolder()
+	}
+
 	return &llmRuntime{
-		Client:         llm.NewLLMClient(ep, retryCollector),
+		Endpoint:       ep,
+		Client:         llm.NewLLMClient(ep, retryCollector, rawHolder),
 		Model:          ep.Model,
 		Provider:       ep.Provider,
-		PlanToolDefs:   planToolDefs,
-		MainToolDefs:   mainToolDefs,
+		Source:         ep.Source,
 		Collector:      tool.NewCommentCollector(),
 		RetryCollector: retryCollector,
+		RawHolder:      rawHolder,
 		AppCfg:         appCfg,
 		RuntimeConfig: agent.RuntimeConfig{
 			Protocol:     ep.Protocol,
@@ -257,6 +280,35 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 			Timeout:      ep.Timeout,
 		},
 	}, nil
+}
+
+// bindRawWriter opens the session's raw capture file and attaches it to the
+// run's raw holder; defer the returned closer. A nil holder (capture off)
+// or an open failure returns a no-op closer: raw capture must never fail a
+// review.
+func bindRawWriter(holder *llm.RawHolder, repoDir string, sess *session.SessionHistory) func() {
+	if holder == nil {
+		return func() {}
+	}
+	w, err := session.NewRawFileWriter(repoDir, sess.SessionID)
+	return attachRawWriter(holder, w, err)
+}
+
+func attachRawWriter(holder *llm.RawHolder, w *session.RawFileWriter, err error) func() {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: raw logging disabled for this run: %v\n", err)
+		return func() {}
+	}
+	holder.Set(w)
+	return func() {
+		// Detach before closing: LLM calls that run after this closer must
+		// bypass capture, not write to a closed file. Without this the
+		// guarantee depends on defer registration order.
+		holder.Set(nil)
+		if err := w.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: close raw file: %v\n", err)
+		}
+	}
 }
 
 // sanitizeEndpointHost extracts the credential-free host[:port] from a full LLM
@@ -288,18 +340,12 @@ func applyCLIExcludes(cc *commonContext, patterns []string) {
 	cc.FileFilter.Exclude = append(cc.FileFilter.Exclude, patterns...)
 }
 
-// excludeToolDef returns a copy of defs with any entries whose function name
-// matches name removed. Used by `ocr scan` to hide tools that don't make
-// sense in full-scan mode (e.g. file_read_diff).
-func excludeToolDef(defs []llm.ToolDef, name string) []llm.ToolDef {
-	out := make([]llm.ToolDef, 0, len(defs))
-	for _, d := range defs {
-		if d.Function.Name == name {
-			continue
-		}
-		out = append(out, d)
+func loadToolDefs(names []string) ([]llm.ToolDef, error) {
+	entries, err := toolsconfig.LoadDefault()
+	if err != nil {
+		return nil, err
 	}
-	return out
+	return toolsconfig.Resolve(entries, names)
 }
 
 // quietHandle wraps the restorer returned by whichever stdout redirection
@@ -311,12 +357,16 @@ type quietHandle struct {
 }
 
 // isMachineReadable reports whether the output format writes a structured
-// document to stdout that must not be interleaved with progress text. Both
-// json and sarif move [ocr] progress lines off stdout and suppress the trace
-// summary, which is already carried inside the document.
+// document to stdout that must not be interleaved with progress text. json and
+// sarif move [ocr] progress lines off stdout and suppress the trace summary,
+// which is already carried inside the document. html joins them for the second
+// reason resolveOutputWriter consults this: it must not run the exported page
+// through stripAnsiWriter, which would eat the ESC bytes in trace-quoted
+// source. It is not a value validateOutputFormat accepts, so it reaches this
+// function only from `session export`.
 func isMachineReadable(outputFormat string) bool {
 	switch strings.ToLower(strings.TrimSpace(outputFormat)) {
-	case "json", "sarif":
+	case "json", "sarif", "html":
 		return true
 	default:
 		return false
@@ -334,7 +384,7 @@ func isMachineReadable(outputFormat string) bool {
 //     Every result document (json, sarif, text) is written straight to
 //     os.Stdout and never through stdout.Writer(), so stdout stays a single
 //     parseable document while stderr carries the live progress.
-//   - otherwise: no-op, progress stays on stdout.
+//   - otherwise: progress stays on stdout, styled according to --color.
 func newQuietHandle(outputFormat, audience string) *quietHandle {
 	h := &quietHandle{}
 	switch {
@@ -342,6 +392,14 @@ func newQuietHandle(outputFormat, audience string) *quietHandle {
 		h.fn = stdout.Quiet()
 	case isMachineReadable(outputFormat):
 		h.fn = stdout.Swap(os.Stderr)
+	}
+	restoreRouting := h.fn
+	restoreStyle := stdout.StyleProgress(resolveColorFor(stdout.Writer()), resolveColorFor(os.Stderr))
+	h.fn = func() {
+		restoreStyle()
+		if restoreRouting != nil {
+			restoreRouting()
+		}
 	}
 	return h
 }
@@ -482,31 +540,118 @@ func (w *stripAnsiWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// lazyFileWriter defers os.Create until the first Write so a run that never
-// produces output (LLM failure, preview error, interruption) leaves an
-// existing target file untouched instead of truncating it to zero bytes. The
-// "Results written" hint is printed to stderr only after the first successful
-// Write, so agents never see a path hint for a file that stayed empty or was
-// never persisted.
+const outputTempPrefix = ".ocr-out-"
+
+// createOutputTemp creates a collision-resistant file in the target directory.
+// Unlike os.CreateTemp, the 0666 mode preserves os.Create's umask-sensitive
+// permissions for new output files.
+func createOutputTemp(dir string) (*os.File, error) {
+	for range 100 {
+		path := filepath.Join(dir, outputTempPrefix+rand.Text())
+		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
+		if err == nil {
+			return f, nil
+		}
+		if !os.IsExist(err) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("too many temporary output filename collisions in %s", dir)
+}
+
+// resolveOutputCommitPath preserves os.Create's behavior for an existing
+// symlink: write through the link to its target instead of replacing the link
+// itself during the final rename.
+func resolveOutputCommitPath(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return path, nil
+		}
+		return "", fmt.Errorf("inspect output path %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return path, nil
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve output symlink %s: %w", path, err)
+	}
+	return resolved, nil
+}
+
+func cleanupOutputTemp(file *os.File, path string) error {
+	var cleanupErr error
+	if file != nil {
+		if err := file.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close temporary output file: %w", err))
+		}
+	}
+	if path != "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove temporary output file %s: %w", path, err))
+		}
+	}
+	return cleanupErr
+}
+
+// lazyFileWriter defers creating a same-directory temporary file until the
+// first Write. Close syncs and atomically renames a complete result into place,
+// so a run that never writes or encounters a write failure leaves the previous
+// target untouched. Replacing the directory entry intentionally gives readers
+// a consistent old-or-new snapshot; open descriptors and hard links keep
+// referring to the old inode.
 type lazyFileWriter struct {
-	path     string
-	strip    bool // strip ANSI when the target format is text
-	once     sync.Once
-	file     *os.File
-	stripper *stripAnsiWriter
-	err      error // os.Create error
-	writeErr error // first error from a Write
-	hinted   bool  // hint already printed after a successful Write
+	path       string
+	strip      bool // strip ANSI when the target format is text
+	once       sync.Once
+	file       *os.File // temporary file committed by Close
+	tempPath   string
+	commitPath string
+	stripper   *stripAnsiWriter
+	err        error // temporary-file creation or setup error
+	writeErr   error // first error from a Write
+	closed     bool
+	closeErr   error
 }
 
 func (w *lazyFileWriter) Write(p []byte) (int, error) {
+	if w.closed {
+		return 0, os.ErrClosed
+	}
 	w.once.Do(func() {
-		f, err := os.Create(w.path)
+		commitPath, err := resolveOutputCommitPath(w.path)
 		if err != nil {
-			w.err = fmt.Errorf("create output file %s: %w", w.path, err)
+			w.err = err
 			return
 		}
+
+		var existingMode os.FileMode
+		hasExistingMode := false
+		if info, statErr := os.Stat(commitPath); statErr == nil {
+			existingMode = info.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+			hasExistingMode = true
+		} else if !os.IsNotExist(statErr) {
+			w.err = fmt.Errorf("inspect output file %s: %w", w.path, statErr)
+			return
+		}
+
+		f, err := createOutputTemp(filepath.Dir(commitPath))
+		if err != nil {
+			w.err = fmt.Errorf("create temporary output file for %s: %w", w.path, err)
+			return
+		}
+		if hasExistingMode {
+			if err := f.Chmod(existingMode); err != nil {
+				cleanupErr := cleanupOutputTemp(f, f.Name())
+				w.err = errors.Join(fmt.Errorf("preserve output permissions for %s: %w", w.path, err), cleanupErr)
+				return
+			}
+		}
+
 		w.file = f
+		w.tempPath = f.Name()
+		w.commitPath = commitPath
 		if w.strip {
 			w.stripper = &stripAnsiWriter{dst: f}
 		}
@@ -523,10 +668,6 @@ func (w *lazyFileWriter) Write(p []byte) (int, error) {
 	}
 	if err != nil && w.writeErr == nil {
 		w.writeErr = err
-	}
-	if err == nil && !w.hinted {
-		w.hinted = true
-		fmt.Fprintf(os.Stderr, "[ocr] Results written to %s\n", w.path)
 	}
 	return n, err
 }
@@ -552,22 +693,54 @@ func writeOutError(out io.Writer) error {
 	return nil
 }
 
-// Close closes the underlying file. It is a no-op when the file was never
-// created (no output produced), so failure paths cannot leave a fresh empty
-// file behind.
+// Close commits a complete output file atomically. It is a no-op when no Write
+// occurred, and it discards the temporary file when a Write already failed.
 func (w *lazyFileWriter) Close() error {
+	if w.closed {
+		return w.closeErr
+	}
+	w.closed = true
 	if w.file == nil {
 		return nil
 	}
-	return w.file.Close()
+	if w.writeErr != nil {
+		w.closeErr = cleanupOutputTemp(w.file, w.tempPath)
+		w.file = nil
+		w.tempPath = ""
+		return w.closeErr
+	}
+	if err := w.file.Sync(); err != nil {
+		cleanupErr := cleanupOutputTemp(w.file, w.tempPath)
+		w.file = nil
+		w.tempPath = ""
+		w.closeErr = errors.Join(fmt.Errorf("sync output file %s: %w", w.path, err), cleanupErr)
+		return w.closeErr
+	}
+	if err := w.file.Close(); err != nil {
+		cleanupErr := cleanupOutputTemp(w.file, w.tempPath)
+		w.file = nil
+		w.tempPath = ""
+		w.closeErr = errors.Join(fmt.Errorf("close output file %s: %w", w.path, err), cleanupErr)
+		return w.closeErr
+	}
+	w.file = nil
+	if err := os.Rename(w.tempPath, w.commitPath); err != nil {
+		cleanupErr := cleanupOutputTemp(nil, w.tempPath)
+		w.tempPath = ""
+		w.closeErr = errors.Join(fmt.Errorf("replace output file %s: %w", w.path, err), cleanupErr)
+		return w.closeErr
+	}
+	w.tempPath = ""
+	fmt.Fprintf(os.Stderr, "[ocr] Results written to %s\n", w.path)
+	return nil
 }
 
 // resolveOutputWriter resolves the --output target into a writer plus a
 // cleanup function.
 //   - "" or "-"      → os.Stdout with a no-op cleanup (colors preserved, no hint)
-//   - otherwise      → a lazyFileWriter over os.Create(path), deferred until the
-//     first Write; text format wraps the file in stripAnsiWriter so ANSI
-//     colors never reach the result file.
+//   - otherwise      → a lazyFileWriter over a same-directory temporary file,
+//     deferred until the first Write and atomically committed by Close; text
+//     format wraps the file in stripAnsiWriter so ANSI colors never reach it.
 //
 // Fail-fast checks (directory target, missing parent) run here without
 // creating or truncating anything; deeper errors (permissions, disk) surface
@@ -604,6 +777,7 @@ type ResultProvider interface {
 	// that skipped / failed the summary phase.
 	ProjectSummary() string
 	ToolCalls() map[string]int64
+	ToolFailures() []llmloop.ToolFailureDetail
 	// SessionID returns the persisted session identifier so callers can show it
 	// in JSON output or failure diagnostics. Returns "" when no session was
 	// created.
@@ -653,7 +827,7 @@ func emitRunResult(
 	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
-	duration := time.Since(startTime)
+	duration := reviewDuration(ag, startTime)
 	telemetry.RecordReviewDuration(ctx, duration)
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
@@ -661,12 +835,13 @@ func emitRunResult(
 
 	traceID := telemetry.TraceIDFromContext(ctx)
 	manifest := ag.RunManifest()
+	analysis := analysisOutputOf(ag)
 
 	// JSON and SARIF are machine-readable formats written to stdout; they
 	// share the same suppression of trace summaries and early stdout restore.
 	machineReadable := isMachineReadable(outputFormat)
 
-	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
+	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 && analysis == nil {
 		if outputFormat == "json" {
 			return outputJSONNoFiles(traceID, llmIdentity, out)
 		}
@@ -693,6 +868,10 @@ func emitRunResult(
 		})
 	}
 
+	if outputFormat == "sarif" {
+		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+	}
+	comments = inCommentSeverityOrder(comments, comments)
 	if outputFormat == "json" {
 		var resumeInfo *agent.ResumeInfo
 		if p, ok := ag.(resumeInfoProvider); ok {
@@ -705,10 +884,7 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
-	}
-	if outputFormat == "sarif" {
-		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, analysis)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
 	// Between the comments/warnings block and the project summary: the report is
@@ -716,7 +892,10 @@ func emitRunResult(
 	// after them but must not separate the summary from the end of output.
 	outputRetryReportText(out, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
-		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", sanitizeTerminal(summary))
+		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", markdownForOutput(out, summary))
+	}
+	if analysis != nil {
+		outputAnalysisText(out, analysis)
 	}
 	// Text rendering ignores fmt.Fprintf write errors; surface them here so a
 	// failed --output write (permission, disk full) fails the command non-zero

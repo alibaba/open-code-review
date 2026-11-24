@@ -55,7 +55,62 @@ func TestCountMessagesTokens_IncludesNativePayload(t *testing.T) {
 	}
 }
 
-func TestGroupIntoRounds(t *testing.T) {
+// TestCountMessagesTokens_IncludesToolCalls guards against under-counting
+// assistant turns that invoke tools under protocols where tool calls live on
+// ToolCalls rather than a Native payload (e.g. OpenAI chat completions).
+func TestCountMessagesTokens_IncludesToolCalls(t *testing.T) {
+	withoutTools := []llm.Message{msg("user", "hello world")}
+	withTools := []llm.Message{
+		msg("user", "hello world"),
+		llm.NewToolCallMessage("", []llm.ToolCall{
+			{
+				ID: "call_1",
+				Function: llm.FunctionCall{
+					Name:      "file_write",
+					Arguments: strings.Repeat("content line\n", 100),
+				},
+			},
+		}, llm.NativeTurn{}, ""),
+	}
+
+	base := CountMessagesTokens(withoutTools)
+	got := CountMessagesTokens(withTools)
+	if got <= base {
+		t.Errorf("CountMessagesTokens with tool calls = %d, want more than base count %d", got, base)
+	}
+
+	expectedToolTokens := (len("call_1") + len("file_write") + len(strings.Repeat("content line\n", 100))) / 4
+	if diff := got - base; diff < expectedToolTokens-10 || diff > expectedToolTokens+10 {
+		t.Errorf("token diff for tool calls = %d, expected roughly %d", diff, expectedToolTokens)
+	}
+}
+
+func TestPartitionMessages_AccountsForToolCalls(t *testing.T) {
+	largeArgs := strings.Repeat("argument data ", 200) // ~2800 bytes => ~700 tokens
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "task"),
+		llm.NewToolCallMessage("", []llm.ToolCall{
+			{
+				ID: "call_large",
+				Function: llm.FunctionCall{
+					Name:      "code_search",
+					Arguments: largeArgs,
+				},
+			},
+		}, llm.NativeTurn{}, ""),
+		msg("tool", "search result"),
+	}
+
+	if part := partitionMessages(msgs, 100, 0); part.activeCount != 0 || part.compressEnd != len(msgs) {
+		t.Errorf("large tool arguments exceed the budget: %+v", part)
+	}
+	if part := partitionMessages(msgs, 10000, 0); part.activeCount != 1 || part.compressEnd != 2 {
+		t.Errorf("round should fit under the larger budget: %+v", part)
+	}
+}
+
+func TestPartitionMessages_CompleteRounds(t *testing.T) {
 	messages := []llm.Message{
 		msg("system", "sys"),
 		msg("user", "prompt"),
@@ -67,37 +122,23 @@ func TestGroupIntoRounds(t *testing.T) {
 		msg("assistant", "resp3"),
 	}
 
-	rounds := groupIntoRounds(messages, 2)
-	if len(rounds) != 3 {
-		t.Fatalf("expected 3 rounds, got %d", len(rounds))
-	}
-
-	if rounds[0].assistantIdx != 2 {
-		t.Errorf("round[0].assistantIdx = %d, want 2", rounds[0].assistantIdx)
-	}
-	if len(rounds[0].toolIdxs) != 2 {
-		t.Errorf("round[0] should have 2 tool messages, got %d", len(rounds[0].toolIdxs))
-	}
-	if rounds[1].assistantIdx != 5 {
-		t.Errorf("round[1].assistantIdx = %d, want 5", rounds[1].assistantIdx)
-	}
-	if rounds[2].assistantIdx != 7 {
-		t.Errorf("round[2].assistantIdx = %d, want 7", rounds[2].assistantIdx)
-	}
-	if len(rounds[2].toolIdxs) != 0 {
-		t.Errorf("round[2] should have 0 tool messages")
+	for offset, start := range []int{7, 5, 2} {
+		reserve := PromptTokenLimit(1000) - CountMessagesTokens(messages[:2]) - CountMessagesTokens(messages[start:]) - 1
+		part := partitionMessages(messages, 1000, reserve)
+		if part.compressEnd != start || part.activeCount != offset+1 {
+			t.Errorf("want %d complete rounds starting at %d: %+v", offset+1, start, part)
+		}
 	}
 }
 
-func TestGroupIntoRounds_NoAssistant(t *testing.T) {
+func TestPartitionMessages_NoAssistant(t *testing.T) {
 	messages := []llm.Message{
 		msg("system", "sys"),
 		msg("user", "prompt"),
 		msg("user", "another"),
 	}
-	rounds := groupIntoRounds(messages, 2)
-	if len(rounds) != 0 {
-		t.Errorf("expected 0 rounds, got %d", len(rounds))
+	if part := partitionMessages(messages, 1000, 0); part.activeCount != 0 || part.compressEnd != 2 {
+		t.Errorf("a fitting user-only tail needs no compression: %+v", part)
 	}
 }
 
@@ -123,11 +164,48 @@ func TestPartitionMessages_EverythingFits(t *testing.T) {
 		msg("tool", "ok"),
 	}
 	result := partitionMessages(messages, 100000, 0)
-	if result.activeCount != 0 {
-		t.Errorf("activeCount = %d, want 0 (everything fits)", result.activeCount)
+	if result.activeCount != 1 {
+		t.Errorf("activeCount = %d, want 1 (everything fits)", result.activeCount)
 	}
-	if result.compressEnd != len(messages) {
-		t.Errorf("compressEnd = %d, want %d", result.compressEnd, len(messages))
+	if result.compressEnd != result.frozenEnd {
+		t.Errorf("compressEnd = %d, want %d", result.compressEnd, result.frozenEnd)
+	}
+}
+
+func TestCompressionSummary(t *testing.T) {
+	for _, fixture := range []struct{ text, want string }{
+		{"a<think>private</think>b", "ab"},
+		{"private</think>", ""},
+		{"private notes\n</think>\nfinal answer", "final answer"},
+		{"`malformed <think>private</think>", "`malformed"},
+		{"The `<think>` tag is literal.", "The `<think>` tag is literal."},
+		{"```json\n \t\n```", ""},
+		{"~~~~go\n\n~~~~~", ""},
+		{"```go\n\n", ""},
+		{"~~~go\n\n", ""},
+		{"~~~go\n~~~\n\n~~~json\n~~~", ""},
+		{"```token``` is a keyword\n```", "```token``` is a keyword\n```"},
+		{"~~~md\n    ~~~", "~~~md\n    ~~~"},
+		{"```md\nKeep finding A.", "```md\nKeep finding A."},
+		{"```json\n{}\n```", "```json\n{}\n```"},
+		{"~~~text\nKeep finding A.\n~~~", "~~~text\nKeep finding A.\n~~~"},
+		{"```json\n```\nKeep finding A.", "```json\n```\nKeep finding A."},
+		{"```text\n<think>notes</think>\n```", ""},
+		{"<think>notes</think>\nFinal answer with `</think>`.", "Final answer with `</think>`."},
+		{"<think>Quote `</think>` literally.</think>\nFinal answer", "Final answer"},
+		{"<think>Quote `</think>` literally.\nNo final answer", ""},
+		{"```go\nf()\n```\nFixed the caller.<think>notes</think>", "```go\nf()\n```\nFixed the caller."},
+		{"Use \\` here. <think>private</think> Escape \\` there.", "Use \\` here.  Escape \\` there."},
+		{`Keep \<think>literal\</think>.`, `Keep \<think>literal\</think>.`},
+		{"```go\nf()\n```\nFixed the caller.", "```go\nf()\n```\nFixed the caller."},
+		{"```xml\n<config><think>off</think></config>\n```", "```xml\n<config><think>off</think></config>\n```"},
+		{"```go\n// <think>\n````\nAnswer<think>notes</think>", "```go\n// <think>\n````\nAnswer"},
+		{"<think>\n~~~xml\n</think>\n~~~\nstill reasoning", ""},
+		{"Delimiter `.\n\n<think>private</think>\n\nAnother `.", "Delimiter `.\n\n\n\nAnother `."},
+	} {
+		if got := compressionSummary(fixture.text); got != fixture.want {
+			t.Errorf("compressionSummary(%q) = %q, want %q", fixture.text, got, fixture.want)
+		}
 	}
 }
 
@@ -155,6 +233,11 @@ func TestStripMarkdownFences(t *testing.T) {
 		{
 			name:  "fence with surrounding whitespace",
 			input: "  ```json\n{}\n```  ",
+			want:  "{}",
+		},
+		{
+			name:  "single-line json fence",
+			input: "```json{}```",
 			want:  "{}",
 		},
 		{

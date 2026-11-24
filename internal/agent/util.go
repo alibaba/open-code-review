@@ -101,9 +101,8 @@ func stripMarkdownFences(s string) string {
 		}
 	}
 	s = strings.TrimSpace(s)
-	if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimSpace(s)
+	if before, ok := strings.CutSuffix(s, "```"); ok {
+		s = strings.TrimSpace(before)
 	}
 	return s
 }
@@ -139,7 +138,7 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 func countMessagesTokens(msgs []llm.Message) int {
 	var total int
 	for _, m := range msgs {
-		total += llm.CountTokens(m.ExtractText())
+		total += llm.CountTokens(m.ExtractText()) + m.EstimatedTokens()
 	}
 	return total
 }

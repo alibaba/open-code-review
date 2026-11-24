@@ -24,37 +24,47 @@ var sessionSubDir = "sessions"
 // $HOME/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl.
 // It is safe for concurrent use by multiple goroutines.
 type jsonlWriter struct {
-	mu          sync.Mutex
-	sessionID   string
-	repoDir     string
-	gitBranch   string
-	model       string
-	reviewMode  string
-	diffFrom    string
-	diffTo      string
-	diffCommit  string
-	scanPaths   []string
-	resumedFrom string
-	file        *os.File
-	writer      *bufio.Writer
-	lastUUID    string // tracks chain of records via parentUuid
+	mu              sync.Mutex
+	sessionID       string
+	repoDir         string
+	gitBranch       string
+	model           string
+	llmSource       string
+	reviewMode      string
+	diffFrom        string
+	diffTo          string
+	diffCommit      string
+	scanPaths       []string
+	resumedFrom     string
+	analysisEnabled bool
+	file            *os.File
+	writer          *bufio.Writer
+	lastUUID        string // tracks chain of records via parentUuid
 }
 
 // newJSONLWriter creates and opens a new JSONL writer for the given session.
 func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOptions) (*jsonlWriter, error) {
 	jw := &jsonlWriter{
-		sessionID:   sessionID,
-		repoDir:     repoDir,
-		gitBranch:   gitBranch,
-		model:       model,
-		reviewMode:  opts.ReviewMode,
-		diffFrom:    opts.DiffFrom,
-		diffTo:      opts.DiffTo,
-		diffCommit:  opts.DiffCommit,
-		scanPaths:   append([]string(nil), opts.ScanPaths...),
-		resumedFrom: opts.ResumedFrom,
+		sessionID:       sessionID,
+		repoDir:         repoDir,
+		gitBranch:       gitBranch,
+		model:           model,
+		llmSource:       opts.LLMSource,
+		reviewMode:      opts.ReviewMode,
+		diffFrom:        opts.DiffFrom,
+		diffTo:          opts.DiffTo,
+		diffCommit:      opts.DiffCommit,
+		scanPaths:       append([]string(nil), opts.ScanPaths...),
+		resumedFrom:     opts.ResumedFrom,
+		analysisEnabled: opts.AnalysisEnabled,
 	}
-	if err := jw.open(); err != nil {
+	var err error
+	if opts.tracePath != "" {
+		err = jw.openFile(opts.tracePath, os.O_EXCL)
+	} else {
+		err = jw.open()
+	}
+	if err != nil {
 		return nil, err
 	}
 	return jw, nil
@@ -112,7 +122,11 @@ func (jw *jsonlWriter) open() error {
 	}
 
 	filename := filepath.Join(sessionDir, jw.sessionID+".jsonl")
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	return jw.openFile(filename, os.O_TRUNC)
+}
+
+func (jw *jsonlWriter) openFile(filename string, flags int) error {
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|flags, 0600)
 	if err != nil {
 		return fmt.Errorf("open session file: %w", err)
 	}
@@ -145,6 +159,12 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 		"gitBranch":  jw.gitBranch,
 		"model":      jw.model,
 	}
+	if jw.llmSource != "" {
+		rec["llmSource"] = jw.llmSource
+	}
+	if jw.analysisEnabled {
+		rec["analysis"] = AnalysisOptions{Enabled: true}
+	}
 	if jw.reviewMode != "" {
 		rec["reviewMode"] = jw.reviewMode
 	}
@@ -167,6 +187,9 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
 	jw.writeRecordLocked(rec)
+	if jw.analysisEnabled {
+		jw.writer.Flush()
+	}
 	jw.lastUUID = uuid
 	return uuid
 }
@@ -295,6 +318,9 @@ func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, request
 		"request_no":  requestNo,
 		"error":       errorMsg,
 		"duration_ms": duration.Milliseconds(),
+	}
+	if jw.llmSource != "" {
+		rec["llmSource"] = jw.llmSource
 	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid

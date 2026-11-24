@@ -14,7 +14,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -23,10 +23,11 @@ flowchart TD
 ```
 
 编排逻辑位于
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 包，主要文件有：`agent.go`（分发与按组编排）、`grouping.go`（语义文件分组）、
-`preview.go`（文件过滤）和 `util.go`（辅助）；工具调用循环与记忆压缩位于相邻的
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)。
+`selection.go`（文件过滤）、`preview.go`（`--preview` 报告）和 `util.go`（辅助）；
+工具调用循环与记忆压缩位于相邻的
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/)。
 两个入口点值得关注：`Agent.Run`（流水线顶部）和 `Agent.dispatchSubtasks`
 （per-group 扇出）。
 
@@ -49,7 +50,7 @@ untracked 文件从磁盘读取并作为整文件新增处理，以便 commit �
 ## 五重门文件过滤
 
 diff 加载后，每个文件经过
-[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go)。
+[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)。
 该函数返回以下之一：
 
 ```
@@ -59,8 +60,9 @@ unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
 ```
 
-……或文件被保留时返回空。`deleted` **不**由 `whyExcluded` 返回；它在 `Preview()`
-中随后计算——当一个被保留文件的 diff 报告 `IsDeleted` 时。各门按以下顺序执行：
+……或文件被保留时返回空。`deleted` 和 `too_large` **不**由 `whyExcluded` 返回；
+它们由 `selectFiles` 在各门之后施加——`deleted` 用于 diff 报告 `IsDeleted` 的被保留
+文件，`too_large` 用于仅 diff 本身就超过 `max_tokens` 80% 的文件。各门按以下顺序执行：
 
 1. `binary`——二进制文件先被丢弃。
 2. `user_exclude`——你项目的 `exclude` 总是优先。
@@ -74,8 +76,13 @@ default_path    — matched a built-in test-file exclude pattern
 
 噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，
 位于 diff-provider 层，通过 `internal/diff/git.go` 中的 `providerDirIgnoreDirs`
-列表——这些目录的 diff 被解析后由 `filterDiffs` 剔除，永远不会到达 per-file
-过滤器。
+列表——这些目录的 diff 被解析后即被剔除，永远不会到达 per-file 过滤器。
+Preview 将这些文件报告为 `provider_directory`；`include` 规则无法让它们变为可评审。
+
+该列表按路径前缀匹配，因此只覆盖**仓库根目录**下的目录。嵌套的同名目录会进入
+per-file 过滤，并由 `default_path` 排除：`vendor/pkg/x.go` 报告为
+`provider_directory`，而 `api/vendor/pkg/x.go` 报告为 `default_path`，只有后者能被
+`include` 规则重新纳入。
 
 运行 `ocr review --preview` 可不花 token 查看完整过滤结果。完整算法见
 [评审规则](../review-rules/#how-files-are-filtered)。
@@ -120,8 +127,8 @@ otherwise                                    { skip plan }
 
 对小 diff，plan 只会增加延迟、没有价值，因此被静默跳过，main 循环直接运行。对较大
 diff，OCR 做一次**单次** `PLAN_TASK` LLM 调用——不发送 `Tools` 字段，因此模型
-在 plan 期间不能调用工具。只读工具子集（`code_search`、`file_read_diff`、
-`file_find`——`tools.json` 中 `plan_task` 标志为 `true` 的那三个）作为纯文本
+在 plan 期间不能调用工具。只读工具子集（`code_search`、`file_read`、`file_read_diff`、
+`file_find`——由 `task_template.json` 中的 `PLAN_TASK.tool_references` 选择）作为纯文本
 通过 `{{plan_tools}}` 占位符（由 `formatToolDefs` 渲染）嵌入，
 让模型知道后续可用什么。模型返回一份清单，作为 main prompt 中的
 `{{plan_guidance}}`。
@@ -129,8 +136,8 @@ diff，OCR 做一次**单次** `PLAN_TASK` LLM 调用——不发送 `Tools` 字
 ### 阶段 2——main 循环（多轮）
 
 main 循环组装 `MAIN_TASK` prompt，与模型展开工具调用对话。完整工具集在
-plan 阶段工具基础上加 **`task_done`**、**`code_comment`** 和
-**`file_read`**——完整清单见[工具](../tools/)。
+plan 阶段工具引用基础上加 **`task_done`** 和 **`code_comment`**——
+完整清单见[工具](../tools/)。
 
 整个 main 循环最多重复 `MAX_REVIEW_ROUNDS` 次（由 `--effort` 控制：
 `low` = 1 轮，`medium` = 2 轮（默认），`high` = 3 轮）。第 2 轮起会剥离
@@ -172,6 +179,13 @@ loop up to MAX_TOOL_REQUEST_TIMES (default 100):
 | MAX_TOKENS 的 60 % | `tokenSoftThreshold` | 启动**异步**后台压缩；当前循环不中断继续。 |
 | MAX_TOKENS 的 80 % | `tokenWarningThreshold` | 在发送下一个请求前**同步**运行压缩。 |
 
+选择 active 区轮次前，OCR 先为**可见摘要**预留空间，不超过配置的输出上限、上下文窗口的
+20% 余量和扣除固定提示词及摘要包装后的剩余空间。部分提供方也把推理 token 计入输出。
+如果压缩请求自身距离 80% 警告阈值还有余量，OCR 可以在配置的输出上限内增加生成预算，
+同时要求模型将摘要正文控制在预留空间内。重建后的会话仍须通过大小检查。
+这些限制独立于累计预算 `--max-tokens-budget`；将累计预算设为零
+并不会禁用上下文压缩。
+
 ### 三个区
 
 ```mermaid
@@ -186,34 +200,27 @@ flowchart LR
 ```
 
 一“轮”是一条 assistant 消息加上其后跟随的工具结果消息。`partitionMessages`
-从末尾向前遍历轮次，保留能装入 `(0.80 × MAX_TOKENS) - reservedTokens` 的尽可能
-多的轮。更早的内容成为 **compress 区**。
+从末尾向前遍历轮次，在 token 数严格小于 `(0.80 × MAX_TOKENS) - reservedTokens`
+的前提下保留尽可能多的轮。预留预算包括前两条消息（含已有摘要）、新摘要正文的
+预留空间及其包装开销。更早的内容成为 **compress 区**。compress 区为空时，会话保持
+不变；原会话仍低于警告阈值时，后台压缩不会把固定前缀之后的全部轮次都变成摘要。
 
 compress 区被渲染为 XML，用 `MEMORY_COMPRESSION_TASK` prompt 交给模型；返回的
 摘要被追加到原始 user 消息内，包在 `<previous_review_summary>` 标签里。
 
-压缩后：`messages = frozen[2] + compressed_user_msg + active`。
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … call MEMORY_COMPRESSION_TASK …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+压缩后：`messages = system + (original_user + summary) + active`。
+重建的会话会使用同一套本地 token 估算进行检查，并且必须比原会话更小。缺少压缩
+模板、摘要为空或压缩后没有变小时，均保留原始历史。摘要模板不可用或重建结果
+超限时会返回错误，不会丢弃任何原始消息。
 
 ### 异步 vs 同步
 
 异步路径让 main 循环在后台压缩运行时继续产出工具调用；当下一次 token 检查发生
 时，已就绪的摘要会通过 `tryApplyPendingCompression` 应用。若比例在异步任务完成前越过
-警告阈值，循环会停顿并同步运行 `runCompression`——保证下一个请求总是装得下。
+警告阈值，循环会停顿并同步运行 `runCompression`。应用后台摘要时，会保留创建
+快照之后追加的消息。如果会话仍无法严格低于本地警告阈值，循环会以
+`StopCompression` 停止，而不是静默丢弃未压缩的历史。本地估算并不保证请求符合
+提供方实际的上下文窗口容量。
 
 ## 评论处理流水线
 
@@ -250,9 +257,9 @@ if countMessagesTokens(messages) > tokenLimit {
 这会在巨大 diff（自动生成的 lock 文件、触及数千行的重构）耗费请求之前把它们拦截下来。
 被跳过的那一组作为非致命警告在 stdout 报告，并加入 JSON `warnings` 数组。
 
-第二个检查在 `filterLargeDiffs` 中运行：若 diff 单独超过 `MAX_TOKENS` 的 80 %，
-它在分组与分发发生之前就被过滤掉。第三道守卫在分组内部运行——见上文的
-`enforceGroupTokenBudget`。
+第二个检查在 `selectFiles` 中运行：若 diff 单独超过 `MAX_TOKENS` 的 80 %，
+它在分组与分发发生之前就被过滤掉，并报告为 `too_large`。第三道守卫在分组内部
+运行——见上文的 `enforceGroupTokenBudget`。
 
 ## 模板与占位符
 
@@ -291,8 +298,8 @@ if countMessagesTokens(messages) > tokenLimit {
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go)。
 模板本身不是 CLI 覆盖——要修改 prompt，你需要编辑
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-并重新构建。`--tools` 参数是*工具注册表*覆盖（它替换 `internal/config/toolsconfig`
-消费的 JSON），不是模板覆盖——见[工具](../tools/#customizing-tools)。
+并重新构建。内置工具定义同样内嵌，不支持运行时覆盖。项目指引使用评审规则和背景，
+外部业务上下文使用 MCP——见[工具](../tools/#customizing-tools)。
 
 > **占位符语法注意。** 以上所有占位符都使用双花括号
 > `{{…}}` 语法，*除了* `RE_LOCATION_TASK`，它替换单花括号
@@ -319,10 +326,9 @@ Web UI（`ocr viewer`）直接读这些文件——没有数据库，只有 appe
 
 启用遥测后，agent 发出三个流水线级 span（`review.run` 包裹整个作业、
 `diff.parse` 包裹 diff 加载、每个被评审的组一个
-`subtask.execute.group.<group-key>`），加上
-每个决策点一个短生命周期的 `event.<name>` span（`plan.skipped`、
-`token.threshold.exceeded`、`subtask.error`……）。LLM 往返和工具调用仅作为
-metrics 记录——不作为 span。prompt 与响应内容**绝不**附加到遥测；
+`subtask.execute.group.<group-key>`），加上每个决策点一个短生命周期的
+`event.<name>` span（`plan.skipped`、`token.threshold.exceeded`、`subtask.error`……）。
+主评审循环中的 LLM 请求和工具调用会生成 span，相关测量值也会记录到 metrics 中。prompt 与响应内容**绝不**附加到遥测；
 `OCR_CONTENT_LOGGING` 标志已接入但目前是死代码。完整 schema 见[遥测](../telemetry/)。
 
 ## 哪些*不*自动化
@@ -353,7 +359,7 @@ metrics 记录——不作为 span。prompt 与响应内容**绝不**附加到�
 | 语义文件分组 | `internal/agent/grouping.go` |
 | 工具调用循环与记忆压缩 | `internal/llmloop/`（loop.go、compression.go） |
 | effort 档位 | `internal/config/template/effort.go` |
-| 文件过滤 / 预览 | `internal/agent/preview.go` |
+| 文件过滤 / 预览 | `internal/agent/selection.go`、`internal/agent/preview.go` |
 | diff 加载（Git 模式） | `internal/diff/git.go` |
 | 规则解析链 | `internal/config/rules/system_rules.go` |
 | 工具注册表与实现 | `internal/tool/` |

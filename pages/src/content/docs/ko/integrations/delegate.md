@@ -62,7 +62,7 @@ cp -R /path/to/open-code-review/skills/open-code-review-delegate ~/.claude/skill
 ### 1단계: 미리 보기 — 리뷰 대상 확인 {#step-1-preview-determine-what-to-review}
 
 ```bash
-ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <patterns>]
 ```
 
 출력 내용:
@@ -78,12 +78,13 @@ ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <pat
 |----------|---------|
 | 워크스페이스 변경 | `ocr delegate preview` |
 | 브랜치 비교 | `ocr delegate preview --from main --to feature` |
+| 현재 브랜치를 main과 비교 | `ocr delegate preview --from main` |
 | 단일 커밋 | `ocr delegate preview -c abc123` |
 
 ### 2단계: 파일별 규칙 가져오기 {#step-2-get-rules-for-files}
 
 ```bash
-ocr delegate rule <path1> <path2> ...
+ocr delegate rule [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> ...
 ```
 
 1단계에서 얻은 리뷰 대상 경로를 넘깁니다. 출력은 규칙 내용별로 묶여 나오므로, 같은
@@ -91,23 +92,41 @@ ocr delegate rule <path1> <path2> ...
 
 ### 3단계: diff 가져오기 {#step-3-get-diffs}
 
-1단계에서 얻은 모드와 ref 정보를 바탕으로 git을 직접 씁니다.
+1단계의 모드와 ref 정보에 맞는 diff 명령을 선택하세요. 리뷰 중 모든 Git 호출에 `git --no-pager`를 사용하세요.
+
+아래 diff 명령은 외부 diff 프로그램, 텍스트 변환, 색상 출력을 꺼서 일반 텍스트 패치를 가져옵니다.
 
 **range 모드**(merge\_base가 제공됨):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **commit 모드**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **workspace 모드**:
 ```bash
-git diff HEAD -- <path>        # 추적 중인 파일
-cat <path>                     # 새로 추가된 추적되지 않은 파일
+git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 추적 중인 파일
+cat "<path>"                     # 새로 추가된 추적되지 않은 파일
 ```
+
+컨텍스트를 조회하려면:
+
+```bash
+git --no-pager log --no-color --oneline -- "<path>"
+git --no-pager blame --no-textconv -- "<path>"
+git --no-pager show --no-ext-diff --no-textconv --no-color "<ref>:<path>"
+```
+
+큰 diff는 선택한 모드의 명령에 `--output="<absolute-diff-file>"`를 추가하세요. 저장소 밖의 고유한 절대 경로를 선택하고 상위 디렉터리를 만드세요. 파일 읽기 도구에서도 같은 경로를 사용하세요:
+
+```bash
+git --no-pager diff --no-ext-diff --no-textconv --no-color --output="<absolute-diff-file>" <merge_base>..<to> -- "<path>"
+```
+
+Git이 종료 코드 0으로 끝나면 파일 전체를 나누어 읽고 리뷰한 뒤 삭제하세요. 명령이 실패하거나 시간 초과가 발생하면 재시도하거나 오류를 기록하고 `skipped`로 표시하세요. 출력이 예상과 달리 비어 있으면 preview를 다시 실행해 대조하세요.
 
 ### 4단계: 파일별 리뷰 {#step-4-review-each-file}
 
@@ -116,6 +135,8 @@ cat <path>                     # 새로 추가된 추적되지 않은 파일
 1. 해당 파일의 diff를 가져옵니다(3단계).
 2. 대응하는 Rule Group(2단계)을 리뷰 체크리스트로 삼습니다.
 3. 필요한 만큼 맥락을 탐색하며 꼼꼼히 리뷰합니다.
+
+preview의 각 `(path, status)`를 `reviewed` 또는 `skipped`로 기록하고, 건너뛴 항목에는 사유를 적으세요. 보고서에는 `total_files`, `reviewed_files`, `skipped_files`, `coverage_rate`를 포함하세요.
 
 ### 5단계: 보고 {#step-5-report}
 
@@ -134,10 +155,12 @@ cat <path>                     # 새로 추가된 추적되지 않은 파일
 
 ## 공통 플래그 {#shared-flags}
 
+두 하위 명령에서 `--from main`은 `--from main --to HEAD`의 축약형입니다. 범위 리뷰는 `merge-base(from, to)..to`를 비교하며 스테이징된 변경, 스테이징되지 않은 변경, 추적되지 않는 파일을 포함하지 않습니다. 범위 및 커밋 플래그를 생략하면 워크스페이스 모드를 사용합니다. 같은 대상을 사용하도록 `preview`와 `rule`에 동일한 범위 또는 커밋 플래그를 전달하세요. 범위 플래그와 커밋 플래그는 함께 사용할 수 없습니다.
+
 | 플래그 | 설명 |
 |------|-------------|
 | `--from <ref>` | range 모드의 원본 ref |
-| `--to <ref>` | range 모드의 대상 ref |
+| `--to <ref>` | range 모드의 대상 ref. `--from`을 지정하면 기본값은 `HEAD` |
 | `-c, --commit <hash>` | 단일 커밋 모드 |
 | `--repo <path>` | 저장소 루트(기본값: 현재 디렉터리) |
 | `--rule <path>` | 커스텀 rule.json 경로 |
