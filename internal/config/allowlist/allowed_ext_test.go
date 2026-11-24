@@ -698,7 +698,29 @@ func TestIsExcludedPath(t *testing.T) {
 
 		// Case insensitive
 		{"case insensitive go", "Foo/Bar_Test.go", true},
-		{"case insensitive java", "com/FooTEST.java", true}, // lowercase → "com/footest.java" matches "**/*test.java"
+		{"case insensitive java", "com/FooTEST.java", true},
+		{"case insensitive java all caps", "COM/FOOTEST.JAVA", true},
+		{"case insensitive java snake suffix", "com/foo_test.java", true},
+		{"java bare Test file", "com/Test.java", true},
+
+		// A capitalized suffix pattern (*Test, *Tests, *Spec) names a word, so it
+		// must start a new word of the file name, not end a longer one. Matching
+		// stays case-insensitive, so only the letter case at the boundary decides.
+		{"java contest not excluded", "com/example/Contest.java", false},
+		{"java backtest not excluded", "com/example/Backtest.java", false},
+		{"java latest not excluded", "com/example/Latest.java", false},
+		{"java contests not excluded", "com/example/Contests.java", false},
+		{"java lowercase contest not excluded", "com/example/contest.java", false},
+		{"java contest in test dir still excluded", "src/test/java/com/example/Contest.java", true},
+		{"java camel test after a longer word", "com/example/LatestTest.java", true},
+		{"swift contest not excluded", "Sources/App/Contest.swift", false},
+		{"swift latest not excluded", "Sources/App/Latest.swift", false},
+		{"swift camel tests after a longer word", "AppTests/LatestTests.swift", true},
+		{"fsharp contest not excluded", "src/Domain/Contest.fs", false},
+		{"fsharp backtest not excluded", "src/Domain/Backtest.fs", false},
+		{"haskell aspec not excluded", "src/Aspec.hs", false},
+		{"lhs inspec not excluded", "src/Inspec.lhs", false},
+		{"haskell spec after digit", "src/Parser2Spec.hs", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -706,5 +728,47 @@ func TestIsExcludedPath(t *testing.T) {
 				t.Errorf("IsExcludedPath(%q) = %v, want %v", tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCamelWordTail(t *testing.T) {
+	tests := []struct {
+		pattern string
+		want    string
+	}{
+		{"**/*Test.java", "Test.java"},
+		{"**/*Spec.lhs", "Spec.lhs"},
+		{"*Tests.swift", "Tests.swift"},
+		{"**/*_test.go", ""},
+		{"**/*.test.{js,jsx,ts,tsx}", ""},
+		{"**/Tests/**/*.swift", ""},
+		{"**/Pods/**", ""},
+		{"**/test_*.py", ""},
+		{"**/*Test.{kt,kts}", ""},
+		{"**/*", ""},
+	}
+	for _, tt := range tests {
+		if got := camelWordTail(tt.pattern); got != tt.want {
+			t.Errorf("camelWordTail(%q) = %q, want %q", tt.pattern, got, tt.want)
+		}
+	}
+}
+
+// TestDefaultPatternsKeepWordBoundary guards against a capitalized suffix
+// pattern that camelWordTail cannot parse, such as "*Test.{kt,kts}": it would
+// fall back to plain lowercase matching and exclude names like Contest.kt.
+func TestDefaultPatternsKeepWordBoundary(t *testing.T) {
+	var raw []string
+	if err := json.Unmarshal(excludeData, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range raw {
+		tail, ok := strings.CutPrefix(baseName(p), "*")
+		if !ok || tail == "" || tail[0] < 'A' || tail[0] > 'Z' {
+			continue
+		}
+		if camelWordTail(p) == "" {
+			t.Errorf("default exclude pattern %q starts its file name with a capitalized word but has no word boundary check", p)
+		}
 	}
 }

@@ -32,6 +32,8 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -47,8 +49,18 @@ var (
 	initOnce  sync.Once
 )
 
+// excludePattern is a default exclude pattern prepared for case-insensitive
+// matching. wordTail is set when the pattern's file name is "*" followed by a
+// capitalized word, such as "*Test.java" or "*Spec.hs": it holds the literal
+// text after the "*" in its original case, so that the word boundary the
+// capital letter marks survives lowercasing.
+type excludePattern struct {
+	glob     string // lowercased pattern (may contain {a,b} syntax)
+	wordTail string
+}
+
 var (
-	excludePatterns []string // raw patterns from JSON (may contain {a,b} syntax)
+	excludePatterns []excludePattern
 	excludeOnce     sync.Once
 )
 
@@ -64,12 +76,51 @@ func initMap() {
 }
 
 func initExclude() {
-	if err := json.Unmarshal(excludeData, &excludePatterns); err != nil {
+	var raw []string
+	if err := json.Unmarshal(excludeData, &raw); err != nil {
 		panic("allowedext: failed to parse default_exclude_patterns.json: " + err.Error())
 	}
-	for i, p := range excludePatterns {
-		excludePatterns[i] = strings.ToLower(p)
+	excludePatterns = make([]excludePattern, len(raw))
+	for i, p := range raw {
+		excludePatterns[i] = excludePattern{glob: strings.ToLower(p), wordTail: camelWordTail(p)}
 	}
+}
+
+// baseName returns the last segment of a slash-separated path or pattern.
+func baseName(p string) string {
+	return p[strings.LastIndexByte(p, '/')+1:]
+}
+
+// camelWordTail returns the text after the leading "*" of the pattern's file
+// name when that text starts with an upper-case letter and holds no further
+// glob syntax, and "" otherwise.
+func camelWordTail(pattern string) string {
+	tail, ok := strings.CutPrefix(baseName(pattern), "*")
+	if !ok || strings.ContainsAny(tail, `*?[]{}\`) {
+		return ""
+	}
+	if first, _ := utf8.DecodeRuneInString(tail); !unicode.IsUpper(first) {
+		return ""
+	}
+	return tail
+}
+
+// startsWord reports whether the file name of p ends in tail, compared
+// case-insensitively, with tail beginning a new word: either its first letter
+// is upper-case ("FooTest.java", "FooTEST.java") or nothing or a non-letter
+// precedes it ("Test.java", "foo_test.java"). The end of one longer word
+// ("Contest.java", "Latest.swift") does not count.
+func startsWord(p, tail string) bool {
+	base := baseName(p)
+	cut := len(base) - len(tail)
+	if cut < 0 || !strings.EqualFold(base[cut:], tail) {
+		return false
+	}
+	if first, _ := utf8.DecodeRuneInString(base[cut:]); unicode.IsUpper(first) {
+		return true
+	}
+	prev, _ := utf8.DecodeLastRuneInString(base[:cut])
+	return cut == 0 || !unicode.IsLetter(prev)
 }
 
 // IsAllowedExt returns true when the given file extension is in the supported types list.
@@ -81,7 +132,10 @@ func IsAllowedExt(ext string) bool {
 
 // IsExcludedPath returns true when the given file path matches any default exclude pattern.
 // Patterns support ** (recursive directory matching), * (single-segment wildcard),
-// and {a,b,c} brace expansion. The check is case-insensitive.
+// and {a,b,c} brace expansion. The check is case-insensitive, except that a
+// pattern whose file name is "*" followed by a capitalized word ("*Test.java",
+// "*Spec.hs") matches only where that word starts a new word of the file name:
+// "FooTest.java" and "foo_test.java" are excluded, "Contest.java" is not.
 //
 // Example patterns and their behavior:
 //
@@ -92,7 +146,8 @@ func IsExcludedPath(path string) bool {
 	excludeOnce.Do(initExclude)
 	lowerPath := strings.ToLower(path)
 	for _, pattern := range excludePatterns {
-		if matched, _ := doublestar.Match(pattern, lowerPath); matched {
+		matched, _ := doublestar.Match(pattern.glob, lowerPath)
+		if matched && (pattern.wordTail == "" || startsWord(path, pattern.wordTail)) {
 			return true
 		}
 	}

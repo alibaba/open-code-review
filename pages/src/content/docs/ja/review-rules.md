@@ -229,6 +229,8 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/Pods/**`、`**/Carthage/**`
 - `**/.next/**`、`**/.nuxt/**`、`**/.gradle/**`、`**/.terraform/**`……
 
+これらのパターンは大文字と小文字を区別せずに照合されますが、例外が 1 つあります。ファイル名部分が `*` と大文字で始まる単語からなるパターン（`**/*Test.java`, `**/*Tests.swift`, `**/*Spec.hs`）では、その単語がファイル名の中で新しい単語として始まっている必要があります。`FooTest.java`, `FooTEST.java`, `foo_test.java` は除外され、`Contest.java`, `Latest.swift`, `Aspec.hs` はレビュー対象に残ります。
+
 `**/build/**` と `**/bin/**` は意図的に含めていません。手書きのソースをそこに置くプロジェクトが多いためです。
 
 同じディレクトリは、より早い [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) の diff 層でもフィルタリングされます。このリストはパスの接頭辞で照合するため、**リポジトリルート**のディレクトリしか捕捉しません。`vendor/pkg/x.go` はファイルごとのフィルタに届かず `provider_directory` として報告され、`api/vendor/pkg/x.go` は届いて `default_path` で除外されます。`include` ルールで戻せるのは後者だけです。
