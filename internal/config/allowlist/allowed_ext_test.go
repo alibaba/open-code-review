@@ -350,6 +350,38 @@ func TestIsExcludedPath(t *testing.T) {
 		{"rust benches prefix not excluded", "src/benches_util.rs", false},
 		{"rust benchmark module not excluded", "src/benchmark.rs", false},
 
+		// C/C++ test and benchmark files: GoogleTest and Chromium suffixes
+		// (_test, _unittest), Google Benchmark (_benchmark), and the test/,
+		// tests/ and unittests/ trees that CTest, Catch2 and LLVM projects use.
+		{"cpp gtest suffix", "absl/strings/str_cat_test.cc", true},
+		{"cpp gtest suffix cpp", "src/parser_test.cpp", true},
+		{"cpp tests suffix", "src/parser_tests.cxx", true},
+		{"cpp chromium unittest suffix", "base/strings/string_util_unittest.cc", true},
+		{"cpp google benchmark suffix", "absl/strings/str_cat_benchmark.cc", true},
+		{"c test suffix", "lib/list_test.c", true},
+		{"c test directory", "test/test_list.c", true},
+		{"cpp tests directory", "tests/catch_main.cpp", true},
+		{"cpp nested tests directory header", "libfoo/tests/unit/helpers.hpp", true},
+		{"c test directory header", "test/support/fake_clock.h", true},
+		{"cpp llvm unittests directory", "llvm/unittests/ADT/APIntTest.cpp", true},
+		{"cpp benchmarks directory", "benchmarks/bm_parser.cc", true},
+		{"c bench directory", "bench/throughput.c", true},
+		{"cpp non-test", "src/parser.cc", false},
+		{"c non-test", "src/list.c", false},
+		{"c header non-test", "include/list.h", false},
+		{"cpp contest not excluded", "src/contest.cc", false},
+		{"cpp latest not excluded", "src/latest.cpp", false},
+		{"c test_support header not excluded", "include/test_support.h", false},
+		{"cpp test_support source not excluded", "src/test_support.cc", false},
+		{"cpp unittest prefix not excluded", "src/unittest_main.cc", false},
+		{"cpp benchmark library source not excluded", "src/benchmark.cc", false},
+		{"cpp testing directory not excluded", "src/testing/harness.cc", false},
+		{"cpp contest directory not excluded", "src/contest/parser.cc", false},
+		{"cpp benchmarking directory not excluded", "src/benchmarking/runner.cpp", false},
+		// The directory patterns are extension-scoped so CUDA/HIP kernels kept
+		// under tests/ stay reviewable (see the CUDA cases below).
+		{"cuda kernel in tests not caught by cpp pattern", "tests/kernels/attention.cu", false},
+
 		// Prisma schemas have no conventional default test-file exclusion.
 		{"prisma schema", "prisma/schema.prisma", false},
 
