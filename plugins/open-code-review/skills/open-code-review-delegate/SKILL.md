@@ -1,11 +1,12 @@
 ---
 name: open-code-review-delegate
 description: >
-  Delegation mode for open-code-review (OCR). Instead of OCR calling an LLM
-  endpoint, this skill instructs the host agent to perform the code review
-  itself, using OCR only for deterministic engineering: file selection and
-  rule resolution. Use when the host agent should drive the review with its
-  own LLM capabilities.
+  Review workspace changes, PRs, commits, or branch comparisons with the
+  host agent's model. OCR's CLI selects files and resolves rules; the host
+  reviews them for defects and explains changes that affect users or callers.
+  Use when the user has no separate API key for OCR or wants to reuse their
+  coding-agent subscription or model setup. For OCR's full native pipeline
+  with its own model provider, choose open-code-review instead.
 license: Apache-2.0
 compatibility: >
   Requires the `ocr` CLI installed (via `npm install -g
@@ -25,15 +26,17 @@ This Codex plugin skill intentionally mirrors the canonical skill at
 updating OCR delegation instructions; a symlink is avoided because plugin
 installs may only materialize the plugin subtree.
 
-A skill for performing AI code review where OCR provides deterministic engineering (file filtering, rule resolution) and the host agent performs the actual review using its own intelligence and tools.
-
 ## Workflow
 
 ### Step 1: Preview — Determine What to Review
 
+Skip OCR provider setup and `ocr llm test`; the host agent's authentication, usage limits, and costs still apply.
+
 ```bash
-ocr delegate preview --format json [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview --format json [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <patterns>]
 ```
+
+With `--from` and no `--to`, both delegate subcommands default to `HEAD`. Range review compares the merge-base to the target commit and excludes staged, unstaged, and untracked changes. Omit range/commit flags for workspace mode; range and commit flags are mutually exclusive.
 
 This outputs:
 - **mode** (workspace / range / commit)
@@ -47,15 +50,18 @@ This outputs:
 |----------|---------|
 | Workspace changes | `ocr delegate preview` |
 | Branch comparison | `ocr delegate preview --from main --to feature` |
+| Current branch against main | `ocr delegate preview --from main` |
 | Single commit | `ocr delegate preview -c abc123` |
 
 ### Step 2: Get Rules for Files
 
 ```bash
-ocr delegate rule --format json <path1> <path2> ...
+ocr delegate rule --format json [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> ...
 ```
 
 Pass the reviewable file paths from Step 1. Output is grouped by rule content — files sharing the same rule appear under one group, avoiding repetition.
+
+Pass the same range or commit flags as in Step 1 so rules are resolved against the same target. For example, pair `ocr delegate preview --from main` with `ocr delegate rule --from main --format json <path...>`.
 
 ### Step 3: Get Diffs
 
@@ -110,6 +116,10 @@ Use `(path, status)` as the checklist identity. Workspace mode can report the sa
 
 For large changes, review in bounded batches grouped by shared rules and diff size. Do not stop after finding the first high-severity issue.
 
+While reading each diff, ask which existing caller or user workflow, if any, behaves differently. Reuse the same evidence; follow a caller, contract, or test only when it helps establish a concrete before/after scenario. Compare the sides selected in Step 3 (the new side in workspace mode is the live working tree). Assess behavior changes as you review the diff. Do not run `ocr review --analysis` or pass `--analysis` to `ocr delegate`.
+
+A removed interface may matter even when there are no new lines to review. If preview excludes a file solely as `deleted`, use its old side as context when needed, without counting it as reviewed. Respect all other exclusions when following evidence.
+
 ### Step 5: Format Output
 
 Each comment must follow this structure:
@@ -125,6 +135,8 @@ Each comment must follow this structure:
 
 ### Step 6: Classify and Report
 
+Identify the review mode as delegation.
+
 Before reporting, verify that every previewed file is accounted for. Include `total_files`, `reviewed_files`, `skipped_files`, and `coverage_rate` in the summary. A skipped file must include its reason.
 
 Group findings by severity:
@@ -134,6 +146,8 @@ Group findings by severity:
 - **Low**: Style nits, minor suggestions — report only if clearly valuable
 
 Discard likely false positives silently.
+
+Report a material behavior change even if it is intentional and there are no defects. Name the affected workflow, what happened before and what happens now, and cite the supporting location. For example, removing a public option can break scripts that still pass it. Keep this impact distinct from severity-rated findings and file coverage; if it explains a finding, describe it there only once. Qualify material uncertainties, and omit the impact section when there is no concrete change to report.
 
 ### Step 7: Fix (Optional)
 
@@ -154,7 +168,7 @@ If the user requested "review and fix":
 | Flag | Description |
 |------|-------------|
 | `--from <ref>` | Source ref for range mode |
-| `--to <ref>` | Target ref for range mode |
+| `--to <ref>` | Target ref for range mode; defaults to `HEAD` when `--from` is supplied in either subcommand |
 | `-c, --commit <hash>` | Single commit mode |
 | `--repo <path>` | Repository root (default: cwd) |
 | `--rule <path>` | Custom rule.json path |
@@ -165,7 +179,7 @@ If the user requested "review and fix":
 
 ## Gotchas
 
-- **No LLM needed on OCR side** — delegation mode never calls an LLM. All intelligence comes from the host agent.
+- **Host-driven analysis** — OCR's native review agent, positioning, and reflection modules do not run in delegation mode.
 - **Rules are grouped** — Files sharing the same rule are grouped together in the output. You can pass any number of paths per call; for large changes, fetch rules per-batch as you review.
 - **Working directory matters** — `ocr delegate` operates on the Git repo at the current directory. Use `--repo /path` to override.
 - **Untracked files in workspace mode** — `preview` includes untracked files. For these, read the file directly instead of using `git diff`.
@@ -192,6 +206,8 @@ condition aborts the command. When the command reports either limit:
    read the original material directly during the review.
 
 ### Troubleshooting CLI Version Compatibility
+
+If an OCR command fails with `command not found`, install the CLI with `npm install -g @alibaba-group/open-code-review` if your environment permits, then retry the same command. If installation is not permitted, explain the prerequisite and stop; do not substitute `ocr review` or ask for an API key.
 
 The `--format` flag is available in `ocr` v1.9.0 and later. The Skill and the
 installed CLI can be updated independently. If a requested `preview` or `rule`

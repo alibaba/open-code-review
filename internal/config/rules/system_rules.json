@@ -7,6 +7,8 @@
     "**/build.gradle": "build_gradle.md",
     "**/package.json": "package_json.md",
     "**/Cargo.toml": "cargo_toml.md",
+    "**/Move.toml": "move_toml.md",
+    "**/*.move": "move.md",
     "**/composer.json": "composer_json.md",
     "**/*.{json,json5,jsonc}": "json.md",
     ".github/workflows/**/*.{yaml,yml}": "github_workflows.md",
@@ -23,7 +25,7 @@
     "**/*.erb": "erb.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
-    "**/*.{ts,js,tsx,jsx,mjs,cjs}": "ts_js_tsx_jsx.md",
+    "**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}": "ts_js_tsx_jsx.md",
     "**/*.{kt,kts}": "kotlin.md",
     "**/*.scala": "scala.md",
     "**/*.{fs,fsi,fsx}": "fsharp.md",
@@ -31,7 +33,12 @@
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
     "**/*.c": "c.md",
+    "**/*.{cu,cuh}": "cuda_hip.md",
+    "**/*.hip": "cuda_hip.md",
     "**/*.{py,pyi,ipynb}": "python.md",
+    "**/*.{rb,rake}": "ruby.md",
+    "**/*.gemspec": "ruby.md",
+    "**/{Gemfile,Rakefile}": "ruby.md",
     "**/*.{php,phtml}": "php.md",
     "**/*.proto": "protobuf.md",
     "**/*.po": "po.md",
@@ -42,6 +49,7 @@
     "**/*.R": "r.md",
     "**/*.{tf,tofu,hcl,tfvars}": "terraform.md",
     "**/*.bicep": "bicep.md",
+    "**/*.dhall": "dhall.md",
     "**/*.nix": "nix.md",
     "**/*.{hs,lhs}": "haskell.md",
     "**/*.{nim,nims,nimble}": "nim.md",
@@ -65,6 +73,7 @@
     "**/*.rego": "rego.md",
     "**/*.{glsl,hlsl,wgsl,metal}": "shader.md",
     "**/*.{ps1,psm1,psd1}": "powershell.md",
-    "**/*.{clj,cljs,cljc,edn}": "clojure.md"
+    "**/*.{clj,cljs,cljc,edn}": "clojure.md",
+    "**/*.sql": "sql.md"
   }
 }

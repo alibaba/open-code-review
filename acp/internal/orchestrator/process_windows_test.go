@@ -116,7 +116,7 @@ func TestWindowsRepeatedCancelDoesNotLeakJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		ctx, cancel := context.WithCancel(context.Background())
 		events, outcomes := NewRunner(binary).Run(ctx, Request{CWD: t.TempDir(), Args: []string{"review", "block"}})
 		for event := range events {

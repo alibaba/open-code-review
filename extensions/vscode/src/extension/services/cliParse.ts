@@ -30,8 +30,8 @@ function toComment(raw: any): ReviewComment {
     content: raw.content,
     suggestionCode: raw.suggestion_code || undefined,
     existingCode: raw.existing_code || undefined,
-    startLine: raw.start_line,
-    endLine: raw.end_line,
+    startLine: raw.start_line ?? 0,
+    endLine: raw.end_line ?? 0,
     thinking: raw.thinking || undefined,
   };
 }
@@ -40,6 +40,18 @@ export function parseCliResult(stdout: string): CliResult {
   const start = stdout.indexOf('{');
   if (start < 0) throw new Error('no JSON in CLI output');
   const json = JSON.parse(stdout.slice(start));
+  if (json.status === 'partial') {
+    if (json.message != null && typeof json.message !== 'string') throw new Error('Invalid partial review message');
+    if (json.comments !== null && !Array.isArray(json.comments)) throw new Error('Missing or invalid partial review comments');
+    for (const comment of json.comments ?? []) {
+      if (!comment || typeof comment.path !== 'string' || !comment.path.trim() ||
+          typeof comment.content !== 'string' || !comment.content.trim() ||
+          ![comment.start_line, comment.end_line].every(line => line === undefined || Number.isInteger(line)) ||
+          ![comment.suggestion_code, comment.existing_code, comment.thinking].every(s => s == null || typeof s === 'string')) {
+        throw new Error('Invalid partial review comment');
+      }
+    }
+  }
   const s = json.summary;
   return {
     status: json.status,

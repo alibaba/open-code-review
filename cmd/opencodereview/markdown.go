@@ -45,7 +45,9 @@ func renderMarkdown(markdown string, width int) string {
 	style.Document.BlockPrefix = ""
 	style.Document.BlockSuffix = ""
 	emphasis := true
+	headingColor := "12"
 	style.Heading.Bold = &emphasis
+	style.Heading.Color = &headingColor
 	for _, heading := range []*glamouransi.StyleBlock{&style.H1, &style.H2, &style.H3, &style.H4, &style.H5, &style.H6} {
 		heading.Prefix = ""
 	}
@@ -55,24 +57,23 @@ func renderMarkdown(markdown string, width int) string {
 	codeColor := "6"
 	style.Code.StylePrimitive = glamouransi.StylePrimitive{Color: &codeColor}
 	style.Link.Underline = &emphasis
-	wrapTables := true
+	options := glamouransi.Options{Styles: style, WordWrap: width, InlineTableLinks: true}
 	markdownParser := goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.DefinitionList),
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 	)
 	markdownRenderer := renderer.NewRenderer(renderer.WithNodeRenderers(util.Prioritized(
-		glamouransi.NewRenderer(glamouransi.Options{
-			Styles:           style,
-			WordWrap:         width,
-			TableWrap:        &wrapTables,
-			InlineTableLinks: true,
-		}), 1000,
+		glamouransi.NewRenderer(options), 1000,
 	)))
 	source := []byte(markdown)
 	document := markdownParser.Parser().Parse(text.NewReader(source))
 	escapeCodeSpanEntities(document, source)
 	source = escapeCodeBlockBackslashes(document, source)
 	source = sanitizeMarkdownText(document, source)
+	source, err := formatMarkdownTables(document, source, options)
+	if err != nil {
+		return markdown
+	}
 	var rendered bytes.Buffer
 	if err := markdownRenderer.Render(&rendered, source, document); err != nil {
 		return markdown
