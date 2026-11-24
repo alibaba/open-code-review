@@ -44,6 +44,7 @@ const README_FILES = [
   "docs/i18n/README.ko-KR.md",
   "docs/i18n/README.ru-RU.md",
   "docs/i18n/README.tr-TR.md",
+  "docs/i18n/README.fr-FR.md",
 ];
 
 // Docs live under pages/src/content/docs/<locale>/**. English is authored under
