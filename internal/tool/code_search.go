@@ -184,6 +184,9 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			if trimmedErr == "" {
 				return "", fmt.Errorf("git grep failed: %w", err)
 			}
+			if usePerlRegexp && exitCode == 128 && strings.HasPrefix(trimmedErr, "fatal: -e option, '") {
+				trimmedErr += `; fix the regular expression (e.g. use \( for a literal opening parenthesis), or set use_perl_regexp=false to search for the entire text literally`
+			}
 			return "", fmt.Errorf("git grep failed: %w: %s", err, trimmedErr)
 		}
 	}

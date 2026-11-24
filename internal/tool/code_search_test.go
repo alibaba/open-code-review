@@ -358,7 +358,7 @@ func TestGitGrep_CommitMode_LiteralWithRegexMetaChars(t *testing.T) {
 func TestGitGrep_InvalidRef_ReturnsError(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "nonexistent_ref_abc123", Mode: ModeCommit})
-	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	result, err := p.gitGrep(context.Background(), "Hello", false, true, nil)
 	if err == nil {
 		t.Fatal("expected invalid ref to return an error")
 	}
@@ -368,20 +368,44 @@ func TestGitGrep_InvalidRef_ReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "git grep failed") {
 		t.Errorf("expected git grep failure, got: %v", err)
 	}
+	if strings.Contains(err.Error(), "use_perl_regexp") {
+		t.Errorf("invalid ref got regex advice: %v", err)
+	}
 }
 
-func TestGitGrep_PerlRegexp_InvalidPattern_ReturnsError(t *testing.T) {
+func TestGitGrep_PerlRegexp_InvalidPatternAndRetry(t *testing.T) {
 	dir := setupTestRepo(t)
-	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
-	result, err := p.gitGrep(context.Background(), "(unclosed", false, true, nil)
-	if err == nil {
-		t.Fatal("expected invalid perl regexp to return an error")
+	const fixture = "mvp_setImage(withURL: url, imageSize: size)\nFS(_ value)\nfunc FS()\n"
+	if err := os.WriteFile(filepath.Join(dir, "calls.txt"), []byte(fixture), 0644); err != nil {
+		t.Fatal(err)
 	}
-	if result != "" {
-		t.Errorf("expected empty result for invalid perl regexp, got: %s", result)
+	provider := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	for _, test := range []struct {
+		invalid, corrected, want string
+	}{
+		{`mvp_setImage(withURL:.*imageSize:`, `mvp_setImage\(withURL:.*imageSize:`, "1|mvp_setImage(withURL: url, imageSize: size)"},
+		{`define FS|FS(_|FS = |func FS`, `define FS|FS\(_|FS = |func FS`, "2|FS(_ value)\n3|func FS()"},
+	} {
+		t.Run(test.invalid, func(t *testing.T) {
+			result, err := provider.gitGrep(t.Context(), test.invalid, false, true, nil)
+			var exitErr *exec.ExitError
+			if result != "" || !errors.As(err, &exitErr) || exitErr.ExitCode() != 128 {
+				t.Fatalf("invalid pattern: result=%q err=%v; want git exit 128", result, err)
+			}
+			for _, want := range []string{test.invalid, `\(`, "use_perl_regexp=false"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+			result, err = provider.gitGrep(t.Context(), test.corrected, false, true, nil)
+			if err != nil || !strings.Contains(result, test.want) {
+				t.Errorf("corrected pattern: result=%q err=%v; want %q", result, err, test.want)
+			}
+		})
 	}
-	if !strings.Contains(err.Error(), "git grep failed") {
-		t.Errorf("expected git grep failure, got: %v", err)
+	result, err := provider.Execute(t.Context(), map[string]any{"search_text": "FS(_"})
+	if err != nil || !strings.Contains(result, "2|FS(_ value)") {
+		t.Errorf("default literal search: result=%q err=%v", result, err)
 	}
 }
 
