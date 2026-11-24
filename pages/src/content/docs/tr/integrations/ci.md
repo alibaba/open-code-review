@@ -36,7 +36,7 @@ Kaynak iş akışı: [`examples/github_actions/ocr-review.yml`](https://github.c
 
 ### Ne yapar? {#what-it-does}
 
-- `pull_request_target` (`opened`) olayında **ve** gövdesi `/open-code-review` veya `@open-code-review` ile başlayan `issue_comment` olaylarında çalışır. Yorumla talep üzerine yeniden çalıştırılabilir. Fork PR'larında sırların erişilebilir olması için `pull_request` yerine `pull_request_target` kullanılır; OCR yalnızca farkı okur, PR kodunu yürütmez.
+- `pull_request_target` (`opened`, `synchronize`, `reopened`) olaylarında **ve** gövdesi `/open-code-review` veya `@open-code-review` ile başlayan `issue_comment` olaylarında çalışır. Yorumla talep üzerine yeniden çalıştırılabilir. Fork PR'larında sırların erişilebilir olması için `pull_request` yerine [`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target) kullanılır; OCR yalnızca farkı okur, PR kodunu yürütmez.
 - `npm install -g @alibaba-group/open-code-review` ile yükler, `ocr config set` ile yapılandırır ve dal aralığı kipinde inceleme yapar.
 - JSON'u ayrıştırır; GitHub Pull Request Review API ile bulguları satır içi yorum olarak gönderir. Satır bilgisi olmayanları özete ekler. Toplu gönderim başarısızsa tek tek dener ve istatistikleri özet yorumunda gösterir.
 
@@ -49,6 +49,13 @@ mkdir -p .github/workflows
 curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
+
+[2 Aralık 2026](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/) tarihinden itibaren GitHub'da barındırılan herkese açık depolarda `pull_request_target` olayı, geçerli bir Actions olay politikası açıkça izin vermedikçe varsayılan olarak engellenecek. PR oluşturulduğunda, güncellendiğinde veya yeniden açıldığında OCR'ın otomatik olarak çalışmaya devam etmesi gerekiyorsa deponuzda **Settings → Actions → Policies** bölümünü açın ve [iş akışına uygulanan bir politika oluşturun veya güncelleyin](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+
+- Yeni politika oluştururken **Target workflows** altında **Add target** düğmesine tıklayın ve `.github/workflows/ocr-review.yml` dosyasını belirtin.
+- **Restrict events** altında, otomatik incelemeler için `pull_request_target`, yorumla tetiklenen yeniden incelemeler için `issue_comment` olayına izin verin.
+- **Enforcement status** ayarını **Active** olarak değiştirin ve politikayı kaydedin.
+- Not: Mevcut bir politikayı güncellemeden önce yalnızca `.github/workflows/ocr-review.yml` dosyasını hedeflediğini doğrulayın.
 
 ### Gerekli sırlar {#required-secrets}
 
