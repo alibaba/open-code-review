@@ -18,7 +18,7 @@ SCRIPT = Path("skills/open-code-review/scripts/review_pr.py")
 URL = "https://github.com/team/project/pull/42"
 
 GH = """
-import json, os, sys
+import json, os, subprocess, sys
 from pathlib import Path
 if sys.argv[1:3] == ['config', 'get']:
     print('https')
@@ -26,9 +26,13 @@ if sys.argv[1:3] == ['config', 'get']:
 assert sys.argv[1:4] == ['pr', 'view', '42'], sys.argv
 if '--repo' in sys.argv:
     assert sys.argv[sys.argv.index('--repo') + 1] == 'github.com/team/project'
-    assert 'GH_REPO' not in os.environ
+    assert all(key not in os.environ for key in ('GH_REPO', 'GIT_DIR', 'GIT_WORK_TREE'))
 else:
-    assert Path.cwd() == Path(os.environ['SOURCE'])
+    if os.environ.get('EXPECT_GIT_CONTEXT'):
+        selected = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip()
+        assert Path(selected) == Path(os.environ['SOURCE']) != Path.cwd()
+    else:
+        assert Path.cwd() == Path(os.environ['SOURCE'])
     if os.environ.get('EXPECT_GH_REPO'):
         assert os.environ.get('GH_REPO') == 'team/project'
 data = json.loads(os.environ['METADATA'])
@@ -45,6 +49,7 @@ OCR = """
 import json, os, subprocess, sys, time
 from pathlib import Path
 args = sys.argv[1:]
+assert 'GIT_DIR' not in os.environ and 'GIT_WORK_TREE' not in os.environ
 with open('calls.jsonl', 'a') as log:
     log.write(json.dumps(args) + '\\n')
 mode = os.environ.get('MODE')
@@ -144,12 +149,18 @@ class Standalone(unittest.TestCase):
         self.assertEqual(run["snapshot"], {"target": "release", "base": self.base, "head": self.head})
         self.assertEqual(run["merge_base"], self.common)
         self.assertEqual(run["freshness"], "current")
-        self.assertEqual(run["cleanup"], "complete")
+        self.assertEqual(run["cleanup"], "retained")
         self.assertEqual(json.loads((folder / "calls.jsonl").read_text()), [
             "review", "--repo", str(folder / "worktree"), "--from", self.common, "--to", self.head,
             "--audience", "agent", "--analysis", "--format", "json", "--output", run["result"],
             "--background", "preserve context"])
         self.assertEqual(json.loads(Path(run["result"]).read_text())["analysis_meta"]["declared_completion"], "partial")
+        self.assertEqual(Path(run["worktree"]), folder / "worktree")
+        self.assertEqual(self.git("-C", run["worktree"], "show", f"{self.head}:topic"), "topic")
+        _, cleaned = self.finish(self.start("--cleanup", folder / "run.json"))
+        self.assertEqual(cleaned, dict(run, cleanup="complete"))
+        self.assertEqual(self.finish(self.start("--cleanup", folder / "run.json"))[1], cleaned)
+        self.assertTrue(Path(cleaned["result"]).is_file())
         self.assertFalse((folder / "worktree").exists())
         self.assertFalse((folder / "objects.git").exists())
         self.assertEqual((self.source / ".git/index").read_bytes(), index)
@@ -169,6 +180,42 @@ class Standalone(unittest.TestCase):
         self.assertEqual(run["url"], URL)
         self.assertEqual(run["freshness"], "current")
 
+    def test_git_context_only_selects_the_initial_repository(self):
+        _, run = self.finish(self.start("42", cwd=self.root, EXPECT_GIT_CONTEXT="1",
+                                        GIT_DIR=str(self.source / ".git"), GIT_WORK_TREE=str(self.source)))
+        self.assertEqual(run["url"], URL)
+        self.assertEqual(run["freshness"], "current")
+
+    def test_cleanup_is_scoped_to_the_recorded_snapshot(self):
+        folder, run = self.finish(self.start("42"))
+        manifest = folder / "run.json"
+        unrelated = self.root / "run.json"
+        shutil.copyfile(manifest, unrelated)
+        self.git("-C", run["worktree"], "branch", "keep")
+        for path, reason in ((unrelated, "snapshot cache"), (manifest, "additional refs")):
+            child = self.start("--cleanup", path)
+            _, error = child.communicate(timeout=10)
+            self.assertNotEqual(child.returncode, 0)
+            self.assertIn(reason, error)
+            self.assertEqual(json.loads(manifest.read_text()), run)
+            self.assertEqual(self.git("-C", run["worktree"], "rev-parse", "keep"), self.head)
+
+    def test_partial_clone_retains_an_independent_snapshot(self):
+        self.git("config", "uploadpack.allowFilter", "true")
+        partial = self.root / "partial"
+        self.git("clone", "--filter=blob:none", "--no-checkout", "--single-branch",
+                 "-b", "release", "https://github.com/team/project.git", str(partial))
+        self.assertEqual(self.git("-C", partial, "rev-parse", "--is-shallow-repository"), "false")
+        self.assertIn("?", self.git("-C", partial, "rev-list", "--objects", "--missing=print", "HEAD"))
+        folder, run = self.finish(self.start(URL, cwd=partial))
+        self.git("update-ref", "refs/pull/42/head", self.base)
+        self.source.rename(self.root / "offline-source")
+        for rev, name in ((self.head, "topic"), (self.base, "release"), (self.common, "initial")):
+            data = subprocess.check_output(["git", "show", f"{rev}:{name}"], cwd=run["worktree"],
+                                           env=dict(self.env, GIT_ALLOW_PROTOCOL=""), text=True)
+            self.assertEqual(data, name)
+        self.assertFalse((folder / "objects.git/objects/info/alternates").exists())
+
     def test_head_policy_is_evidence_only(self):
         self.git("switch", "-q", "topic")
         policy = self.source / ".opencodereview" / "rule.json"
@@ -179,7 +226,7 @@ class Standalone(unittest.TestCase):
         self.git("update-ref", "refs/pull/42/head", head)
         self.git("switch", "-q", "release")
         _, run = self.finish(self.start("42", MODE="policy", METADATA=json.dumps(dict(self.metadata, headRefOid=head))))
-        self.assertEqual(run["cleanup"], "complete")
+        self.assertEqual(run["cleanup"], "retained")
 
     def test_configured_mcp_stops_before_ocr(self):
         config = self.root / ".opencodereview" / "config.json"
@@ -230,7 +277,7 @@ class Standalone(unittest.TestCase):
         self.git("update-ref", "refs/pull/42/head", self.base)
         folder, run = self.finish(self.start("42"), code=1)
         self.assertEqual(run["failed_step"], "freeze")
-        self.assertEqual(run["cleanup"], "complete")
+        self.assertEqual(run["cleanup"], "retained")
         self.assertFalse((folder / "calls.jsonl").exists())
 
     def test_no_unique_merge_base(self):
@@ -243,12 +290,17 @@ class Standalone(unittest.TestCase):
         self.assertIn("merge-base", run["error"])
         self.assertIsNone(run["ocr_exit"])
 
-    def test_cleanup_on_failure(self):
-        for mode, status, step in (("dirty", "retained", "cleanup"), ("failed", "complete", "review"),
-                                   ("no-result", "complete", "review")):
+    def test_failure_retains_snapshot(self):
+        for mode, step in (("dirty", "verify_snapshot"), ("failed", "review"), ("no-result", "review")):
             with self.subTest(mode=mode):
                 folder, run = self.finish(self.start('42', MODE=mode), code=1)
-                self.assertEqual((run['cleanup'], run['failed_step']), (status, step))
+                self.assertEqual((run['cleanup'], run['failed_step']), ('retained', step))
+                self.assertTrue((folder / 'worktree').is_dir())
+                if mode == 'dirty':
+                    child = self.start('--cleanup', folder / 'run.json')
+                    _, error = child.communicate(timeout=10)
+                    self.assertNotEqual(child.returncode, 0)
+                    self.assertIn('worktree changed', error)
                 self.assertEqual((folder / 'worktree/keep').is_file(), mode == 'dirty')
                 self.assertEqual(run['ocr_exit'], 5 if mode == 'failed' else 0)
 
@@ -263,8 +315,13 @@ class Standalone(unittest.TestCase):
         self.assertEqual(len(folders), 2)
         first.send_signal(signal.SIGTERM)
         stopped, run = self.finish(first, code=130)
-        self.assertEqual((run['failed_step'], run['cleanup']), ('review', 'complete'))
+        self.assertEqual((run['failed_step'], run['cleanup']), ('review', 'retained'))
         remaining, = set(folders) - {stopped}
+        child = self.start('--cleanup', remaining / 'run.json')
+        _, error = child.communicate(timeout=10)
+        self.assertNotEqual(child.returncode, 0)
+        self.assertIn('completed run', error)
+        self.finish(self.start('--cleanup', stopped / 'run.json'))
         self.assertTrue((remaining / 'worktree/topic').is_file())
         (remaining / 'resume').touch()
         self.finish(second)

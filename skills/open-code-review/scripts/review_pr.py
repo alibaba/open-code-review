@@ -17,6 +17,7 @@ from pathlib import Path
 REPOSITORY = r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+"
 PR_URL = re.compile(rf"https://github\.com/({REPOSITORY})/pull/([1-9][0-9]*)/?")
 FIELDS = "url,baseRefName,baseRefOid,headRefOid"
+CACHE = (Path.home() / ".cache" / "open-code-review" / "pr").resolve()
 
 
 def target(value, repo):
@@ -67,12 +68,7 @@ def local_remote(repo, env):
 def freeze(folder, repo, number, revisions, env, offline):
     store, tree = folder / "objects.git", folder / "worktree"
     remote = local_remote(repo, env)
-    if remote and command("git", "rev-parse", "--is-shallow-repository", env=env) == "false":
-        source = command("git", "rev-parse", "--path-format=absolute", "--git-common-dir", env=env)
-        command("git", "clone", "--bare", "--shared", "--single-branch", "--no-tags", "--template=",
-                "--", source, store, cwd=folder, env=dict(offline, GIT_ALLOW_PROTOCOL="file"))
-    else:
-        command("git", "init", "--bare", "--template=", store, cwd=folder, env=offline)
+    command("git", "init", "--bare", "--template=", store, cwd=folder, env=offline)
     if not remote:
         protocol = command("gh", "config", "get", "git_protocol", "--host", "github.com", env=env)
         remote = f"git@github.com:{repo}.git" if protocol == "ssh" else f"https://github.com/{repo}.git"
@@ -90,13 +86,29 @@ def freeze(folder, repo, number, revisions, env, offline):
     return bases[0]
 
 
+def verify_tree(folder, head, env):
+    tree = folder / "worktree"
+    common = command("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=tree, env=env)
+    if (Path(common) != folder / "objects.git" or
+            command("git", "rev-parse", "HEAD", cwd=tree, env=env) != head or
+            command("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=tree, env=env) != "HEAD" or
+            command("git", "status", "--porcelain", "--ignored", "--untracked-files=all", cwd=tree, env=env)):
+        raise ValueError(f"worktree changed; retained {tree}")
+
+
 def release(folder, head, env):
     store, tree = folder / "objects.git", folder / "worktree"
+    if store.is_symlink() or tree.is_symlink():
+        raise ValueError("refusing to clean up a symlinked snapshot")
+    if store.exists():
+        refs = command("git", "for-each-ref", "--format=%(refname)", cwd=store, env=env).splitlines()
+        if set(refs) - {"refs/pr/base", "refs/pr/head"}:
+            raise ValueError("object store has additional refs; retained snapshot")
+        entries = command("git", "worktree", "list", "--porcelain", "-z", cwd=store, env=env).split("\0")
+        if any(Path(entry[9:]) not in (store, tree) for entry in entries if entry.startswith("worktree ")):
+            raise ValueError("object store has another worktree; retained snapshot")
     if tree.exists():
-        if (command("git", "rev-parse", "HEAD", cwd=tree, env=env) != head or
-                command("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=tree, env=env) != "HEAD" or
-                command("git", "status", "--porcelain", "--ignored", "--untracked-files=all", cwd=tree, env=env)):
-            raise ValueError(f"worktree changed; retained {tree}")
+        verify_tree(folder, head, env)
         command("git", "worktree", "remove", "--", tree, cwd=store, env=env)
     if store.exists():
         shutil.rmtree(store)
@@ -149,23 +161,43 @@ def save(manifest, summary):
     pending.replace(manifest)
 
 
-def run(number, repo, background):
-    cache = Path.home() / ".cache" / "open-code-review" / "pr"
-    cache.mkdir(parents=True, exist_ok=True)
-    folder = Path(tempfile.mkdtemp(prefix=f"pr-{number}-", dir=cache)).resolve()
-    manifest = folder / "run.json"
-    result = folder / "review.json"
-    summary = {"number": int(number), "state": "running", "freshness": "not_checked", "ocr_exit": None, "result": None}
-    save(manifest, summary)
-    print(f"PR review artifacts: {folder}", file=sys.stderr, flush=True)
+def environments():
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_") and key != "GH_REPO"}
     env["PATH"] = os.pathsep.join(part for part in os.get_exec_path() if os.path.isabs(part))
     env.update(GH_PROMPT_DISABLED="1", GIT_TERMINAL_PROMPT="0")
-    offline = dict(env, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_ALLOW_PROTOCOL="", OCR_NO_UPDATE="1")
+    return env, dict(env, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_ALLOW_PROTOCOL="", OCR_NO_UPDATE="1")
+
+
+def cleanup(manifest, offline):
+    manifest = manifest.absolute()
+    folder = manifest.parent
+    if (manifest.name != "run.json" or folder.parent != CACHE or manifest != manifest.resolve() or
+            not re.fullmatch(r"pr-[1-9][0-9]*-[\w-]+", folder.name)):
+        raise ValueError("expected a run.json in the PR snapshot cache")
+    summary = json.loads(manifest.read_text(encoding="utf-8"))
+    if (not isinstance(summary, dict) or summary.get("state") not in ("finished", "failed") or
+            summary.get("worktree") != str(folder / "worktree")):
+        raise ValueError("expected a completed run belonging to this directory")
+    if summary.get("cleanup") != "complete":
+        release(folder, summary.get("snapshot", {}).get("head"), offline)
+        summary["cleanup"] = "complete"
+        save(manifest, summary)
+    print(manifest)
+
+
+def run(number, repo, background, env, offline):
+    CACHE.mkdir(parents=True, exist_ok=True)
+    folder = Path(tempfile.mkdtemp(prefix=f"pr-{number}-", dir=CACHE))
+    manifest = folder / "run.json"
+    result = folder / "review.json"
+    summary = {"number": int(number), "state": "running", "freshness": "not_checked", "ocr_exit": None, "result": None,
+               "worktree": str(folder / "worktree"), "cleanup": "retained"}
+    save(manifest, summary)
+    print(f"PR review artifacts: {folder}", file=sys.stderr, flush=True)
     step = "lookup"
     code = 1
     try:
-        initial_env = dict(env, GH_REPO=os.environ["GH_REPO"]) if not repo and os.environ.get("GH_REPO") else env
+        initial_env = {**os.environ, **env} if not repo else env
         repo, snapshot = lookup(number, repo, None, initial_env)
         summary.update(url=f"https://github.com/{repo}/pull/{number}", snapshot=snapshot)
         step = "freeze"
@@ -179,6 +211,8 @@ def run(number, repo, background):
         summary["ocr_exit"] = review(folder, base, snapshot["head"], background, offline)
         if summary["ocr_exit"] != 0 or not result.is_file() or not result.stat().st_size:
             raise ValueError(f"OCR exited {summary['ocr_exit']}; no successful review")
+        step = "verify_snapshot"
+        verify_tree(folder, snapshot["head"], offline)
         code = 0
     except (OSError, ValueError, KeyboardInterrupt) as error:
         summary.update(failed_step=step, error=str(error) or "interrupted")
@@ -187,13 +221,6 @@ def run(number, repo, background):
     finally:
         if result.is_file():
             summary["result"] = str(result)
-        try:
-            release(folder, summary.get("snapshot", {}).get("head"), offline)
-            summary["cleanup"] = "complete"
-        except (OSError, ValueError, KeyboardInterrupt) as error:
-            summary.update(cleanup="retained", cleanup_error=str(error) or "interrupted")
-            summary.setdefault("failed_step", "cleanup")
-            code = 130 if isinstance(error, KeyboardInterrupt) else code or 1
         if summary["result"]:
             try:
                 _, latest = lookup(number, repo, folder, env)
@@ -216,13 +243,24 @@ def interrupt(signum, frame):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Review one pinned GitHub pull request using native OCR.")
-    parser.add_argument("pr", help="PR number in the checkout's default gh repository, or a full GitHub PR URL")
+    operation = parser.add_mutually_exclusive_group(required=True)
+    operation.add_argument("pr", nargs="?", help="PR number in the checkout's default gh repository, or a full GitHub PR URL")
+    operation.add_argument("--cleanup", type=Path, metavar="RUN_JSON", help="Remove only this run's retained snapshot")
     parser.add_argument("--repo", help="GitHub repository (OWNER/REPO)")
     parser.add_argument("--background", help="Business context for the review")
     args = parser.parse_args()
+    env, offline = environments()
+    if args.cleanup:
+        if args.repo or args.background:
+            parser.error("--cleanup does not accept review options")
+        try:
+            cleanup(args.cleanup, offline)
+        except (OSError, ValueError) as error:
+            sys.exit(f"Cleanup refused or incomplete: {error}")
+        sys.exit(0)
     try:
         number, repo = target(args.pr, args.repo)
     except ValueError as error:
         parser.error(str(error))
     signal.signal(signal.SIGTERM, interrupt)
-    sys.exit(run(number, repo, args.background))
+    sys.exit(run(number, repo, args.background, env, offline))

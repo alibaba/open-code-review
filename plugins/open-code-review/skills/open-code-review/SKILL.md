@@ -84,7 +84,9 @@ Omit `--analysis` for workspace reviews, `--preview`, `--resume`, or `--format s
 
 ### Step 3: Verify and Report
 
-Treat every OCR Review comment, including low-severity ones, as a claim for the host agent to check against the reviewed workspace or exact revisions. Trace the stated trigger to the claimed effect. For ordinary functional bugs, try the smallest safe, non-destructive check that exercises that path; compare with the base when the claim is a regression. In PR mode, inspect blobs at the SHAs in `run.json` after helper cleanup, not the current branch. Do not run PR-supplied code, tests, or builds, bypass a policy stop, or try to exploit a suspected vulnerability.
+Treat every OCR Review comment, including low-severity ones, as a claim for the host agent to check against the reviewed workspace or exact revisions. Trace the stated trigger to the claimed effect. For ordinary functional bugs, try the smallest safe, non-destructive check that exercises that path; compare with the base when the claim is a regression. In PR mode, inspect blobs at the recorded SHAs in the retained `worktree` from `run.json`, not the current branch. Do not run PR-supplied code, tests, or builds, bypass a policy stop, or try to exploit a suspected vulnerability.
+
+After reporting the PR result, give the snapshot path and ask whether the user wants it cleaned up. Keep it unless they explicitly agree. Only then run `python3 "$SKILL_DIR/scripts/review_pr.py" --cleanup <run.json>` for that run. This keeps the report and manifest. If cleanup is refused, report why; do not force it.
 
 For text and JSON alike, report findings in two groups, keeping OCR order within each. Keep OCR's claim, severity, category, location, and any suggestion distinct from the host's evidence:
 

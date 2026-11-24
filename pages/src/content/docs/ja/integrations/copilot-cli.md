@@ -35,17 +35,17 @@ skill を Copilot CLI が検出するディレクトリにコピーします。*
 （リポジトリにコミットし、チームで共有）：
 
 ```bash
-mkdir -p .github/skills/open-code-review
-curl -o .github/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p .github/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C .github/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 **ユーザーレベル**（マシン上のすべてのプロジェクトで利用可能）：
 
 ```bash
-mkdir -p ~/.copilot/skills/open-code-review
-curl -o ~/.copilot/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p ~/.copilot/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C ~/.copilot/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 Copilot CLI はプロジェクト内の `.agents/skills/` と `.claude/skills/` も検出します。同じ名前のプロジェクト skill は個人用のものより優先されます。セッション内で `/skills list` を実行して（セッション外では
@@ -57,14 +57,14 @@ skill を `/open-code-review` で明示的に指定するか、タスクを記�
 
 ```
 /open-code-review
-/open-code-review review this PR against main
+/open-code-review 42
 /open-code-review focus on race conditions in commit abc123
 ```
 
 | あなたの発言 | skill が実行する内容 |
 | --- | --- |
 | 「変更をレビューして」 | `ocr review --audience agent`（staged、unstaged、untracked） |
-| 「この PR をレビューして」 | `ocr review --from main --to <branch>` |
+| `42` | `python3 "$SKILL_DIR/scripts/review_pr.py" 42` |
 | 「commit abc123 をレビューして」 | `ocr review --commit abc123` |
 
 skill は独自に設定されたモデルで `ocr` を駆動し、重要度別にグループ化された発見を報告します。`ocr` 用に別の LLM を設定したくない場合は、[デリゲーションモード](../delegate/)をお試しください——ホスト agent（Copilot）がモデルを提供し、`ocr` はファイルの選択とルールの解決のみを行います。
