@@ -11,7 +11,7 @@ import { zh } from '../i18n/zh';
 import { ja } from '../i18n/ja';
 import { ko } from '../i18n/ko';
 import { ru } from '../i18n/ru';
-import { vi } from '../i18n/vi';
+import { vi as viLang } from '../i18n/vi';
 import Footer from './Footer';
 
 function renderFooter() {
@@ -29,7 +29,7 @@ afterEach(() => {
 });
 
 describe.each([375, 1440])('Footer at %dpx', (width) => {
-  it.each(Object.entries({ en, zh, ja, ko, ru, vi }))('links to the contact profile in %s', (language, translations) => {
+  it.each(Object.entries({ en, zh, ja, ko, ru, vi: viLang }))('links to the contact profile in %s', (language, translations) => {
     vi.stubGlobal('innerWidth', width);
     localStorage.setItem('ocr-lang', language);
     renderFooter();
