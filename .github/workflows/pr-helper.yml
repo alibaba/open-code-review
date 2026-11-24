@@ -6,13 +6,9 @@ on:
     paths: &helper-paths
       - 'skills/open-code-review/scripts/**'
       - 'plugins/open-code-review/skills/open-code-review/scripts/**'
-      - 'skills/open-code-review/SKILL.md'
       - 'plugins/open-code-review/skills/open-code-review/SKILL.md'
       - '.agents/plugins/marketplace.json'
-      - '.kimi-plugin/plugin.json'
       - 'plugins/open-code-review/.codex-plugin/plugin.json'
-      - 'plugins/open-code-review/.cursor-plugin/plugin.json'
-      - 'plugins/open-code-review/plugin.json'
       - 'scripts/github-actions/test_review_pr.py'
       - '.github/workflows/pr-helper.yml'
   pull_request:
