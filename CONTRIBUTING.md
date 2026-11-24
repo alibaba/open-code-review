@@ -217,6 +217,7 @@ Documentation is a crucial part of OpenCodeReview. We welcome improvements to RE
 | `docs/i18n/README.ko-KR.md`       | Korean translation                   |
 | `docs/i18n/README.ru-RU.md`       | Russian translation                  |
 | `docs/i18n/README.tr-TR.md`       | Turkish translation                  |
+| `docs/i18n/README.fr-FR.md`       | French translation                   |
 | `CONTRIBUTING.md`                 | Contribution guide (English)         |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | Contribution guide (Chinese)         |
 | `docs/i18n/CONTRIBUTING.ja-JP.md` | Contribution guide (Japanese)        |

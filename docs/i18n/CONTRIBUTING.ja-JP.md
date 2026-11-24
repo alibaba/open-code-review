@@ -205,6 +205,7 @@ AI を開発に使った場合は、下記のルールに従ってください�
 | `README.md`                       | メインのプロジェクトドキュメント（英語） |
 | `docs/i18n/README.zh-CN.md`       | 中国語訳                                 |
 | `docs/i18n/README.tr-TR.md`       | トルコ語訳                               |
+| `docs/i18n/README.fr-FR.md`       | フランス語訳                             |
 | `CONTRIBUTING.md`                 | コントリビューションガイド（英語）       |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | コントリビューションガイド（中国語）     |
 | `docs/i18n/CONTRIBUTING.tr-TR.md` | コントリビューションガイド（トルコ語）   |

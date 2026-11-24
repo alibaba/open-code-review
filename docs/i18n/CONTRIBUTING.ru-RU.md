@@ -209,6 +209,7 @@ make build
 | `docs/i18n/README.ko-KR.md`       | Корейский перевод                          |
 | `docs/i18n/README.ru-RU.md`       | Русский перевод                            |
 | `docs/i18n/README.tr-TR.md`       | Турецкий перевод                           |
+| `docs/i18n/README.fr-FR.md`       | Французский перевод                        |
 | `CONTRIBUTING.md`                 | Руководство контрибьютора (английский)     |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | Руководство контрибьютора (китайский)      |
 | `docs/i18n/CONTRIBUTING.ja-JP.md` | Руководство контрибьютора (японский)       |

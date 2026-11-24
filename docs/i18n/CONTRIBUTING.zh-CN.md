@@ -204,6 +204,7 @@ make build
 | `README.md`                       | 项目主文档（英文） |
 | `docs/i18n/README.zh-CN.md`       | 中文翻译           |
 | `docs/i18n/README.tr-TR.md`       | 土耳其语翻译       |
+| `docs/i18n/README.fr-FR.md`       | 法语翻译           |
 | `CONTRIBUTING.md`                 | 贡献指南（英文）   |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | 贡献指南（中文）   |
 | `docs/i18n/CONTRIBUTING.tr-TR.md` | 贡献指南（土耳其语） |
