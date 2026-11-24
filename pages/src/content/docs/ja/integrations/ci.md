@@ -40,8 +40,8 @@ sidebar:
 
 ### 何をするか
 
-- `pull_request_target`（`opened`）**および** `issue_comment` イベント（本文が
-  `/open-code-review` または `@open-code-review` で始まるもの）でトリガーします。後者はレビュアーが PR にコメントすることで OCR をオンデマンドで再実行できるようにします。（`pull_request` ではなく `pull_request_target` を使うことで、fork から提出された PR でも secret を利用できます。OCR は diff を読むだけで、PR 内のコードは実行しません。）
+- `pull_request_target`（`opened`、`synchronize`、`reopened`）**および** `issue_comment` イベント（本文が
+  `/open-code-review` または `@open-code-review` で始まるもの）でトリガーします。後者はレビュアーが PR にコメントすることで OCR をオンデマンドで再実行できるようにします。（`pull_request` ではなく [`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target) を使うことで、fork から提出された PR でも secret を利用できます。OCR は diff を読むだけで、PR 内のコードは実行しません。）
 - `npm install -g @alibaba-group/open-code-review` で OCR をインストールし、`ocr config set` で設定を書き込み、ブランチ区間モードで中核コマンドを実行します。
 - JSON の外殻を解析し、GitHub Pull Request Review API を通じて各発見をインラインのレビューコメントとして貼り付けます。行情報を持たないコメントはサマリー本文にまとめられます。一括送信が失敗した場合は 1 件ずつの貼り付けにフォールバックし、統計をサマリーコメントに表示します。
 
@@ -55,7 +55,7 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
-2026年12月2日から、GitHub は公開リポジトリの `pull_request_target` イベントをデフォルトでブロックします。適用される Actions イベントポリシーで明示的に許可すると、このイベントを利用できます。PR の作成・更新・再オープン時に OCR を引き続き自動実行する必要がある場合は、リポジトリの **Settings → Actions → Policies** で[このワークフローのポリシーを作成または更新します](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
+[2026年12月2日](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/)から、GitHub がホストする公開リポジトリでは `pull_request_target` イベントがデフォルトでブロックされます。適用される Actions イベントポリシーで明示的に許可すると、このイベントを利用できます。PR の作成・更新・再オープン時に OCR を引き続き自動実行する必要がある場合は、リポジトリの **Settings → Actions → Policies** で[このワークフローのポリシーを作成または更新します](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
 
 - ポリシーを作成する場合は、**Target workflows** の **Add target** をクリックし、`.github/workflows/ocr-review.yml` を指定します。
 - **Restrict events** を選択し、自動レビュー用に `pull_request_target`、コメントによる再レビュー用に `issue_comment` を許可します。既存のポリシーを更新する場合は、ほかに必要なイベントも残します。

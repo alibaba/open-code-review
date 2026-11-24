@@ -59,10 +59,10 @@ GitLab CI ниже представляют её конкретные реали
 
 ### Что он делает
 
-- Запускается по `pull_request_target` (`opened`) **и** по событиям
+- Запускается по `pull_request_target` (`opened`, `synchronize`, `reopened`) **и** по событиям
   `issue_comment`, тело которых начинается с `/open-code-review` или
   `@open-code-review`. Второй вариант позволяет ревьюерам повторно запускать
-  OCR по запросу, оставив комментарий в PR. (`pull_request_target` используется
+  OCR по запросу, оставив комментарий в PR. ([`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target) используется
   вместо `pull_request`, чтобы секреты были доступны даже для PR из форков;
   OCR только читает diff и не выполняет код из PR.)
 - Устанавливает OCR командой
@@ -84,7 +84,7 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
-С 2 декабря 2026 года GitHub будет по умолчанию блокировать событие `pull_request_target` в публичных репозиториях, если применимая политика событий Actions явно его не разрешает. Если вам нужно, чтобы OCR по-прежнему запускался автоматически при создании, обновлении или повторном открытии PR, откройте в репозитории **Settings → Actions → Policies** и [создайте или обновите политику для рабочего процесса](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+С [2 декабря 2026 года](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/) событие `pull_request_target` будет по умолчанию блокироваться в публичных репозиториях на GitHub, если применимая политика событий Actions явно его не разрешает. Если вам нужно, чтобы OCR по-прежнему запускался автоматически при создании, обновлении или повторном открытии PR, откройте в репозитории **Settings → Actions → Policies** и [создайте или обновите политику для рабочего процесса](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
 
 - При создании политики нажмите **Add target** в разделе **Target workflows** и укажите `.github/workflows/ocr-review.yml`.
 - В разделе **Restrict events** разрешите `pull_request_target` для автоматического ревью и `issue_comment` для повторного ревью по комментарию. При обновлении политики сохраните остальные необходимые события в списке разрешённых.

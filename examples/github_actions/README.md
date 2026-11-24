@@ -11,7 +11,7 @@ mkdir -p .github/workflows
 cp ocr-review.yml .github/workflows/ocr-review.yml
 ```
 
-Starting December 2, 2026, GitHub will block `pull_request_target` by default in public repositories unless an applicable Actions event policy explicitly allows it. If you need OCR to keep running automatically when a PR is opened, updated, or reopened, go to **Settings → Actions → Policies** in your repository and [create or update a policy for the workflow](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+Starting [December 2, 2026](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/), GitHub will block `pull_request_target` by default in public repositories it hosts unless an applicable Actions event policy explicitly allows it. If you need OCR to keep running automatically when a PR is opened, updated, or reopened, go to **Settings → Actions → Policies** in your repository and [create or update a policy for the workflow](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
 
 - For a new policy, click **Add target** under **Target workflows** and specify `.github/workflows/ocr-review.yml`.
 - Under **Restrict events**, allow `pull_request_target` for automatic reviews and `issue_comment` for comment-triggered re-reviews. When updating a policy, keep any other required events in the allowlist.
@@ -66,7 +66,7 @@ PR Created/Updated → GitHub Actions Triggered → OCR Reviews Diff → Comment
 Comment with trigger keyword ↗
 ```
 
-1. When a PR is opened, the workflow triggers (uses `pull_request_target` for fork secret access).
+1. When a PR is opened, updated, or reopened, the workflow runs using [`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target) so it can access secrets for PRs from forks.
 2. Alternatively, when a comment containing `/open-code-review` or `@open-code-review` is posted on a PR, the workflow triggers.
 3. The reusable action installs OCR, fetches the PR head blobs, computes `git merge-base`, and runs `ocr review --from <merge-base> --to <head> --format json`.
 4. It parses the JSON output and posts inline review comments on the PR via the Pull Request Review API, plus a summary comment (an issue comment on the PR).

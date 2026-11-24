@@ -55,10 +55,10 @@ GitLab은 `GITLAB_API_TOKEN`을 명시적으로 두기를 권장하지만, fork 
 
 ### 무엇을 하나 {#what-it-does}
 
-- `pull_request_target`(`opened`) 이벤트와 본문이 `/open-code-review` 또는
+- `pull_request_target`(`opened`, `synchronize`, `reopened`) 이벤트와 본문이 `/open-code-review` 또는
   `@open-code-review`로 시작하는 `issue_comment` 이벤트에서 트리거합니다. 후자
   덕분에 리뷰어가 PR에 코멘트를 남겨 OCR을 다시 돌릴 수 있습니다.
-  (`pull_request` 대신 `pull_request_target`을 쓰는 이유는 fork에서 올라온 PR에서도
+  (`pull_request` 대신 [`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target)을 쓰는 이유는 fork에서 올라온 PR에서도
   시크릿을 쓸 수 있게 하기 위해서입니다. OCR은 diff를 읽기만 하고 PR의 코드를
   실행하지 않습니다.)
 - `npm install -g @alibaba-group/open-code-review`로 OCR을 설치하고,
@@ -77,7 +77,7 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
-2026년 12월 2일부터 GitHub는 공개 저장소에서 `pull_request_target` 이벤트를 기본적으로 차단합니다. 적용되는 Actions 이벤트 정책에서 명시적으로 허용하면 이 이벤트를 사용할 수 있습니다. PR을 만들거나 업데이트하거나 다시 열 때 OCR을 계속 자동으로 실행해야 한다면 저장소의 **Settings → Actions → Policies**에서 [이 워크플로에 적용할 정책을 만들거나 업데이트하세요](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+[2026년 12월 2일](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/)부터 GitHub에서 호스팅하는 공개 저장소의 `pull_request_target` 이벤트가 기본적으로 차단됩니다. 적용되는 Actions 이벤트 정책에서 명시적으로 허용하면 이 이벤트를 사용할 수 있습니다. PR을 만들거나 업데이트하거나 다시 열 때 OCR을 계속 자동으로 실행해야 한다면 저장소의 **Settings → Actions → Policies**에서 [이 워크플로에 적용할 정책을 만들거나 업데이트하세요](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
 
 - 새 정책을 만드는 경우 **Target workflows**에서 **Add target**을 클릭하고 `.github/workflows/ocr-review.yml`을 지정하세요.
 - **Restrict events**에서 자동 리뷰용 `pull_request_target`과 댓글로 리뷰를 다시 요청할 때 쓰는 `issue_comment`를 허용하세요. 기존 정책을 업데이트할 때는 다른 필수 이벤트도 허용 목록에 남겨 두세요.

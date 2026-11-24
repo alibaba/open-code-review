@@ -49,9 +49,9 @@ sidebar:
 
 ### 它做什么
 
-- 在 `pull_request_target`（`opened`）**和** `issue_comment` 事件上触发，后者正文
+- 在 `pull_request_target`（`opened`、`synchronize`、`reopened`）**和** `issue_comment` 事件上触发，后者正文
   以 `/open-code-review` 或 `@open-code-review` 开头——后者让评审者通过在 PR 上
-   评论按需重跑 OCR。（用 `pull_request_target` 而非 `pull_request`，使即便从
+   评论按需重跑 OCR。（用 [`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target) 而非 `pull_request`，使即便从
    fork 提交的 PR 也能用上 secret；OCR 只读 diff，不执行 PR 中的代码。）
 - 通过 `npm install -g @alibaba-group/open-code-review` 安装 OCR，用
   `ocr config set` 写配置，再以分支区间模式运行核心命令。
@@ -69,7 +69,7 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
-2026 年 12 月 2 日起，GitHub 将默认拦截公开仓库中的 `pull_request_target` 事件，除非适用的 Actions 事件策略明确允许该事件。如果你需要让 OCR 在 PR 创建、更新或重新打开时继续自动运行，请前往仓库的 **Settings → Actions → Policies**，然后[新建或更新适用于该工作流的策略](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
+[2026 年 12 月 2 日](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/)起，GitHub 将默认拦截其托管的公开仓库中的 `pull_request_target` 事件，除非适用的 Actions 事件策略明确允许该事件。如果你需要让 OCR 在 PR 创建、更新或重新打开时继续自动运行，请前往仓库的 **Settings → Actions → Policies**，然后[新建或更新适用于该工作流的策略](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
 
 - 新建策略时，在 **Target workflows** 下点击 **Add target**，指定 `.github/workflows/ocr-review.yml`。
 - 勾选 **Restrict events**，允许 `pull_request_target`（自动评审）和 `issue_comment`（通过评论触发复审）。更新已有策略时，保留其他必要事件。
