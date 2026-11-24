@@ -171,12 +171,6 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		if errors.Is(err, context.Canceled) {
 			return "", err
 		}
-		if isPerlRegexpCompileError(err, errStr) {
-			// An invalid -P pattern is a user/model error, not a tool failure:
-			// surface it as a message the caller can inspect and correct instead
-			// of aborting the tool session.
-			return fmt.Sprintf("Error: invalid regular expression: %s", strings.TrimSpace(errStr)), nil
-		}
 		if outStr == "" {
 			var exitErr *exec.ExitError
 			exitCode := -1
@@ -189,6 +183,9 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			trimmedErr := trimGitUsage(errStr, exitCode)
 			if trimmedErr == "" {
 				return "", fmt.Errorf("git grep failed: %w", err)
+			}
+			if usePerlRegexp && exitCode == 128 && isPerlRegexpCompileError(trimmedErr) {
+				trimmedErr += `; fix the regular expression (e.g. use \( for a literal opening parenthesis), or set use_perl_regexp=false to search for the entire text literally`
 			}
 			return "", fmt.Errorf("git grep failed: %w: %s", err, trimmedErr)
 		}
@@ -286,16 +283,11 @@ func isNotGitRepoError(err error, stderr string) bool {
 	return false
 }
 
-func isPerlRegexpCompileError(err error, stderr string) bool {
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 128 {
-		return false
+func isPerlRegexpCompileError(stderr string) bool {
+	for line := range strings.SplitSeq(stderr, "\n") {
+		if strings.HasPrefix(line, "fatal: -e option, '") || strings.HasPrefix(line, "fatal: pcre2_compile failed") {
+			return true
+		}
 	}
-	// Detect the stable structure of a failed -P pattern compile rather than
-	// enumerating PCRE diagnostics. Newer git reports "fatal: -e option,
-	// '<pattern>': ..."; older builds "fatal: pcre2_compile failed: ...". Both
-	// identify the pattern argument itself as the failure, not a repository or
-	// I/O error.
-	return strings.Contains(stderr, "pcre2_compile failed") ||
-		strings.Contains(stderr, "-e option")
+	return false
 }
