@@ -698,7 +698,16 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Effort = string(e)
 	case "llm.url", "llm.URL":
-		cfg.Llm.URL = value
+		// Same treatment as providers.<name>.url, so a scheme-less or padded
+		// value is refused here rather than surfacing as an opaque
+		// "unsupported protocol scheme" on the first LLM request.
+		trimmedURL := strings.TrimSpace(value)
+		if trimmedURL != "" {
+			if err := validateBaseURL(trimmedURL); err != nil {
+				return fmt.Errorf("invalid URL for %s: %w", key, err)
+			}
+		}
+		cfg.Llm.URL = trimmedURL
 	case "llm.auth_token", "llm.AuthToken":
 		cfg.Llm.AuthToken = value
 	case "llm.auth_token_cmd", "llm.AuthTokenCmd":
