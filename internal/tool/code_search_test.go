@@ -391,6 +391,8 @@ func TestIsPerlRegexpCompileError(t *testing.T) {
 		want   bool
 	}{
 		{"trace: built-in: git grep -P\nfatal: -e option, 'FS(': missing closing parenthesis", true},
+		{"fatal\u00A0: -e option, 'FS(': missing closing parenthesis", true},
+		{"\u81F4\u547D\u9519\u8BEF\uFF1A-e option, 'FS(': missing closing parenthesis", true},
 		{"fatal: pcre2_compile failed at offset 3: missing closing parenthesis", true},
 		{"fatal: unable to resolve revision: pcre2_compile failed", false},
 		{"fatal: invalid pathspec: -e option", false},

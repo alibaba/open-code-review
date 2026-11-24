@@ -285,7 +285,14 @@ func isNotGitRepoError(err error, stderr string) bool {
 
 func isPerlRegexpCompileError(stderr string) bool {
 	for line := range strings.SplitSeq(stderr, "\n") {
-		if strings.HasPrefix(line, "fatal: -e option, '") || strings.HasPrefix(line, "fatal: pcre2_compile failed") {
+		line = strings.Replace(line, "\uFF1A", ":", 1)
+		_, diagnostic, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		diagnostic = strings.TrimSpace(diagnostic)
+		if strings.HasPrefix(diagnostic, "-e option, '") ||
+			strings.HasPrefix(diagnostic, "pcre2_compile failed") {
 			return true
 		}
 	}
