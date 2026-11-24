@@ -55,10 +55,11 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
-2026年12月2日から、GitHub は公開リポジトリの `pull_request_target` イベントをデフォルトでブロックします。PR を開いたときや更新したときに OCR を引き続き自動実行するには、リポジトリの **Settings → Actions → Policies** で[ポリシーを追加します](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
+2026年12月2日から、GitHub は公開リポジトリの `pull_request_target` イベントをデフォルトでブロックします。適用される Actions イベントポリシーで明示的に許可すると、このイベントを利用できます。PR の作成・更新・再オープン時に OCR を自動実行するには、リポジトリの **Settings → Actions → Policies** で[このワークフローのポリシーを作成または更新します](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
 
-- **Target workflows** の **Add target** をクリックし、`.github/workflows/ocr-review.yml` を指定します。
-- **Restrict events** を選択し、許可するイベントに `pull_request_target` を追加します。
+- ポリシーを作成する場合は、**Target workflows** の **Add target** をクリックし、`.github/workflows/ocr-review.yml` を指定します。
+- **Restrict events** を選択し、自動レビュー用に `pull_request_target`、コメントによる再レビュー用に `issue_comment` を許可します。既存のポリシーを更新する場合は、ほかに必要なイベントも残します。
+- **Enforcement status** を **Active** に設定し、ポリシーを保存します。
 
 ### 必須の secret
 

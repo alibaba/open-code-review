@@ -86,10 +86,11 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
-Starting December 2, 2026, GitHub will block `pull_request_target` by default in public repositories. To keep OCR running automatically when a PR is opened or updated, go to **Settings → Actions → Policies** in your repository and [create a policy](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+Starting December 2, 2026, GitHub will block `pull_request_target` by default in public repositories unless an applicable Actions event policy explicitly allows it. To keep OCR running automatically when a PR is opened, updated, or reopened, go to **Settings → Actions → Policies** in your repository and [create or update a policy for the workflow](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
 
-- Under **Target workflows**, click **Add target** and specify `.github/workflows/ocr-review.yml`.
-- Select **Restrict events** and add `pull_request_target` to the list of allowed events.
+- For a new policy, click **Add target** under **Target workflows** and specify `.github/workflows/ocr-review.yml`.
+- Under **Restrict events**, allow `pull_request_target` for automatic reviews and `issue_comment` for comment-triggered re-reviews. When updating a policy, keep any other required events in the allowlist.
+- Set **Enforcement status** to **Active** and save the policy.
 
 ### Required secrets
 
