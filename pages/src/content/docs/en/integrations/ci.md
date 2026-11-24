@@ -86,6 +86,8 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
+Starting December 2, 2026, GitHub blocks `pull_request_target` by default in public repositories. To keep automatic PR reviews, open your repository's **Settings → Actions → Policies** and [allow `pull_request_target` for `.github/workflows/ocr-review.yml`](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+
 ### Required secrets
 
 Set under **Settings → Secrets and variables → Actions**:

@@ -11,6 +11,8 @@ mkdir -p .github/workflows
 cp ocr-review.yml .github/workflows/ocr-review.yml
 ```
 
+Starting December 2, 2026, GitHub blocks `pull_request_target` by default in public repositories. To keep automatic PR reviews, open your repository's **Settings → Actions → Policies** and [allow `pull_request_target` for `.github/workflows/ocr-review.yml`](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+
 The core of the demo is a single action step:
 
 ```yaml
@@ -66,8 +68,6 @@ Comment with trigger keyword ↗
 4. It parses the JSON output and posts inline review comments on the PR via the Pull Request Review API, plus a summary comment (an issue comment on the PR).
 
 ## Setup
-
-Starting December 2, 2026, GitHub blocks `pull_request_target` by default in public repositories. To keep automatic PR reviews, open your repository's **Settings → Actions → Policies** and [allow `pull_request_target` for `.github/workflows/ocr-review.yml`](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
 
 ### Configure secrets and variables
 

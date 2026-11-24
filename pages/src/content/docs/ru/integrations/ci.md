@@ -84,6 +84,8 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
+С 2 декабря 2026 года GitHub по умолчанию блокирует событие `pull_request_target` в публичных репозиториях. Чтобы сохранить автоматическое ревью PR, откройте **Settings → Actions → Policies** в своём репозитории и [разрешите событие `pull_request_target` для `.github/workflows/ocr-review.yml`](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+
 ### Необходимые секреты
 
 Задайте их в разделе **Settings → Secrets and variables → Actions**:

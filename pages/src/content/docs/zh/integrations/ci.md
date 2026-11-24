@@ -69,6 +69,8 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
+2026 年 12 月 2 日起，GitHub 将默认拦截公开仓库中的 `pull_request_target` 事件。要继续使用 PR 自动评审，请在仓库的 **Settings → Actions → Policies** 中[为 `.github/workflows/ocr-review.yml` 放行 `pull_request_target`](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
+
 ### 必需 secret
 
 在 **Settings → Secrets and variables → Actions** 下设置：

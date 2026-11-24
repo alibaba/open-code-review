@@ -55,6 +55,8 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
+2026年12月2日から、GitHub は公開リポジトリの `pull_request_target` イベントをデフォルトでブロックします。PR の自動レビューを続けるには、リポジトリの **Settings → Actions → Policies** で [`.github/workflows/ocr-review.yml` の `pull_request_target` を許可してください](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
+
 ### 必須の secret
 
 **Settings → Secrets and variables → Actions** で設定します。

@@ -77,6 +77,8 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
+2026년 12월 2일부터 GitHub는 공개 저장소에서 `pull_request_target` 이벤트를 기본적으로 차단합니다. PR 자동 리뷰를 계속 사용하려면 저장소의 **Settings → Actions → Policies**에서 [`.github/workflows/ocr-review.yml` 워크플로에 `pull_request_target`을 허용하세요](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+
 ### 필요한 시크릿 {#required-secrets}
 
 **Settings → Secrets and variables → Actions**에서 설정합니다.
