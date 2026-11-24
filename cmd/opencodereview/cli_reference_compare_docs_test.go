@@ -111,7 +111,7 @@ func TestCLIReferenceUsesSubtaskUnit(t *testing.T) {
 }
 
 func firstLineContaining(body, marker string) (string, bool) {
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if strings.Contains(line, marker) {
 			return line, true
 		}

@@ -24,6 +24,8 @@ export function App() {
     return unsub;
   }, []);
 
+  const result = state.session.result;
+  const partialFailure = state.view === 'failed' && !!result?.executionError;
   const configured = isConfigReady(state.config);
   const start = (options: CliRunOptions) => {
     dispatch({ type: 'startReview', mode: options.mode });
@@ -57,15 +59,16 @@ export function App() {
           {state.view !== 'idle' && (
             <div class="result-region">
               {state.view === 'running' && <RunningView logs={state.logs} onCancel={() => bridge.post({ type: 'cancelReview' })} />}
-              {state.view === 'done' && state.session.result && (
-                <DoneView result={state.session.result} commentStatus={state.commentStatus}
-                  commentJumpable={state.commentJumpable} logs={state.logs}
+              {state.view === 'failed' && <FailedView error={state.session.error} partial={partialFailure} logs={state.logs}
+                onRetry={() => start({ mode: ReviewMode.Workspace })} />}
+              {(state.view === 'done' || partialFailure) && result && (
+                <DoneView result={result} commentStatus={state.commentStatus}
+                  commentJumpable={state.commentJumpable} logs={partialFailure ? [] : state.logs}
                   onOpen={(i) => bridge.post({ type: 'jumpToComment', index: i })}
                   onAction={(i, action) => bridge.post({ type: 'commentAction', index: i, action })} />
               )}
               {state.view === 'empty' && <EmptyView logs={state.logs} />}
               {state.view === 'cancelled' && <CancelledView />}
-              {state.view === 'failed' && <FailedView error={state.session.error} onRetry={() => start({ mode: ReviewMode.Workspace })} />}
             </div>
           )}
         </div>

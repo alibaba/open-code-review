@@ -7,15 +7,58 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/alibaba/open-code-review/acp/internal/testutil"
 )
+
+func cooperativeInterruptAvailable(test *testing.T) bool {
+	test.Helper()
+	var processID uint32
+	getConsoleProcessList := syscall.NewLazyDLL("kernel32.dll").NewProc("GetConsoleProcessList")
+	count, _, err := getConsoleProcessList.Call(uintptr(unsafe.Pointer(&processID)), 1)
+	if count != 0 {
+		return true
+	}
+	if errors.Is(err, syscall.Errno(6)) {
+		return false
+	}
+	test.Fatalf("GetConsoleProcessList: %v", err)
+	return false
+}
+
+func TestWindowsCancellationWithoutConsole(test *testing.T) {
+	const childEnvironment = "OCR_TEST_CANCELLATION_WITHOUT_CONSOLE"
+	if os.Getenv(childEnvironment) == "1" {
+		if cooperativeInterruptAvailable(test) {
+			test.Fatal("cancellation subprocess unexpectedly has a console")
+		}
+		TestRunnerLocalCancelOverridesExit(test)
+		return
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		test.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, binary, "-test.run=^TestWindowsCancellationWithoutConsole$", "-test.v")
+	command.Env = append(os.Environ(), childEnvironment+"=1")
+	const createNoWindow = 0x08000000
+	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
+	if output, err := command.CombinedOutput(); err != nil {
+		test.Fatalf("console-less cancellation: %v\n%s", err, output)
+	}
+}
 
 func TestWindowsJobObjectReapsGrandchild(t *testing.T) {
 	dir := t.TempDir()
@@ -73,7 +116,7 @@ func TestWindowsRepeatedCancelDoesNotLeakJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		ctx, cancel := context.WithCancel(context.Background())
 		events, outcomes := NewRunner(binary).Run(ctx, Request{CWD: t.TempDir(), Args: []string{"review", "block"}})
 		for event := range events {

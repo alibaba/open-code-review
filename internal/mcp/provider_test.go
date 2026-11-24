@@ -81,6 +81,16 @@ func TestRegisterAll_SkipsReservedTools(t *testing.T) {
 	}
 }
 
+func TestRegisterAnalysisNamesInReview(t *testing.T) {
+	names := []string{"context_read", "submit_analysis"}
+	client := newTestClient("fixture", []*mcp.Tool{{Name: names[0]}, {Name: names[1]}})
+	registry := tool.NewRegistry()
+	RegisterAll(registry, client, names)
+	if got := CollectToolDefs([]*Client{client}, registry); len(got) != 2 {
+		t.Fatalf("missing Review MCP definitions: %+v", got)
+	}
+}
+
 func TestRegisterAll_SkipsDuplicateTools(t *testing.T) {
 	tools := []*mcp.Tool{{Name: "dup_tool"}}
 	c := newTestClient("srv", tools)

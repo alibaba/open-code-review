@@ -21,7 +21,7 @@ flowchart TD
     A --> B --> C --> D --> D2 --> E --> F
 ```
 
-オーケストレーションのロジックは [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/) パッケージにあり、主要なファイルは `agent.go`（ディスパッチとグループごとのオーケストレーション）、`grouping.go`（セマンティックなファイルグルーピング）、`selection.go`（ファイルフィルタリング）、`preview.go`（`--preview` のレポート）、`util.go`（ヘルパー）です。ツール呼び出しループとメモリ圧縮は、その隣にある [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/) にあります。注目すべきエントリポイントは 2 つです: `Agent.Run`（パイプラインの最上部）と `Agent.dispatchSubtasks`（グループごとのファンアウト）。
+オーケストレーションのロジックは [`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/) パッケージにあり、主要なファイルは `agent.go`（ディスパッチとグループごとのオーケストレーション）、`grouping.go`（セマンティックなファイルグルーピング）、`selection.go`（ファイルフィルタリング）、`preview.go`（`--preview` のレポート）、`util.go`（ヘルパー）です。ツール呼び出しループとメモリ圧縮は、その隣にある [`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/) にあります。注目すべきエントリポイントは 2 つです: `Agent.Run`（パイプラインの最上部）と `Agent.dispatchSubtasks`（グループごとのファンアウト）。
 
 ## diff provider
 
@@ -92,11 +92,11 @@ otherwise                                    { skip plan }
 
 2 つのしきい値は連携して働きます。`PLAN_MODE_LINE_THRESHOLD` はグループ内で最も大きいファイルを見て、`PLAN_MODE_GROUP_LINE_THRESHOLD` はグループ全体の合計変更量を見ます。後者を意図的に大きめの値にしているのは、plan 段階が無条件に実行されてしまうのを避けるためです。
 
-小さな diff に対しては、plan はレイテンシを増やすだけで価値がないため、静かにスキップされ、main ループが直接実行されます。より大きな diff に対しては、OCR は**1 回だけ** `PLAN_TASK` の LLM 呼び出しを行います。`Tools` フィールドを送らないため、plan の間モデルはツールを呼び出せません。読み取り専用ツールのサブセット（`code_search`、`file_read_diff`、`file_find`。`tools.json` で `plan_task` フラグが `true` の 3 つ）が、`{{plan_tools}}` プレースホルダー（`formatToolDefs` でレンダリング）を通じてプレーンテキストとして埋め込まれ、あとで何が使えるかをモデルに知らせます。モデルはチェックリストを返し、それが main prompt 内の `{{plan_guidance}}` になります。
+小さな diff に対しては、plan はレイテンシを増やすだけで価値がないため、静かにスキップされ、main ループが直接実行されます。より大きな diff に対しては、OCR は**1 回だけ** `PLAN_TASK` の LLM 呼び出しを行います。`Tools` フィールドを送らないため、plan の間モデルはツールを呼び出せません。読み取り専用ツールのサブセット（`code_search`、`file_read`、`file_read_diff`、`file_find`。`task_template.json` の `PLAN_TASK.tool_references` で選択）が、`{{plan_tools}}` プレースホルダー（`formatToolDefs` でレンダリング）を通じてプレーンテキストとして埋め込まれ、あとで何が使えるかをモデルに知らせます。モデルはチェックリストを返し、それが main prompt 内の `{{plan_guidance}}` になります。
 
 ### 段階 2: main ループ（複数ラウンド）
 
-main ループは `MAIN_TASK` prompt を組み立て、モデルとツール呼び出しの対話を展開します。完全なツールセットは、plan 段階のツールに **`task_done`**、**`code_comment`**、**`file_read`** を加えたものです。完全な一覧は[ツール](../tools/)を参照してください。
+main ループは `MAIN_TASK` prompt を組み立て、モデルとツール呼び出しの対話を展開します。完全なツールセットは、plan 段階のツール参照に **`task_done`** と **`code_comment`** を加えたものです。完全な一覧は[ツール](../tools/)を参照してください。
 
 main ループ全体は最大 `MAX_REVIEW_ROUNDS` 回繰り返されます（`--effort` で制御: `low` = 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド）。2 ラウンド目以降は plan の結果を取り除き（それが recall の上限になってしまうのを避けるため）、前のラウンドで確定したコメントを「すでに見つかった指摘」のコンテキストとして渡し、モデルに**新しい**問題を探させます。あるラウンドで新しい指摘が出なかった場合、または確定コメント数が上限に達した場合は、早期に停止します。
 
@@ -131,6 +131,8 @@ loop up to MAX_TOOL_REQUEST_TIMES (default 100):
 | MAX_TOKENS の 60% | `tokenSoftThreshold` | **非同期**のバックグラウンド圧縮を起動します。現在のループは中断せず継続します。 |
 | MAX_TOKENS の 80% | `tokenWarningThreshold` | 次のリクエストを送る前に**同期的**に圧縮を実行します。 |
 
+active ゾーンに残すラウンドを選ぶ前に、OCR はサマリー本文の領域を予約します。予約量は、設定された出力上限、コンテキストウィンドウの 20%、固定プロンプトとラッパーを差し引いた残りの領域の最小値です。推論トークンも出力に含めるプロバイダーがあるため、圧縮リクエスト自体に 80% の警告しきい値まで余裕があれば、設定された出力上限の範囲で生成予算を増やし、本文は予約量以内に収めるよう指示します。再構築した会話のサイズは別途検査されます。これらの制限は累積予算 `--max-tokens-budget` とは独立しており、累積予算をゼロにしても圧縮は無効になりません。
+
 ### 3 つのゾーン
 
 ```mermaid
@@ -144,30 +146,16 @@ flowchart LR
     F --- C --- A
 ```
 
-1「ラウンド」とは、1 つの assistant メッセージと、それに続くツール結果メッセージのことです。`partitionMessages` は末尾から前へラウンドを辿り、`(0.80 × MAX_TOKENS) - reservedTokens` に収まる限り多くのラウンドを保持します。それより前の内容が **compress ゾーン**になります。
+1「ラウンド」とは、1 つの assistant メッセージと、それに続くツール結果メッセージのことです。`partitionMessages` は末尾から前へラウンドを辿り、token 数が `(0.80 × MAX_TOKENS) - reservedTokens` を厳密に下回る範囲で、できるだけ多くのラウンドを保持します。予約する予算には、先頭 2 メッセージ（以前のサマリーを含む）、新しいサマリー本文の予約量、そのラッパーの分が含まれます。それより前の内容が **compress ゾーン**になります。compress ゾーンが空なら会話は変更しません。また、元の会話がまだ警告しきい値を下回っている場合、バックグラウンド圧縮で固定プレフィックス以降の全ラウンドをまとめて要約することはありません。
 
 compress ゾーンは XML としてレンダリングされ、`MEMORY_COMPRESSION_TASK` prompt でモデルに渡されます。返されたサマリーは、`<previous_review_summary>` タグで包まれて元の user メッセージ内に追記されます。
 
-圧縮後: `messages = frozen[2] + compressed_user_msg + active`。
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … MEMORY_COMPRESSION_TASK を呼び出す …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+圧縮後: `messages = system + (original_user + summary) + active`。
+再構築した会話は同じローカルの token 推定方法で検査し、元の会話より小さくなっている必要があります。圧縮テンプレートがない場合、サマリーが空の場合、または結果が小さくならない場合は、元の履歴をそのまま保持します。サマリーテンプレートが使用できない場合や、再構築した結果が上限を超える場合は、元のメッセージを一切破棄せずにエラーを返します。
 
 ### 非同期 vs 同期
 
-非同期パスでは、バックグラウンドで圧縮が実行されている間も main ループがツール呼び出しを生成し続けられます。次の token チェックが発生したとき、準備できたサマリーが `tryApplyPendingCompression` を通じて適用されます。非同期タスクが完了する前に比率が警告しきい値を越えた場合、ループは一時停止して `runCompression` を同期的に実行します。これにより次のリクエストが必ず収まることが保証されます。
+非同期パスでは、バックグラウンドで圧縮が実行されている間も main ループがツール呼び出しを生成し続けられます。次の token チェックが発生したとき、準備できたサマリーが `tryApplyPendingCompression` を通じて適用されます。非同期タスクが完了する前に比率が警告しきい値を越えた場合、ループは一時停止して `runCompression` を同期的に実行します。バックグラウンド処理のスナップショット取得後に追加されたメッセージは、サマリーを適用する際にも保持されます。それでも会話がローカルの警告しきい値を厳密に下回れない場合は、未圧縮の履歴を黙って破棄するのではなく、`StopCompression` でループを停止します。この推定は、プロバイダーの実際のコンテキストウィンドウ容量に収まることを保証するものではありません。
 
 ## コメント処理パイプライン
 
@@ -225,7 +213,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | `{{path}}` | グループのキー（グループ内のファイルパスをカンマ区切りで連結）。`REVIEW_FILTER_TASK` に使用されます。 |
 | `{{comments}}` | 蓄積されたコメント（JSON）。`REVIEW_FILTER_TASK` に使用されます。 |
 
-プレースホルダーの置換は [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go) にあります。テンプレート自体は CLI では上書きできません。prompt を変更するには、[`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json) を編集して再ビルドする必要があります。`--tools` 引数は*ツールレジストリ*の上書きです（`internal/config/toolsconfig` が消費する JSON を置き換えます）。テンプレートの上書きではありません。[ツール](../tools/#customizing-tools)を参照してください。
+プレースホルダーの置換は [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go) にあります。テンプレート自体は CLI では上書きできません。prompt を変更するには、[`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json) を編集して再ビルドする必要があります。組み込みツール定義も実行時には上書きできません。プロジェクトの指針にはレビュールールと背景情報、外部業務コンテキストには MCP を使用してください。[ツール](../tools/#customizing-tools)を参照してください。
 
 > **プレースホルダー構文についての注意。** 上記のプレースホルダーはすべて二重波括弧 `{{…}}` 構文を使用します。*ただし* `RE_LOCATION_TASK` は例外で、単一波括弧の `{diff}`、`{existing_code}`、`{suggestion_content}` を置換します（`internal/diff/relocation.go` を参照）。
 

@@ -3,7 +3,41 @@
 
 package diff
 
-import "strings"
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/alibaba/open-code-review/internal/gitcmd"
+)
+
+type GitignorePatterns []string
+
+func LoadGitignoreAtRef(ctx context.Context, repoDir, ref string, runner *gitcmd.Runner) (GitignorePatterns, error) {
+	if runner == nil {
+		runner = gitcmd.New(1)
+	}
+	entries, err := runner.Output(ctx, repoDir, "ls-tree", "-z", "--full-tree", "--end-of-options", ref)
+	if err != nil {
+		return nil, fmt.Errorf("locate root .gitignore at %s: %w", ref, err)
+	}
+	for entry := range strings.SplitSeq(string(entries), "\x00") {
+		metadata, name, _ := strings.Cut(entry, "\t")
+		if name != ".gitignore" {
+			continue
+		}
+		mode, oid, _ := strings.Cut(metadata, " blob ")
+		if mode != "100644" && mode != "100755" {
+			break
+		}
+		data, err := runner.Output(ctx, repoDir, "cat-file", "blob", oid)
+		if err != nil {
+			return nil, fmt.Errorf("read root .gitignore at %s: %w", ref, err)
+		}
+		return parseGitignorePatterns(data), nil
+	}
+	return nil, nil
+}
 
 // ExcludedDirs is the list of directory prefixes that scanners and diff
 // providers should always skip. Exposed so internal/scan and other consumers

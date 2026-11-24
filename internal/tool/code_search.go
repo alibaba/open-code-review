@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ const (
 // CodeSearchProvider performs text search across the repository using git grep.
 type CodeSearchProvider struct {
 	FileReader *FileReader
+	Access     *CodeAccess
 }
 
 func NewCodeSearch(fr *FileReader) *CodeSearchProvider { return &CodeSearchProvider{FileReader: fr} }
@@ -29,6 +31,14 @@ func NewCodeSearch(fr *FileReader) *CodeSearchProvider { return &CodeSearchProvi
 func (p *CodeSearchProvider) Tool() Tool { return CodeSearch }
 
 func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (string, error) {
+	return p.Access.execute(ctx, args, p.FileReader, func(reader *FileReader) (string, error) {
+		selected := *p
+		selected.FileReader = reader
+		return selected.execute(ctx, args)
+	})
+}
+
+func (p *CodeSearchProvider) execute(ctx context.Context, args map[string]any) (string, error) {
 	searchText, _ := args["search_text"].(string)
 	caseSensitive, _ := args["case_sensitive"].(bool)
 	usePerlRegexp, _ := args["use_perl_regexp"].(bool)
@@ -105,12 +115,7 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 
 func hasTraversalPathComponent(pathspec string) bool {
 	norm := strings.ReplaceAll(pathspec, "\\", "/")
-	for _, part := range strings.Split(norm, "/") {
-		if part == ".." {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(norm, "/"), "..")
 }
 
 func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []string) (string, string, error) {
@@ -140,6 +145,9 @@ func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []str
 }
 
 func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) (string, error) {
+	if p.FileReader.Mode == ModeEmpty {
+		return "No matches found", nil
+	}
 	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
 	if cmdArgs == nil {
 		return "Error: ref must not start with '-'", nil

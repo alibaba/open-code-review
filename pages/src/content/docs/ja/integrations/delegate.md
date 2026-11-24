@@ -53,7 +53,7 @@ cp -R /path/to/open-code-review/skills/open-code-review-delegate ~/.claude/skill
 ### ステップ 1：Preview — レビュー対象の決定
 
 ```bash
-ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <patterns>]
 ```
 
 出力内容：
@@ -69,12 +69,13 @@ ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <pat
 |----------|---------|
 | ワークスペースの変更 | `ocr delegate preview` |
 | ブランチ比較 | `ocr delegate preview --from main --to feature` |
+| 現在のブランチを main と比較 | `ocr delegate preview --from main` |
 | 単一コミット | `ocr delegate preview -c abc123` |
 
 ### ステップ 2：ファイルのルール取得
 
 ```bash
-ocr delegate rule <path1> <path2> ...
+ocr delegate rule [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> ...
 ```
 
 ステップ 1 のレビュー可能パスを渡します。出力はルール内容でグループ化されます — 同じルールを共有するファイルは1つのグループにまとめられ、重複を避けます。
@@ -144,10 +145,12 @@ preview の各 `(path, status)` を `reviewed` または `skipped` として記�
 
 ## 共通フラグ
 
+両サブコマンドで `--from main` は `--from main --to HEAD` の省略形です。範囲レビューは `merge-base(from, to)..to` を比較し、ステージ済み・未ステージ・未追跡の変更を含みません。範囲とコミットのフラグを省略するとワークスペースモードになります。同じターゲットを使うため、`preview` と `rule` には同じ範囲またはコミットのフラグを渡してください。範囲とコミットのフラグは併用できません。
+
 | フラグ | 説明 |
 |--------|------|
 | `--from <ref>` | Range モードのソース参照 |
-| `--to <ref>` | Range モードのターゲット参照 |
+| `--to <ref>` | Range モードのターゲット参照。`--from` 指定時の既定値は `HEAD` |
 | `-c, --commit <hash>` | 単一コミットモード |
 | `--repo <path>` | リポジトリルート（デフォルト：cwd） |
 | `--rule <path>` | カスタム rule.json パス |

@@ -53,6 +53,11 @@ describe('parseCliResult', () => {
     expect(r.summary?.filesReviewed).toBe(2);
   });
 
+  it('keeps a partial file-level finding without a line anchor', () => {
+    const raw = JSON.stringify({ status: 'partial', comments: [{ path: 'a.ts', content: 'Missing return' }] });
+    expect(parseCliResult(raw).comments[0]).toMatchObject({ startLine: 0, endLine: 0 });
+  });
+
   it('returns no comments for skipped status', () => {
     const raw = JSON.stringify({ status: 'skipped', message: 'No supported files changed.', comments: [] });
     const r = parseCliResult(raw);

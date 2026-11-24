@@ -33,6 +33,24 @@ This installs the `/open-code-review:review` and
 [Claude Code guide](https://open-codereview.ai/docs/claude-code) for manual
 installation, usage, and behavior.
 
+## Copilot CLI
+
+Install the plugin, which adds the two Agent Skills `open-code-review` and
+`open-code-review-delegate`. Mention `/open-code-review` or just describe the
+task; Copilot picks the skill.
+
+```bash
+copilot plugin install alibaba/open-code-review:plugins/open-code-review
+```
+
+Copilot CLI's installer warns that direct installs (repo/path/URL) are
+deprecated in favor of `plugin@marketplace`; once this repository's marketplace
+index points at the plugin root, `copilot plugin install <name>@open-code-review`
+becomes the recommended form.
+Remove it with `copilot plugin uninstall open-code-review`. See the
+[Copilot CLI guide](https://open-codereview.ai/docs/copilot-cli) for usage and
+manual installation.
+
 ## Codex
 
 Add this repository as a Codex marketplace, then start Codex:
@@ -50,6 +68,16 @@ example:
 @Open Code Review review my current changes
 @Open Code Review review this branch against main
 @Open Code Review review and fix high-confidence issues
+```
+
+The default review skill runs `ocr review`, which calls the LLM configured for
+`ocr`, not the Codex session. To review with your existing Codex quota and no
+OCR LLM setup, use the delegate skill. It runs `ocr delegate preview` and
+`ocr delegate rule` for file selection and rules, and Codex itself performs the
+review:
+
+```text
+@Open Code Review delegate review my current changes
 ```
 
 ## Cursor

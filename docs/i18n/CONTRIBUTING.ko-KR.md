@@ -2,7 +2,7 @@
 
 OpenCodeReview에 기여해 주셔서 감사합니다. 오타 수정, bug report, 새 기능 구현 등 모든 기여는 프로젝트에 도움이 됩니다.
 
-[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | 한국어 | [Русский](CONTRIBUTING.ru-RU.md)
+[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | 한국어 | [Русский](CONTRIBUTING.ru-RU.md) | [Türkçe](CONTRIBUTING.tr-TR.md)
 
 ## Code of Conduct
 
@@ -22,7 +22,7 @@ OpenCodeReview에 기여해 주셔서 감사합니다. 오타 수정, bug report
 
 ### 전제 조건
 
-- [Go 1.26.9+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -85,7 +85,7 @@ git checkout -b feat/your-feature-name
 예시:
 
 ```text
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
@@ -190,7 +190,7 @@ AI가 개발 과정에 관여했다면 아래 규칙을 따라 주세요.
 - 혼란스러운 설명을 명확히 하거나 빠진 맥락 추가
 - command나 configuration option의 사용 예시 추가
 - feature 변경 이후 오래된 내용 update
-- 지역화 문서 번역 또는 개선(`docs/i18n/README.zh-CN.md`, `docs/i18n/README.ja-JP.md`, `docs/i18n/README.ko-KR.md`, `docs/i18n/CONTRIBUTING.zh-CN.md`, `docs/i18n/CONTRIBUTING.ja-JP.md`, `docs/i18n/CONTRIBUTING.ko-KR.md`)
+- `docs/i18n/`에 있는 README와 기여 가이드를 번역하거나 기존 번역을 개선하기
 
 ### 문서 workflow
 
@@ -206,10 +206,12 @@ AI가 개발 과정에 관여했다면 아래 규칙을 따라 주세요.
 | `docs/i18n/README.zh-CN.md` | Chinese translation |
 | `docs/i18n/README.ja-JP.md` | Japanese translation |
 | `docs/i18n/README.ko-KR.md` | Korean translation |
+| `docs/i18n/README.tr-TR.md` | 튀르키예어 번역 |
 | `CONTRIBUTING.md` | contribution guide (English) |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | contribution guide (Chinese) |
 | `docs/i18n/CONTRIBUTING.ja-JP.md` | contribution guide (Japanese) |
 | `docs/i18n/CONTRIBUTING.ko-KR.md` | contribution guide (Korean) |
+| `docs/i18n/CONTRIBUTING.tr-TR.md` | 튀르키예어 기여 가이드 |
 
 ## 변경 제출
 
@@ -238,7 +240,7 @@ Bug를 보고할 때는 다음 정보를 포함해 주세요.
 commit message와 같은 Conventional Commits 형식을 사용합니다.
 
 ```text
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### Review process

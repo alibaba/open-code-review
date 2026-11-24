@@ -22,7 +22,7 @@ func addRuleFlag(cmd *cobra.Command, target *string) {
 
 func addDiffFlags(cmd *cobra.Command, from, to, commit *string) {
 	cmd.Flags().StringVar(from, "from", "", "source ref to start diff from (e.g., 'main')")
-	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
+	cmd.Flags().StringVar(to, "to", "", "target ref to end diff at (e.g., 'feature-branch'; defaults to HEAD when --from is given)")
 	cmd.Flags().StringVarP(commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
 }
 
@@ -57,7 +57,7 @@ func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, max
 	cmd.Flags().IntVar(maxTools, "max-tools", 0, "max tool call rounds per subtask (0 = template default; min 50)")
 	cmd.Flags().IntVar(maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(maxTokens, "max-tokens", 0, "per-group prompt token ceiling (0 = configured or template default)")
-	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; checked before every LLM round, so a group already over budget gets one final round to submit findings and is reported as failed(budget), and no further groups are dispatched. Partial results are published and review exits 0; it exits non-zero only if every selected item failed (0 = unlimited)")
+	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; checked before every LLM round, so a group already over budget gets one final round to submit findings and is reported as failed(budget), and no further groups are dispatched. The CLI emits available results. Budget-only partial reviews with usable coverage exit 0. Operational failures (such as timeouts or provider errors) and fully failed reviews (even for budget alone) exit non-zero (0 = unlimited)")
 }
 
 func addModelFlag(cmd *cobra.Command, target *string) {
@@ -66,10 +66,6 @@ func addModelFlag(cmd *cobra.Command, target *string) {
 
 func addProviderFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "provider", "", "override configured LLM provider for this run")
-}
-
-func addToolsFlag(cmd *cobra.Command, target *string) {
-	cmd.Flags().StringVar(target, "tools", "", "path to JSON tools config file (default: embedded)")
 }
 
 func addPreviewFlag(cmd *cobra.Command, target *bool) {
@@ -123,7 +119,15 @@ func validateOutputFormat(format string) (string, error) {
 	}
 }
 
+func normalizeDiffTarget(from, to, commit string) string {
+	if from != "" && to == "" && commit == "" {
+		return "HEAD"
+	}
+	return to
+}
+
 func validateReviewOptions(opts *reviewOptions) error {
+	opts.to = normalizeDiffTarget(opts.from, opts.to, opts.commit)
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
@@ -138,6 +142,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 		return err
 	}
 	opts.outputFormat = normalizedFormat
+	if err := validateAnalysisOptions(*opts); err != nil {
+		return err
+	}
 	const minMaxTools = 50
 	if opts.maxTools < 0 {
 		return fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
@@ -191,6 +198,7 @@ func validateScanOptions(opts *scanOptions) error {
 }
 
 func validateDelegateOptions(opts *delegateOptions) error {
+	opts.to = normalizeDiffTarget(opts.from, opts.to, opts.commit)
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
@@ -202,7 +210,6 @@ func validateDelegateOptions(opts *delegateOptions) error {
 
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
 func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
-	addToolsFlag(cmd, &opts.toolConfigPath)
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
@@ -218,12 +225,13 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.Flags().StringVar(&opts.effort, "effort", "", "review effort preset: low | medium | high (\"\" = configured or default medium)")
 	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
+	cmd.Flags().IntVar(&opts.analysisMaxTokensBudget, "analysis-max-tokens-budget", 0, "cap total input and output tokens for Analysis only (0 = unlimited)")
+	cmd.Flags().BoolVar(&opts.analysis, "analysis", false, "include Behavior, Impact, and maintainer decisions (commit or range only; text/json); incomplete Analysis warns without changing the Review exit status")
 	addPreviewFlag(cmd, &opts.preview)
 }
 
 // registerScanFlags registers all scan command flags on cmd, binding to opts.
 func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
-	addToolsFlag(cmd, &opts.toolConfigPath)
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	cmd.Flags().StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan (default: whole repo; nonexistent paths are an error)")
