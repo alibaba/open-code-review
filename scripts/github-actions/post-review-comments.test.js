@@ -879,12 +879,14 @@ async function testIncrementalSkipsSameRunIoUOverlapping() {
   assert.strictEqual(outputs.comments_inline, "2");
 }
 
-async function testIncrementalSkipsSameRunOverlapping() {
+async function testIncrementalPrefersHighestSeverityOverlap() {
   const result = {
     comments: [
-      { path: "src/a.js", content: "first finding", start_line: 10, end_line: 10 },
-      { path: "src/a.js", content: "duplicate finding", start_line: 10, end_line: 10 },
-      { path: "src/b.js", content: "independent finding", start_line: 5, end_line: 5 },
+      { path: "src/a.js", content: "low finding", severity: "low", start_line: 10, end_line: 10 },
+      { path: "src/a.js", content: "first critical finding", severity: "critical", start_line: 10, end_line: 10 },
+      { path: "src/a.js", content: "second critical finding", severity: "critical", start_line: 10, end_line: 10 },
+      { path: "src/b.js", content: "unranked finding", start_line: 5, end_line: 5 },
+      { path: "src/b.js", content: "known low finding", severity: "low", start_line: 5, end_line: 5 },
     ],
     warnings: [],
   };
@@ -902,10 +904,12 @@ async function testIncrementalSkipsSameRunOverlapping() {
   assert.strictEqual(sent.length, 2, "same-run duplicate should be suppressed");
   assert.strictEqual(sent[0].path, "src/a.js");
   assert.strictEqual(sent[0].line, 10);
+  assert.match(sent[0].body, /first critical finding/);
   assert.strictEqual(sent[1].path, "src/b.js");
   assert.strictEqual(sent[1].line, 5);
+  assert.match(sent[1].body, /known low finding/);
 
-  assert.strictEqual(outputs.comments_skipped, "1");
+  assert.strictEqual(outputs.comments_skipped, "3");
   assert.strictEqual(outputs.comments_inline, "2");
 }
 async function testIncrementalAllOverlapPostsNoReview() {
@@ -2795,7 +2799,7 @@ async function main() {
   await testZeroFindingWarningsPreserveSummaryOwnership();
   await testZeroFindingWarningsDoNotBlockCheckpoint();
   await testIncrementalSkipsOverlapping();
-  await testIncrementalSkipsSameRunOverlapping();
+  await testIncrementalPrefersHighestSeverityOverlap();
   await testIncrementalSkipsSameRunIoUOverlapping();
   await testIncrementalAllOverlapPostsNoReview();
   await testIncrementalMultiLineIoUDefaultThreshold();

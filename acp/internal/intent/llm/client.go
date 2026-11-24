@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -110,9 +111,7 @@ func (c *Client) callOpenAI(ctx context.Context, req intent.LLMRequest) (intent.
 			"function": map[string]string{"name": req.Tool.Name},
 		},
 	}
-	for k, v := range c.ep.ExtraBody {
-		body[k] = v
-	}
+	maps.Copy(body, c.ep.ExtraBody)
 
 	data, err := c.post(ctx, openAIChatURL(c.ep.URL), body, openAIHeaders(c.ep))
 	if err != nil {

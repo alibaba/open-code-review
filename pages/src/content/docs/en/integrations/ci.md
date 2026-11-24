@@ -61,10 +61,10 @@ The upstream workflow lives at
 
 ### What it does
 
-- Triggers on `pull_request_target` (`opened`) **and** `issue_comment` events
+- Triggers on `pull_request_target` (`opened`, `synchronize`, `reopened`) **and** `issue_comment` events
   whose body starts with `/open-code-review` or `@open-code-review` —
   the latter lets reviewers re-run OCR on demand by commenting on a PR.
-  (`pull_request_target` is used instead of `pull_request` so that
+  ([`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target) is used instead of `pull_request` so that
   secrets are available even for PRs opened from forks; OCR only reads
   the diff and does not execute code from the PR.)
 - Installs OCR via `npm install -g @alibaba-group/open-code-review`,
@@ -85,6 +85,13 @@ mkdir -p .github/workflows
 curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
+
+Starting [December 2, 2026](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/), GitHub will block `pull_request_target` by default in public repositories it hosts unless an applicable Actions event policy explicitly allows it. If you need OCR to keep running automatically when a PR is opened, updated, or reopened, go to **Settings → Actions → Policies** in your repository and [create or update a policy for the workflow](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+
+- For a new policy, click **Add target** under **Target workflows** and specify `.github/workflows/ocr-review.yml`.
+- Under **Restrict events**, allow `pull_request_target` for automatic reviews and `issue_comment` for comment-triggered re-reviews.
+- Set **Enforcement status** to **Active** and save the policy.
+- Note: Before updating an existing policy, check that it applies only to `.github/workflows/ocr-review.yml`.
 
 ### Required secrets
 
@@ -117,7 +124,7 @@ step:
 | Input | Default | Description |
 |---|---|---|
 | `effort` | `''` | Review effort preset passed to `ocr review --effort`: `low`, `medium`, or `high` (case-insensitive). Empty keeps the CLI default (the configured value, or medium). Requires OCR v1.10.0 or newer; the action fails early with a clear error on older versions. |
-| `max_tokens_budget` | `''` | Total token cap (input + output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a subtask already over the cap gets one final round to submit findings, no further subtasks are dispatched, over-budget and skipped files are reported as `failed(budget)`, partial results are still published, and the review exits 0. |
+| `max_tokens_budget` | `''` | Total token cap (input + output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a subtask already over the cap gets one final round to submit findings, no further subtasks are dispatched, over-budget and skipped files are reported as `failed(budget)`. A budget-only partial review with usable coverage exits 0. Operational failures (such as timeouts or provider errors) and fully failed reviews (even for budget alone) exit non-zero. The CLI emits available results. On a non-zero exit, the Action can upload the raw output as an artifact but skips posting PR comments. |
 | `llm_reasoning_effort` | `''` | Reasoning depth for models with a steerable `reasoning_effort` request field (e.g. GLM-5.x, OpenAI reasoning models): `minimal`, `low`, `medium`, `high`, `max` (case-insensitive). Merged into the request body through `llm_extra_body`, so it works with every published CLI version; an explicit `reasoning_effort` key in `llm_extra_body` wins over this input. Empty (default) sends nothing. OpenAI-compatible protocols only — the Anthropic API rejects unknown body fields, so the action fails fast on that protocol; steer Anthropic thinking through an explicit `llm_extra_body` key instead. |
 | `stream_progress` | `'false'` | `'true'` streams live `[ocr]` progress lines to the workflow log (human audience on stderr) instead of staying silent until the run finishes. Display-only: stderr is still captured to a file for artifacts and comment posting. |
 

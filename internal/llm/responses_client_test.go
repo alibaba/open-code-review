@@ -403,6 +403,16 @@ func TestMapResponsesResponse_TextOnly(t *testing.T) {
 	}
 }
 
+func TestMapResponsesResponse_RawOutputPreservesReasoningDelimiters(t *testing.T) {
+	client := NewOpenAIResponsesClient(ClientConfig{})
+	resp := client.mapResponsesResponse(unmarshalResponsesBody(t, `{
+		"status":"completed","output":[{"type":"message","role":"assistant",
+		"content":[{"type":"output_text","text":"<think>notes</think>answer"}]}]}`))
+	if resp.RawOutputText() != "<think>notes</think>answer" || resp.VisibleContent() != "notesanswer" || *resp.Choices[0].Message.Content != "notesanswer" {
+		t.Fatal("compression needs raw delimiters without changing visible or recorded content")
+	}
+}
+
 func TestMapResponsesResponse_FunctionCalls(t *testing.T) {
 	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
 	body := `{

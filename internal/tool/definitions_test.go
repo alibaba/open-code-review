@@ -19,6 +19,8 @@ func TestOfName(t *testing.T) {
 		{"file_read_diff", FileReadDiff},
 		{"code_search", CodeSearch},
 		{"task_done", TaskDone},
+		{"context_read", ContextRead},
+		{"submit_analysis", SubmitAnalysis},
 		{"nonexistent", Unknown},
 		{"", Unknown},
 	}
@@ -97,7 +99,7 @@ func TestIsReserved(t *testing.T) {
 		}
 	}
 
-	nonReserved := []string{"custom_tool", "my_tool", "search", ""}
+	nonReserved := []string{"custom_tool", "my_tool", "search", "", "context_read", "submit_analysis"}
 	for _, name := range nonReserved {
 		if IsReserved(name) {
 			t.Errorf("IsReserved(%q) = true, want false", name)

@@ -53,6 +53,7 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
+	AnalysisEnabled bool
 	// RepoDir is the root of the git repository.
 	RepoDir string
 
@@ -216,13 +217,14 @@ func New(args Args) *Agent {
 			mode = reviewModeString(args.From, args.To, args.Commit)
 		}
 		args.Session = session.New(args.RepoDir, gitBranch, args.Model, session.SessionOptions{
-			ReviewMode:  mode,
-			DiffFrom:    args.From,
-			DiffTo:      args.To,
-			DiffCommit:  args.Commit,
-			ResumedFrom: resumedFromSession(args.Resume),
-			Operation:   session.OperationReview,
-			LLMSource:   args.EndpointSource,
+			AnalysisEnabled: args.AnalysisEnabled,
+			ReviewMode:      mode,
+			DiffFrom:        args.From,
+			DiffTo:          args.To,
+			DiffCommit:      args.Commit,
+			ResumedFrom:     resumedFromSession(args.Resume),
+			Operation:       session.OperationReview,
+			LLMSource:       args.EndpointSource,
 		})
 	}
 	a := &Agent{
@@ -538,10 +540,11 @@ func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.Too
 //
 // This is a diagnostic signal, not a terminal state. The stop records a pending
 // failure cause (not a run_failure), so the manifest attributes the undispatched
-// items to failed(budget) and its coverage alone determines the terminal state
-// and exit code: partial/0 whenever anything was covered, failed/non-zero only
-// when the cap left nothing covered. Per-file token/tool-round exhaustion
-// does NOT set this flag — it is an item-level failed(budget) outcome instead.
+// items to failed(budget) and its coverage alone determines the terminal state:
+// partial whenever anything was covered, failed when the cap left nothing
+// covered. The CLI keeps a budget-only partial at exit 0. Exhausting a per-file
+// token or tool-round budget does NOT set this flag — it is an item-level
+// failed(budget) outcome instead.
 func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded.Load() }
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
@@ -843,8 +846,9 @@ dispatchLoop:
 		reused = a.resumeInfo.ReusedFiles
 	}
 	// A resumed run can still have usable coverage when every newly dispatched
-	// subtask hard-fails. Preserve the legacy all-failed error only when there is
-	// no reused result; otherwise the manifest is partial and must exit 0.
+	// subtask hard-fails. Preserve the dispatcher-level all-failed error only when
+	// there is no reused result; otherwise the manifest is partial and the CLI
+	// decides the process status from the recorded failure classifications.
 	if failed > 0 && failed == dispatched && reused == 0 {
 		// Even when all subtasks failed, some may have produced comments before
 		// hitting the error. Return those comments instead of discarding them.
@@ -1868,10 +1872,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		all := a.args.CommentCollector.CommentsForPath(d.NewPath)
 		start := 0
 		if from != nil {
-			start = from[d.NewPath]
-			if start > len(all) {
-				start = len(all)
-			}
+			start = min(from[d.NewPath], len(all))
 		}
 		for i := start; i < len(all); i++ {
 			candidates = append(candidates, filterCandidate{cm: all[i], pathIdx: i})

@@ -49,9 +49,9 @@ sidebar:
 
 ### 它做什么
 
-- 在 `pull_request_target`（`opened`）**和** `issue_comment` 事件上触发，后者正文
+- 在 `pull_request_target`（`opened`、`synchronize`、`reopened`）**和** `issue_comment` 事件上触发，后者正文
   以 `/open-code-review` 或 `@open-code-review` 开头——后者让评审者通过在 PR 上
-   评论按需重跑 OCR。（用 `pull_request_target` 而非 `pull_request`，使即便从
+   评论按需重跑 OCR。（用 [`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target) 而非 `pull_request`，使即便从
    fork 提交的 PR 也能用上 secret；OCR 只读 diff，不执行 PR 中的代码。）
 - 通过 `npm install -g @alibaba-group/open-code-review` 安装 OCR，用
   `ocr config set` 写配置，再以分支区间模式运行核心命令。
@@ -68,6 +68,13 @@ mkdir -p .github/workflows
 curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
+
+[2026 年 12 月 2 日](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/)起，GitHub 将默认拦截其托管的公开仓库中的 `pull_request_target` 事件，除非适用的 Actions 事件策略明确允许该事件。如果你需要让 OCR 在 PR 创建、更新或重新打开时继续自动运行，请前往仓库的 **Settings → Actions → Policies**，然后[新建或更新适用于该工作流的策略](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
+
+- 新建策略时，在 **Target workflows** 下点击 **Add target**，指定 `.github/workflows/ocr-review.yml`。
+- 勾选 **Restrict events**，允许 `pull_request_target`（自动评审）和 `issue_comment`（通过评论触发复审）。
+- 将 **Enforcement status** 设为 **Active**，然后保存策略。
+- 请注意：在更新已有策略之前，请先确认它只适用于 `.github/workflows/ocr-review.yml`。
 
 ### 必需 secret
 
@@ -97,7 +104,7 @@ composite action
 | Input | 默认值 | 说明 |
 |---|---|---|
 | `effort` | `''` | 传给 `ocr review --effort` 的评审强度预设：`low`、`medium` 或 `high`（不区分大小写）。留空则沿用 CLI 默认值（已配置的值，否则为 medium）。需要 OCR v1.10.0 或更新版本；在更旧版本上 action 会提前以明确报错失败。 |
-| `max_tokens_budget` | `''` | 传给 `ocr review --max-tokens-budget` 的 token 总量上限（输入 + 输出）。留空或 `'0'` 表示不限。每次 LLM 轮次前都会检查：已超出上限的子任务会获得最后一轮来提交发现，不再派发新的子任务，超出预算和被跳过的文件记为 `failed(budget)`，已产生的部分结果仍会发布，评审以 0 退出。 |
+| `max_tokens_budget` | `''` | 传给 `ocr review --max-tokens-budget` 的 token 总量上限（输入 + 输出）。留空或 `'0'` 表示不限。每次 LLM 轮次前都会检查：已超出上限的子任务会获得最后一轮来提交发现，不再派发新的子任务，超出预算和被跳过的文件记为 `failed(budget)`。仅因预算而中断且已有有效审查结果时，退出码为 0。发生超时、模型服务错误等运行故障，或所有选中项均失败（包括全部因预算失败）时，退出码非零。CLI 会输出已有结果。非零退出时，Action 可按配置上传原始输出，但会跳过 PR 评论。 |
 | `llm_reasoning_effort` | `''` | 面向支持 `reasoning_effort` 请求字段的模型（如 GLM-5.x、OpenAI reasoning 模型）的推理深度：`minimal`、`low`、`medium`、`high`、`max`（不区分大小写）。经 `llm_extra_body` 合并进请求体，因此所有已发布的 CLI 版本均可使用；`llm_extra_body` 中显式的 `reasoning_effort` 键优先于此 input。留空（默认）则不发送。仅适用于 OpenAI 兼容协议——Anthropic API 会拒绝未知请求体字段，action 在该协议下会快速失败；Anthropic 的 thinking 控制请改用 `llm_extra_body` 中的显式键。 |
 | `stream_progress` | `'false'` | 设为 `'true'` 时，把 `[ocr]` 实时进度行流入工作流日志（stderr 上的 human audience），而不是在评审结束前保持静默。仅影响展示：stderr 仍会写入文件，供产物上传与评论张贴使用。 |
 

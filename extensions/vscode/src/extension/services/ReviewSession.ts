@@ -15,7 +15,7 @@ const SUPPORTED_STATUSES: ReadonlySet<CliStatus> = new Set<CliStatus>([
 const INCOMPLETE_STATUSES: ReadonlySet<CliStatus> = new Set<CliStatus>(['completed_with_errors', 'partial', 'failed']);
 
 export function resultToState(result: CliResult): ReviewState {
-  if (!SUPPORTED_STATUSES.has(result.status)) return 'failed';
+  if (result.executionError || !SUPPORTED_STATUSES.has(result.status)) return 'failed';
   if (result.comments.length > 0) return 'done';
   if (INCOMPLETE_STATUSES.has(result.status)) return 'failed';
   return 'empty';
@@ -43,7 +43,7 @@ export class ReviewSession {
       }
       const state = resultToState(result);
       const error = state === 'failed'
-        ? result.message || `Review did not complete successfully (status: ${result.status || 'missing'})`
+        ? result.executionError || result.message || `Review did not complete successfully (status: ${result.status || 'missing'})`
         : undefined;
       cb.onState(state, error);
       cb.onDone(result);

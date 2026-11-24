@@ -35,7 +35,7 @@
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="../../README.md">English</a> | 简体中文 | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
+  <a href="../../README.md">English</a> | 简体中文 | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a> | <a href="README.tr-TR.md">Türkçe</a> | <a href="README.fr-FR.md">Français</a>
 </p>
 
 ---
@@ -102,8 +102,11 @@ Open Code Review 的核心设计理念是将确定性工程与 Agent 结合，�
 
 ## 如何使用
 
+<a id="supported-platforms"></a>
+
 ### 前置条件
 
+- **操作系统：** Windows、macOS 或 Linux。
 - **Git >= 2.41** — Open Code Review 依赖 Git 进行 diff 生成、代码搜索和仓库操作。
 
 <a id="supported-agents"></a>
@@ -174,6 +177,9 @@ cd your-project
 
 # 工作区模式 —— 审查所有暂存、未暂存和未跟踪的变更
 ocr review
+
+# 当前分支 —— 评审当前分支与 main 分叉后的变更（--to 默认为 HEAD）
+ocr review --from main
 
 # 分支范围 —— 评审 feature-branch 与 main 分叉后的变更（合并基准模式）
 ocr review --from main --to feature-branch

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,7 +34,8 @@ var retryTestFixedTime = time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
 // 429 (which the SDK must retry on its own) or a permanent 402 (which it must
 // not retry).
 type fakeLLM struct {
-	mu sync.Mutex
+	mu              sync.Mutex
+	mainInputTokens int
 	// attemptsByFile counts real HTTP attempts per file, so a test can assert
 	// the SDK retried rather than OCR re-requesting.
 	attemptsByFile map[string]int
@@ -55,14 +57,13 @@ type fakeLLM struct {
 // file. rateLimitOnce and hardFail are set by the caller before use.
 func newFakeLLM() *fakeLLM {
 	fileMarkers := make(map[string]string, len(markers))
-	for marker, name := range markers {
-		fileMarkers[marker] = name
-	}
+	maps.Copy(fileMarkers, markers)
 	return &fakeLLM{
-		attemptsByFile: map[string]int{},
-		rateLimitOnce:  map[string]bool{},
-		hardFail:       map[string]bool{},
-		markers:        fileMarkers,
+		mainInputTokens: 10,
+		attemptsByFile:  map[string]int{},
+		rateLimitOnce:   map[string]bool{},
+		hardFail:        map[string]bool{},
+		markers:         fileMarkers,
 	}
 }
 
@@ -104,9 +105,7 @@ func (f *fakeLLM) attemptCounts() map[string]int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make(map[string]int, len(f.attemptsByFile))
-	for k, v := range f.attemptsByFile {
-		out[k] = v
-	}
+	maps.Copy(out, f.attemptsByFile)
 	return out
 }
 
@@ -211,9 +210,9 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Main-task rounds carry tool definitions; the plan phase does not.
 	if hasTools {
-		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-test",
+		_, _ = fmt.Fprintf(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-test",
 			"content":[{"type":"tool_use","id":"tu_1","name":"task_done","input":{"state":"DONE"}}],
-			"stop_reason":"tool_use","usage":{"input_tokens":10,"output_tokens":5}}`))
+			"stop_reason":"tool_use","usage":{"input_tokens":%d,"output_tokens":5}}`, f.mainInputTokens)
 		return
 	}
 	_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-test",
@@ -281,7 +280,7 @@ func retryTestRepo(t *testing.T) string {
 // Windows and never falls back to HOME, so redirecting HOME alone left these
 // runs writing to the real profile. Set both; the one that does not apply is
 // harmless.
-func startFakeLLM(t *testing.T, srv *fakeLLM) {
+func startFakeLLM(t *testing.T, srv http.Handler) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
