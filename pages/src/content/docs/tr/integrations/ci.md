@@ -52,7 +52,7 @@ curl -o .github/workflows/ocr-review.yml \
 
 [2 Aralık 2026](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/) tarihinden itibaren GitHub'da barındırılan herkese açık depolarda `pull_request_target` olayı, geçerli bir Actions olay politikası açıkça izin vermedikçe varsayılan olarak engellenecek. PR oluşturulduğunda, güncellendiğinde veya yeniden açıldığında OCR'ın otomatik olarak çalışmaya devam etmesi gerekiyorsa deponuzda **Settings → Actions → Policies** bölümünü açın ve [iş akışına uygulanan bir politika oluşturun veya güncelleyin](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
 
-- Yeni politika oluştururken **Target workflows** altında **Add target** düğmesine tıklayın ve `.github/workflows/ocr-review.yml` dosyasını belirtin.
+- Yeni politika oluştururken **Target workflows** altında **Add target** düğmesine tıklayın ve `.github/workflows/ocr-review.yml` dosyasını belirtin. Mevcut bir politikayı güncellemeden önce yalnızca bu iş akışını hedeflediğini doğrulayın.
 - **Restrict events** altında, otomatik incelemeler için `pull_request_target`, yorumla tetiklenen yeniden incelemeler için `issue_comment` olayına izin verin. Mevcut bir politikayı güncellerken gerekli diğer olayları da izin verilenler listesinde tutun.
 - **Enforcement status** ayarını **Active** olarak değiştirin ve politikayı kaydedin.
 
