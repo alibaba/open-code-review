@@ -20,6 +20,9 @@ const (
 	gitGrepTimeout  = 10 * time.Second
 )
 
+// CodeSearchIncompletePrefix distinguishes incomplete search coverage from benign warnings.
+const CodeSearchIncompletePrefix = "Warning: incomplete search: "
+
 // CodeSearchProvider performs text search across the repository using git grep.
 type CodeSearchProvider struct {
 	FileReader *FileReader
@@ -254,13 +257,30 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		sb.WriteString("\n")
 	}
 
-	// Git can return success after finding a match even if another blob was
-	// unreadable. Preserve that diagnostic so partial results stay explicit.
-	if warning := strings.TrimSpace(errStr); warning != "" {
-		sb.WriteString(fmt.Sprintf("Warning: %s\n", warning))
-	}
+	appendGitGrepDiagnostics(&sb, errStr, err)
 
 	return sb.String(), nil
+}
+
+func appendGitGrepDiagnostics(sb *strings.Builder, stderr string, commandErr error) {
+	written := false
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Git can exit successfully with read errors after matching another blob.
+		// Ordinary Git warnings do not establish incomplete coverage.
+		prefix := "Warning: "
+		if commandErr != nil || strings.HasPrefix(line, "error:") || strings.HasPrefix(line, "fatal:") {
+			prefix = CodeSearchIncompletePrefix
+		}
+		fmt.Fprintf(sb, "%s%s\n", prefix, line)
+		written = true
+	}
+	if !written && commandErr != nil {
+		fmt.Fprintf(sb, "%s%v\n", CodeSearchIncompletePrefix, commandErr)
+	}
 }
 
 func trimGitUsage(stderr string, exitCode int) string {

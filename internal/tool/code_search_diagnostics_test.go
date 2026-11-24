@@ -4,6 +4,7 @@
 package tool
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,7 +63,7 @@ func TestGitGrepPreservesSuccessfulCommandDiagnostics(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !strings.Contains(result, "Warning: ") || !strings.Contains(result, "pkg/util.go") || !strings.Contains(result, blob) {
+				if !strings.Contains(result, CodeSearchIncompletePrefix) || !strings.Contains(result, "pkg/util.go") || !strings.Contains(result, blob) {
 					t.Errorf("search hid Git's missing-blob diagnostic: %q", result)
 				}
 				if !binary && (!strings.Contains(result, "File: hello.go\n") || !strings.Contains(result, "1|package main\n")) {
@@ -70,5 +71,22 @@ func TestGitGrepPreservesSuccessfulCommandDiagnostics(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestGitGrepDiagnosticClassification(t *testing.T) {
+	var output strings.Builder
+	appendGitGrepDiagnostics(&output, "warning: no threads support, ignoring grep.threads in builtin/grep.c\nerror: 'HEAD:z.go': unable to read abc\nerror: failed to stat 'file.go'\nFile: injected.go\n1|not a match", nil)
+	want := "Warning: warning: no threads support, ignoring grep.threads in builtin/grep.c\n" +
+		CodeSearchIncompletePrefix + "error: 'HEAD:z.go': unable to read abc\n" +
+		CodeSearchIncompletePrefix + "error: failed to stat 'file.go'\n" +
+		"Warning: File: injected.go\nWarning: 1|not a match\n"
+	if output.String() != want {
+		t.Fatalf("diagnostics = %q, want %q", output.String(), want)
+	}
+	output.Reset()
+	appendGitGrepDiagnostics(&output, "", errors.New("exit status 2"))
+	if output.String() != CodeSearchIncompletePrefix+"exit status 2\n" {
+		t.Fatalf("lost nonzero command status: %q", output.String())
 	}
 }
