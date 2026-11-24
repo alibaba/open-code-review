@@ -563,7 +563,10 @@ async function runPostReviewComments({
   summaryBody += formatSummaryComments(commentsRouted);
   for (const { comment, error } of failedComments) {
     summaryBody += "\n\n---\n\n";
-    summaryBody += formatCommentMarkdown(comment, error);
+    summaryBody += formatCommentMarkdown(
+      comment,
+      `⚠️ GitHub could not post this as an inline comment: ${error}`
+    );
   }
   if (toSend.length === 0 && stats.skipped > 0) {
     summaryBody += "\n\n---\n\nℹ️ All inline comments overlapped with existing reviews; nothing new was posted.";
@@ -2390,7 +2393,7 @@ function formatComment(comment, id) {
   return body;
 }
 
-function formatCommentMarkdown(comment, error) {
+function formatCommentMarkdown(comment, summaryNote) {
   let md = "";
   // The badge renders as a leading line before the path heading (consistent
   // with formatComment), so the heading/reason lines still anchor the comment
@@ -2403,8 +2406,8 @@ function formatCommentMarkdown(comment, error) {
     md += ` (L${comment.start_line}-L${comment.end_line})`;
   }
   md += "\n\n";
-  if (error) {
-    md += `⚠️ GitHub could not post this as an inline comment: ${error}\n\n`;
+  if (summaryNote) {
+    md += `${summaryNote}\n\n`;
   }
   md += comment.content || "";
 
@@ -2484,7 +2487,10 @@ function formatSummaryComments(summaryComments) {
   let body = "";
   for (const { comment, reason } of summaryComments) {
     body += "\n\n---\n\n";
-    body += formatCommentMarkdown(comment, reason);
+    const summaryNote = reason === NO_LINE_REASON
+      ? "ℹ️ No line range, so shown here"
+      : `ℹ️ ${String(reason).replace(/^Routed to summary/, "Routed to the summary by policy")}`;
+    body += formatCommentMarkdown(comment, summaryNote);
   }
   return body;
 }

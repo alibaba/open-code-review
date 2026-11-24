@@ -476,8 +476,11 @@ async function testFailedInlineCommentsAreSummarized() {
   assert.match(body, /No-line content with a fenced block/);
   assert.match(body, /Failed inline content must remain visible/);
   assert.match(body, /Line could not be resolved/);
-  // The no-line comment now carries the same reason line as a posting failure.
-  assert.match(body, /GitHub could not post this as an inline comment: No line information provided/);
+  // No-line findings are informational, while an actual posting failure keeps
+  // the GitHub failure warning.
+  assert.match(body, /ℹ️ No line range, so shown here/);
+  assert.doesNotMatch(body, /GitHub could not post this as an inline comment: No line information provided/);
+  assert.match(body, /⚠️ GitHub could not post this as an inline comment:.*Line could not be resolved/);
   // Posting statistics are merged into the leading summary header (the trailing
   // "📊 Posting Statistics" section is gone), so the merged stats must appear
   // BEFORE the per-comment renderings.
@@ -2360,9 +2363,46 @@ async function testRouteSeverityBelowRoutesToSummary() {
   const body = github.updatedComments[0].body;
   assert.match(body, /📋 Routed to summary by policy: 1 comment\(s\)/);
   assert.match(body, /low finding/);
-  assert.match(body, /Routed to summary \(severity low/);
+  assert.match(body, /ℹ️ Routed to the summary by policy \(severity low/);
   // no-line finding still rendered in summary too
   assert.match(body, /no-line finding/);
+}
+
+// Summary placement reasons are not all posting failures: policy-routed and
+// no-line findings are informational, while an actual inline API failure stays
+// a warning. These categories must not affect the mutually exclusive counters.
+async function testSummaryLabelsDistinguishRoutingNoLineAndPostingFailure() {
+  const result = {
+    comments: [
+      { path: "src/routed.js", content: "policy-routed finding", category: "bug", severity: "medium", start_line: 1, end_line: 1 },
+      { path: "docs/no-line.md", content: "finding without line info", category: "bug", severity: "low", start_line: 0, end_line: 0 },
+      { path: "src/failed.js", content: "real inline failure", category: "bug", severity: "high", start_line: 2, end_line: 2 },
+    ],
+    warnings: [],
+  };
+  const { github, outputs } = await run({
+    result,
+    opts: { routeSeverityBelow: "medium" },
+    githubOpts: {
+      bulkError: 'Unprocessable Entity: "Line could not be resolved"',
+      individualError: 'Unprocessable Entity: "Line could not be resolved"',
+    },
+  });
+
+  assert.strictEqual(outputs.comments_total, "3");
+  assert.strictEqual(outputs.comments_routed, "1");
+  assert.strictEqual(outputs.comments_failed, "1");
+  assert.strictEqual(outputs.comments_inline, "0");
+  assert.strictEqual(outputs.comments_skipped, "0");
+  const body = github.updatedComments[0].body;
+  assert.match(body, /ℹ️ Routed to the summary by policy \(severity medium · category bug\)/);
+  assert.match(body, /ℹ️ No line range, so shown here/);
+  assert.match(body, /⚠️ GitHub could not post this as an inline comment:.*Line could not be resolved/);
+  assert.strictEqual(
+    body.split("GitHub could not post this as an inline comment").length - 1,
+    1,
+    "only the genuine posting failure carries the GitHub failure wording"
+  );
 }
 
 // OC4: comma-list category routing moves listed categories to the summary.
@@ -2858,6 +2898,7 @@ async function main() {
   testFormatCommentMarkdownBadgePlacement();
   await testNoRoutingInputPreservesBehavior();
   await testRouteSeverityBelowRoutesToSummary();
+  await testSummaryLabelsDistinguishRoutingNoLineAndPostingFailure();
   await testRouteCategoriesRoutesToSummary();
   await testRoutedFindingsNeverCallCreateReview();
   await testAccountingReconcilesToTotal();
