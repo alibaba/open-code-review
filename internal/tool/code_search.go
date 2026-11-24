@@ -171,7 +171,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			return "No matches found", nil
 		}
 		if outStr == "" || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return "", gitGrepError(errStr, err)
+			return "", gitGrepError(errStr, err, usePerlRegexp)
 		}
 	}
 
@@ -194,7 +194,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, noIndex, pathspec, "--files-with-matches")
 		paths, stderr, err := p.runGitGrep(searchCtx, cmdArgs)
 		if err != nil {
-			return "", gitGrepError(stderr, err)
+			return "", gitGrepError(stderr, err, usePerlRegexp)
 		}
 		return paths, nil
 	}
@@ -218,7 +218,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		return "", parseErr
 	}
 	if ctx.Err() != nil {
-		return "", gitGrepError("", ctx.Err())
+		return "", gitGrepError("", ctx.Err(), usePerlRegexp)
 	}
 
 	var sb strings.Builder
@@ -369,17 +369,22 @@ func gitGrepExitCode(err error) int {
 	return -1
 }
 
-func gitGrepError(stderr string, err error) error {
+func gitGrepError(stderr string, err error, usePerlRegexp bool) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("git grep timed out; try narrowing file_patterns to a more specific path: %w", err)
 	}
 	if errors.Is(err, context.Canceled) {
 		return err
 	}
-	if message := trimGitUsage(stderr, gitGrepExitCode(err)); message != "" {
-		return fmt.Errorf("git grep failed: %w: %s", err, message)
+	exitCode := gitGrepExitCode(err)
+	message := trimGitUsage(stderr, exitCode)
+	if message == "" {
+		return fmt.Errorf("git grep failed: %w", err)
 	}
-	return fmt.Errorf("git grep failed: %w", err)
+	if usePerlRegexp && exitCode == 128 && isPerlRegexpCompileError(message) {
+		message += `; fix the regular expression (e.g. use \( for a literal opening parenthesis), or set use_perl_regexp=false to search for the entire text literally`
+	}
+	return fmt.Errorf("git grep failed: %w: %s", err, message)
 }
 
 func trimGitUsage(stderr string, exitCode int) string {
@@ -395,4 +400,20 @@ func trimGitUsage(stderr string, exitCode int) string {
 func isNotGitRepoError(err error, stderr string) bool {
 	return gitGrepExitCode(err) == 128 &&
 		(strings.Contains(stderr, "not a git repository") || strings.Contains(stderr, ".git"))
+}
+
+func isPerlRegexpCompileError(stderr string) bool {
+	for line := range strings.SplitSeq(stderr, "\n") {
+		line = strings.Replace(line, "\uFF1A", ":", 1)
+		_, diagnostic, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		diagnostic = strings.TrimSpace(diagnostic)
+		if strings.HasPrefix(diagnostic, "-e option, '") ||
+			strings.HasPrefix(diagnostic, "pcre2_compile failed") {
+			return true
+		}
+	}
+	return false
 }

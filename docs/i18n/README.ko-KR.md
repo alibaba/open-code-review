@@ -35,7 +35,7 @@
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | 한국어 | <a href="README.ru-RU.md">Русский</a>
+  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | 한국어 | <a href="README.ru-RU.md">Русский</a> | <a href="README.tr-TR.md">Türkçe</a> | <a href="README.fr-FR.md">Français</a>
 </p>
 
 ---
@@ -102,8 +102,11 @@ agent의 강점은 동적 판단과 동적 context 검색이 중요한 지점에
 
 ## 사용 방법
 
+<a id="supported-platforms"></a>
+
 ### 사전 요구 사항
 
+- **운영 체제:** Windows, macOS 또는 Linux.
 - **Git >= 2.41** — Open Code Review는 diff 생성, 코드 검색, 저장소 작업에 Git을 사용합니다.
 
 <a id="supported-agents"></a>
