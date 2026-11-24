@@ -383,11 +383,16 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 
 		if len(calls) == 0 {
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", taskKey)
-			messages = append(messages, llm.NewTextMessage("user", r.task.EmptyResponseMessage))
+			var next []llm.Message
 			native := resp.Native()
 			reasoning := resp.ReasoningContent()
 			if content != "" || native.Payload != nil || reasoning != "" {
-				messages = append(messages[:len(messages)-1], llm.NewToolCallMessage(content, nil, native, reasoning), messages[len(messages)-1])
+				next = append(next, llm.NewToolCallMessage(content, nil, native, reasoning))
+			}
+			next = append(next, llm.NewTextMessage("user", r.task.EmptyResponseMessage))
+			if nextStop := r.appendMessages(ctx, next, &messages, taskKey, st); nextStop != StopNone {
+				stop = nextStop
+				break
 			}
 			continue
 		}
@@ -578,6 +583,19 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 // warning (80%) MaxTokens thresholds. A budget rejection keeps the latest
 // tool results available for final submission without retrying compression.
 func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, native llm.NativeTurn, reasoningContent string, results []ToolCallResult, messages *[]llm.Message, taskKey string, st *compressionState) MainLoopStop {
+	var next []llm.Message
+	if len(toolCalls) > 0 {
+		next = append(next, llm.NewToolCallMessage(assistantContent, toolCalls, native, reasoningContent))
+	} else if assistantContent != "" || native.Payload != nil {
+		next = append(next, llm.NewToolCallMessage(assistantContent, nil, native, reasoningContent))
+	}
+	for _, rs := range results {
+		next = append(next, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
+	}
+	return r.appendMessages(ctx, next, messages, taskKey, st)
+}
+
+func (r *Runner) appendMessages(ctx context.Context, next []llm.Message, messages *[]llm.Message, taskKey string, st *compressionState) MainLoopStop {
 	maxAllowed := r.task.MaxContextTokens
 	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
 	warnLimit := PromptTokenLimit(maxAllowed)
@@ -597,15 +615,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	// round's messages are appended (e.g. an oversized initial prompt).
 	budgetDenied := CountMessagesTokens(*messages) > warnLimit && errors.Is(compress(), llm.ErrTokenBudget)
 
-	if len(toolCalls) > 0 {
-		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls, native, reasoningContent))
-	} else if assistantContent != "" || native.Payload != nil {
-		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, nil, native, reasoningContent))
-	}
-
-	for _, rs := range results {
-		*messages = append(*messages, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
-	}
+	*messages = append(*messages, next...)
 	if budgetDenied {
 		return StopTokenBudget
 	}
