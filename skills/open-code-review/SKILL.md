@@ -81,7 +81,9 @@ Omit `--analysis` for workspace reviews, `--preview`, `--resume`, or `--format s
 
 Treat every OCR Review comment, including low-severity ones, as a claim for the host agent to check against the reviewed workspace or exact revisions. Trace the stated trigger to the claimed effect. For ordinary functional bugs, try the smallest safe, non-destructive check that exercises that path; compare with the base when the claim is a regression. In PR mode, inspect blobs at the recorded SHAs in the retained `worktree` from `run.json`, not the current branch. Do not run PR-supplied code, tests, or builds, bypass a policy stop, or try to exploit a suspected vulnerability.
 
-After reporting the PR result, give the snapshot path and ask whether the user wants it cleaned up. Keep it unless they explicitly agree. Only then run `python3 "$SKILL_DIR/scripts/review_pr.py" --cleanup <run.json>` for that run. This keeps the report and manifest. If cleanup is refused, report why; do not force it.
+After reporting the PR result and finishing any requested fixes, give the snapshot path and ask whether to discard it, including uncommitted edits and local-only commits. No answer means keep it. Cleanup preserves the report, manifest, and changes already pushed to the PR.
+
+Only after explicit consent, run `python3 "$SKILL_DIR/scripts/review_pr.py" --cleanup <run.json>` for that run. If the user requested a push, first verify the intended commit is on the PR's remote head branch, for example by comparing it with `gh pr view <pr-url> --json headRefOid`. If the push fails or cannot be verified, keep the snapshot and explain why. Report any cleanup warning or refusal; do not bypass it.
 
 For text and JSON alike, report findings in two groups, keeping OCR order within each. Keep OCR's claim, severity, category, location, and any suggestion distinct from the host's evidence:
 

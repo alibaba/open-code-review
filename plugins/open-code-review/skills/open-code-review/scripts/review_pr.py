@@ -86,32 +86,42 @@ def freeze(folder, repo, number, revisions, env, offline):
     return bases[0]
 
 
-def verify_tree(folder, head, env):
+def verify_tree_owner(folder, env):
     tree = folder / "worktree"
     common = command("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=tree, env=env)
-    if (Path(common) != folder / "objects.git" or
-            command("git", "rev-parse", "HEAD", cwd=tree, env=env) != head or
+    if Path(common) != folder / "objects.git":
+        raise ValueError(f"worktree does not belong to this snapshot; retained {tree}")
+
+
+def verify_tree(folder, head, env):
+    tree = folder / "worktree"
+    verify_tree_owner(folder, env)
+    if (command("git", "rev-parse", "HEAD", cwd=tree, env=env) != head or
             command("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=tree, env=env) != "HEAD" or
             command("git", "status", "--porcelain", "--ignored", "--untracked-files=all", cwd=tree, env=env)):
         raise ValueError(f"worktree changed; retained {tree}")
 
 
-def release(folder, head, env):
+def release(folder, env):
     store, tree = folder / "objects.git", folder / "worktree"
     if store.is_symlink() or tree.is_symlink():
         raise ValueError("refusing to clean up a symlinked snapshot")
-    if store.exists():
-        refs = command("git", "for-each-ref", "--format=%(refname)", cwd=store, env=env).splitlines()
-        if set(refs) - {"refs/pr/base", "refs/pr/head"}:
-            raise ValueError("object store has additional refs; retained snapshot")
-        entries = command("git", "worktree", "list", "--porcelain", "-z", cwd=store, env=env).split("\0")
-        if any(Path(entry[9:]) not in (store, tree) for entry in entries if entry.startswith("worktree ")):
-            raise ValueError("object store has another worktree; retained snapshot")
+    if not store.exists():
+        if tree.exists():
+            raise ValueError(f"snapshot object store is missing; retained {tree}")
+        return
+    git = ("git", f"--git-dir={store}", "-c", f"core.hooksPath={os.devnull}")
+    entries = command(*git, "worktree", "list", "--porcelain", "-z", env=env).split("\0")
+    worktrees = {Path(entry[9:]) for entry in entries if entry.startswith("worktree ")}
+    if worktrees - {store, tree}:
+        raise ValueError("object store has another worktree; retained snapshot")
     if tree.exists():
-        verify_tree(folder, head, env)
-        command("git", "worktree", "remove", "--", tree, cwd=store, env=env)
-    if store.exists():
-        shutil.rmtree(store)
+        verify_tree_owner(folder, env)
+        command(*git, "worktree", "remove", "--force", "--", tree, env=env)
+    elif tree in worktrees:
+        print("The recorded worktree is missing. Any moved files are left in place but will lose their Git metadata.",
+              file=sys.stderr)
+    shutil.rmtree(store)
 
 
 def prepare_review_policy(tree, base, head, env):
@@ -179,7 +189,7 @@ def cleanup(manifest, offline):
             summary.get("worktree") != str(folder / "worktree")):
         raise ValueError("expected a completed run belonging to this directory")
     if summary.get("cleanup") != "complete":
-        release(folder, summary.get("snapshot", {}).get("head"), offline)
+        release(folder, offline)
         summary["cleanup"] = "complete"
         save(manifest, summary)
     print(manifest)
@@ -245,7 +255,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Review one pinned GitHub pull request using native OCR.")
     operation = parser.add_mutually_exclusive_group(required=True)
     operation.add_argument("pr", nargs="?", help="PR number in the checkout's default gh repository, or a full GitHub PR URL")
-    operation.add_argument("--cleanup", type=Path, metavar="RUN_JSON", help="Remove only this run's retained snapshot")
+    operation.add_argument("--cleanup", type=Path, metavar="RUN_JSON",
+                           help="Discard this run's local snapshot, including edits and local-only commits")
     parser.add_argument("--repo", help="GitHub repository (OWNER/REPO)")
     parser.add_argument("--background", help="Business context for the review")
     args = parser.parse_args()

@@ -191,14 +191,63 @@ class Standalone(unittest.TestCase):
         manifest = folder / "run.json"
         unrelated = self.root / "run.json"
         shutil.copyfile(manifest, unrelated)
-        self.git("-C", run["worktree"], "branch", "keep")
-        for path, reason in ((unrelated, "snapshot cache"), (manifest, "additional refs")):
+        extra = self.root / "linked"
+        self.git("-C", run["worktree"], "worktree", "add", "--detach", extra, self.head)
+        for path, reason in ((unrelated, "snapshot cache"), (manifest, "another worktree")):
             child = self.start("--cleanup", path)
             _, error = child.communicate(timeout=10)
             self.assertNotEqual(child.returncode, 0)
             self.assertIn(reason, error)
             self.assertEqual(json.loads(manifest.read_text()), run)
-            self.assertEqual(self.git("-C", run["worktree"], "rev-parse", "keep"), self.head)
+            self.assertEqual(self.git("-C", extra, "rev-parse", "HEAD"), self.head)
+
+    def test_cleanup_discards_local_work_but_preserves_pushed_pr_head(self):
+        folder, run = self.finish(self.start("42"))
+        tree = Path(run["worktree"])
+        result = Path(run["result"]).read_bytes()
+        fork = self.root / "fork.git"
+        self.git("clone", "--bare", self.source, fork)
+        self.git("-C", tree, "switch", "-c", "fix")
+        self.git("-C", tree, "config", "user.name", "Test")
+        self.git("-C", tree, "config", "user.email", "test@example.com")
+        (tree / "topic").write_text("review fix")
+        self.git("-C", tree, "commit", "-qam", "fix")
+        pushed = self.git("-C", tree, "rev-parse", "HEAD")
+        self.git("-C", tree, "push", fork, "HEAD:refs/heads/topic")
+        self.git("-C", tree, "commit", "--allow-empty", "-qm", "local only")
+        (tree / "topic").write_text("unfinished edit")
+        (tree / "untracked").touch()
+        _, cleaned = self.finish(self.start("--cleanup", folder / "run.json"))
+        self.assertEqual(cleaned, dict(run, cleanup="complete"))
+        self.assertFalse(tree.exists())
+        self.assertFalse((folder / "objects.git").exists())
+        self.assertEqual(Path(run["result"]).read_bytes(), result)
+        self.assertEqual(self.git("-C", fork, "rev-parse", "refs/heads/topic"), pushed)
+        self.assertEqual(self.git("-C", fork, "show", "topic:topic"), "review fix")
+
+    def test_cleanup_does_not_follow_manually_moved_tree(self):
+        folder, run = self.finish(self.start("42"))
+        moved = self.root / "moved"
+        Path(run["worktree"]).rename(moved)
+        child = self.start("--cleanup", folder / "run.json")
+        out, error = child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 0, error)
+        self.assertIn("moved files", error)
+        self.assertEqual(json.loads(Path(out.strip()).read_text())["cleanup"], "complete")
+        self.assertEqual((moved / "topic").read_text(), "topic")
+        self.assertFalse((folder / "objects.git").exists())
+
+    def test_cleanup_refuses_a_replacement_checkout(self):
+        folder, run = self.finish(self.start("42"))
+        tree = Path(run["worktree"])
+        tree.rename(self.root / "original")
+        self.git("clone", self.source, tree)
+        child = self.start("--cleanup", folder / "run.json")
+        _, error = child.communicate(timeout=10)
+        self.assertNotEqual(child.returncode, 0)
+        self.assertIn("does not belong", error)
+        self.assertEqual(self.git("-C", tree, "rev-parse", "HEAD"), self.base)
+        self.assertTrue((folder / "objects.git").is_dir())
 
     def test_partial_clone_retains_an_independent_snapshot(self):
         self.git("config", "uploadpack.allowFilter", "true")
@@ -296,13 +345,11 @@ class Standalone(unittest.TestCase):
                 folder, run = self.finish(self.start('42', MODE=mode), code=1)
                 self.assertEqual((run['cleanup'], run['failed_step']), ('retained', step))
                 self.assertTrue((folder / 'worktree').is_dir())
-                if mode == 'dirty':
-                    child = self.start('--cleanup', folder / 'run.json')
-                    _, error = child.communicate(timeout=10)
-                    self.assertNotEqual(child.returncode, 0)
-                    self.assertIn('worktree changed', error)
                 self.assertEqual((folder / 'worktree/keep').is_file(), mode == 'dirty')
                 self.assertEqual(run['ocr_exit'], 5 if mode == 'failed' else 0)
+                _, cleaned = self.finish(self.start('--cleanup', folder / 'run.json'))
+                self.assertEqual(cleaned, dict(run, cleanup='complete'))
+                self.assertFalse((folder / 'worktree').exists())
 
     def test_concurrent_interrupt(self):
         first, second = self.start('42', MODE='wait'), self.start('42', MODE='wait')
