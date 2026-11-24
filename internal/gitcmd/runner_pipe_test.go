@@ -269,7 +269,7 @@ func TestRunner_CancelledWithSeparatePipesRepeated(t *testing.T) {
 	cancelGracePeriod = 50 * time.Millisecond
 	t.Cleanup(func() { cancelGracePeriod = orig })
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		r := New(1)
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		_, _, _ = r.RunSplit(ctx, dir, "leak")

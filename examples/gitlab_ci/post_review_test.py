@@ -496,6 +496,33 @@ class PublishTest(unittest.TestCase):
                          "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
                          "✅ **OpenCodeReview**: Looks good to me.")
 
+    def test_failed_review_not_lgtm(self):
+        # A failed review also has zero comments, but must not post the
+        # success glyph / LGTM message on the durable MR record.
+        stats, rec = run_publish({"status": "failed",
+                                  "message": "Review failed: 0 finding(s); 3 of 3 selected item(s) failed."})
+        self.assertEqual(stats["inline"], 0)
+        self.assertNotIn("✅", rec.final_summary_body)
+        self.assertNotIn("Looks good to me", rec.final_summary_body)
+        self.assertEqual(rec.final_summary_body,
+                         "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
+                         "⚠️ **OpenCodeReview**: Review failed: 0 finding(s); 3 of 3 selected item(s) failed.")
+
+    def test_partial_review_not_lgtm(self):
+        # Partial means some selected items were never reviewed, so zero
+        # comments is not an all-clear either.
+        stats, rec = run_publish({"status": "partial",
+                                  "message": "Review partially complete: 0 finding(s); 2 of 3 selected item(s) failed."})
+        self.assertEqual(stats["inline"], 0)
+        self.assertEqual(rec.final_summary_body,
+                         "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
+                         "⚠️ **OpenCodeReview**: Review partially complete: 0 finding(s); 2 of 3 selected item(s) failed.")
+
+    def test_incomplete_review_without_message_names_status(self):
+        stats, rec = run_publish({"status": "partial"})
+        self.assertNotIn("✅", rec.final_summary_body)
+        self.assertIn("review did not complete (status=partial)", rec.final_summary_body)
+
     def test_warnings_in_summary(self):
         stats, rec = run_publish({"comments": [comment()], "warnings": [{"file": "a.py", "message": "skipped"}]})
         self.assertIn("1 warning(s)", rec.final_summary_body)

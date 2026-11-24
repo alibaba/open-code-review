@@ -192,13 +192,25 @@ URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个�
 （`protocol` 取 `anthropic`、`openai`、`openai-responses` 或
 `anthropic-bedrock`）：
 
+实现 Chat Completions 的远程 OpenAI 兼容 provider 使用 `protocol openai`。将
+`url` 设置为服务文档中的 API 根地址，通常以 `/v1` 结尾；OCR 发送请求时会在其后
+追加 `/chat/completions`。例如，下面的自定义别名使用 OpenAI 的公开 Chat Completions
+端点：
+
 ```bash
-ocr config set provider                             my-gateway
-ocr config set custom_providers.my-gateway.url      https://gateway.internal.com/v1
-ocr config set custom_providers.my-gateway.protocol openai
-ocr config set custom_providers.my-gateway.model    llama-3-70b
-ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+ocr config set provider                                      openai-chat-gateway
+ocr config set custom_providers.openai-chat-gateway.url      https://api.openai.com/v1
+ocr config set custom_providers.openai-chat-gateway.protocol openai
+ocr config set custom_providers.openai-chat-gateway.model    gpt-4.1
+ocr config set custom_providers.openai-chat-gateway.api_key  "$OPENAI_API_KEY"
 ```
+
+其他远程 OpenAI 兼容服务也使用相同字段：将 `url` 换成服务文档中的 API 根地址，
+将 `model` 换成该服务模型目录中的精确 ID。所选模型和端点必须支持原生工具调用，
+因为 OCR 会通过 Chat Completions 发送工具。自定义 provider 不会自动从环境变量获取
+API key，因此请显式设置 `api_key`（或配置 `api_key_cmd`）。使用
+`ocr config set provider <name>` 选择 provider 会改变当前生效的 provider，以及 OCR
+使用的 provider 配置。
 
 当 provider 或模型要求使用 OpenAI Responses API（`/v1/responses`）时，使用
 `openai-responses` 协议：

@@ -208,13 +208,26 @@ Any provider name not in the table above is treated as custom and must
 supply at least `url` and `protocol` (`protocol` is `anthropic`,
 `openai`, `openai-responses`, or `anthropic-bedrock`):
 
+An OpenAI-compatible remote provider that implements Chat Completions uses
+`protocol openai`. Set `url` to its documented API root, commonly ending in
+`/v1`; OCR appends `/chat/completions` when it sends requests. For example, this
+custom alias uses OpenAI's public Chat Completions endpoint:
+
 ```bash
-ocr config set provider                             my-gateway
-ocr config set custom_providers.my-gateway.url      https://gateway.internal.com/v1
-ocr config set custom_providers.my-gateway.protocol openai
-ocr config set custom_providers.my-gateway.model    llama-3-70b
-ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+ocr config set provider                                      openai-chat-gateway
+ocr config set custom_providers.openai-chat-gateway.url      https://api.openai.com/v1
+ocr config set custom_providers.openai-chat-gateway.protocol openai
+ocr config set custom_providers.openai-chat-gateway.model    gpt-4.1
+ocr config set custom_providers.openai-chat-gateway.api_key  "$OPENAI_API_KEY"
 ```
+
+Use the same fields for any remote OpenAI-compatible service: replace `url`
+with its documented API root and `model` with the exact model catalog ID that it
+accepts. The selected model and endpoint must support native tool calls because
+OCR sends tools through Chat Completions. Custom providers do not infer an
+environment variable for API keys, so set `api_key` explicitly (or configure
+`api_key_cmd`). Selecting a provider with `ocr config set provider <name>` makes
+it the active provider and changes which provider configuration OCR uses.
 
 Use `openai-responses` when a provider or model requires the OpenAI
 Responses API (`/v1/responses`):

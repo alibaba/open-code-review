@@ -57,7 +57,15 @@ func NewRawFileWriter(repoDir, sessionID string) (*RawFileWriter, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("create raw dir: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	return openRawWriter(path, sessionID, os.O_APPEND)
+}
+
+func NewAnalysisRawWriter(directory, reportID string) (*RawFileWriter, error) {
+	return openRawWriter(filepath.Join(directory, "raw.jsonl"), reportID, os.O_EXCL)
+}
+
+func openRawWriter(path, sessionID string, flags int) (*RawFileWriter, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|flags, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open raw file: %w", err)
 	}

@@ -202,13 +202,26 @@ Model:  claude-sonnet-5
 `protocol` を指定する必要があります（`protocol` は `anthropic`、`openai`、
 `openai-responses`、または `anthropic-bedrock`）。
 
+Chat Completions を実装するリモートの OpenAI 互換 provider では、`protocol openai` を
+使用します。`url` にはサービスのドキュメントに記載された API ルート（通常は `/v1`
+で終わる URL）を指定します。OCR はリクエスト送信時に `/chat/completions` を追加します。
+次の例では、OpenAI の公開 Chat Completions エンドポイントをカスタム名で登録します。
+
 ```bash
-ocr config set provider                             my-gateway
-ocr config set custom_providers.my-gateway.url      https://gateway.internal.com/v1
-ocr config set custom_providers.my-gateway.protocol openai
-ocr config set custom_providers.my-gateway.model    llama-3-70b
-ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+ocr config set provider                                      openai-chat-gateway
+ocr config set custom_providers.openai-chat-gateway.url      https://api.openai.com/v1
+ocr config set custom_providers.openai-chat-gateway.protocol openai
+ocr config set custom_providers.openai-chat-gateway.model    gpt-4.1
+ocr config set custom_providers.openai-chat-gateway.api_key  "$OPENAI_API_KEY"
 ```
+
+他のリモート OpenAI 互換サービスでも同じフィールドを使います。`url` をサービスの
+ドキュメントにある API ルートに、`model` をそのモデルカタログにある正確な ID に置き換えて
+ください。選択したモデルとエンドポイントはネイティブなツール呼び出しに対応している
+必要があります。OCR は Chat Completions を通じてツールを送信するためです。カスタム
+provider では API key の環境変数フォールバックはないため、`api_key` を明示的に設定するか、
+`api_key_cmd` を設定してください。`ocr config set provider <name>` で provider を選択すると、
+アクティブな provider と OCR が使う provider 設定が変わります。
 
 provider またはモデルが OpenAI Responses API（`/v1/responses`）を必要とする場合は、
 `openai-responses` プロトコルを使用します。

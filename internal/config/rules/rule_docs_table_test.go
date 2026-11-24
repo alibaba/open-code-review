@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -36,7 +37,7 @@ var ruleDocNameRE = regexp.MustCompile("`([A-Za-z0-9_]+\\.md)`")
 
 func reviewRulesListedPatterns(body string) map[string]string {
 	listed := make(map[string]string)
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		row := reviewRulesTableRow.FindStringSubmatch(line)
 		if row == nil {
 			continue
@@ -152,14 +153,7 @@ func TestReviewRulesGuideListsEverySystemRulePattern(t *testing.T) {
 				for _, name := range ruleDocNameRE.FindAllStringSubmatch(cell, -1) {
 					names = append(names, name[1])
 				}
-				found := false
-				for _, name := range names {
-					if name == doc {
-						found = true
-						break
-					}
-				}
-				if !found {
+				if !slices.Contains(names, doc) {
 					t.Errorf("%s lists %q as %q, want %s", page, glob, strings.TrimSpace(cell), doc)
 				}
 			}
@@ -225,7 +219,7 @@ func TestReviewRulesGuideListsPatternsInMatchingOrder(t *testing.T) {
 			}
 
 			var seen []string
-			for _, line := range strings.Split(string(body), "\n") {
+			for line := range strings.SplitSeq(string(body), "\n") {
 				row := reviewRulesTableRow.FindStringSubmatch(line)
 				if row == nil {
 					continue

@@ -214,6 +214,11 @@ func TestWhyExcluded_AllBranches(t *testing.T) {
 			item: model.ScanItem{Path: "main.go", Content: "x"},
 			want: model.ExcludeNone,
 		},
+		{
+			name: "rust integration test excluded",
+			item: model.ScanItem{Path: "tests/api.rs", Content: "x"},
+			want: model.ExcludeDefaultPath,
+		},
 	}
 
 	for _, tt := range tests {

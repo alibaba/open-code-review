@@ -174,13 +174,25 @@ Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습�
 
 위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
 
+Chat Completions를 구현하는 원격 OpenAI 호환 프로바이더는 `protocol openai`를 사용합니다.
+`url`에는 서비스 문서에 나온 API 루트를 지정하며, 보통 `/v1`로 끝납니다. OCR은 요청을 보낼
+때 `/chat/completions`를 뒤에 추가합니다. 다음 예시는 OpenAI의 공개 Chat Completions
+엔드포인트를 커스텀 이름으로 등록합니다.
+
 ```bash
-ocr config set provider                             my-gateway
-ocr config set custom_providers.my-gateway.url      https://gateway.internal.com/v1
-ocr config set custom_providers.my-gateway.protocol openai
-ocr config set custom_providers.my-gateway.model    llama-3-70b
-ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+ocr config set provider                                      openai-chat-gateway
+ocr config set custom_providers.openai-chat-gateway.url      https://api.openai.com/v1
+ocr config set custom_providers.openai-chat-gateway.protocol openai
+ocr config set custom_providers.openai-chat-gateway.model    gpt-4.1
+ocr config set custom_providers.openai-chat-gateway.api_key  "$OPENAI_API_KEY"
 ```
+
+다른 원격 OpenAI 호환 서비스도 같은 필드를 사용합니다. `url`은 서비스 문서의 API 루트로,
+`model`은 해당 서비스 모델 카탈로그의 정확한 ID로 바꾸세요. 선택한 모델과 엔드포인트는
+네이티브 도구 호출을 지원해야 합니다. OCR이 Chat Completions를 통해 도구를 보내기
+때문입니다. 커스텀 프로바이더는 API 키를 환경 변수에서 자동으로 가져오지 않으므로
+`api_key`를 명시적으로 설정하거나 `api_key_cmd`를 구성하세요. `ocr config set provider <name>`으로
+프로바이더를 선택하면 활성 프로바이더와 OCR이 사용하는 프로바이더 설정이 바뀝니다.
 
 프로바이더나 모델이 OpenAI Responses API(`/v1/responses`)를 요구하면 `openai-responses`를 사용합니다:
 

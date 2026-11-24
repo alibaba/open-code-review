@@ -20,7 +20,8 @@ var llmCmd = &cobra.Command{
 	Short: "LLM utility commands",
 	Long:  "LLM utility commands.",
 	Example: `  ocr llm test                   Verify LLM connectivity and configuration
-  ocr llm providers              List available built-in providers`,
+  ocr llm providers              List available built-in providers
+  ocr llm models                 List models for the active ChatGPT account`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()

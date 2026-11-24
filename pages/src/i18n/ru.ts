@@ -198,7 +198,7 @@ export const ru: TranslationKeys = {
   'docs.reviewFlag10Desc': 'Макс. раундов вызова инструментов на файл; действует только если больше значения шаблона по умолчанию',
   'docs.reviewFlag10Default': 'Встроенное',
   'docs.reviewFlag11Desc': 'Макс. параллельных git-подпроцессов',
-  'docs.reviewNote': 'Примечание: <code>--from/--to</code> и <code>--commit</code> нельзя использовать вместе. При указании <code>--from</code> также нужно указать <code>--to</code>.',
+  'docs.reviewNote': 'Примечание: <code>--from/--to</code> и <code>--commit</code> нельзя использовать вместе. Если указан только <code>--from</code>, конечной точкой сравнения будет <code>HEAD</code>.',
   'docs.scanTitle': 'ocr scan',
   'docs.scanDesc': '<code>ocr scan</code> проверяет файлы целиком, поэтому история Git и diff не нужны. Используйте команду для аудита незнакомой кодовой базы, проверки каталога перед миграцией или ревью проекта без истории изменений.',
   'docs.scanVsTitle': 'ocr scan и ocr review',
@@ -289,6 +289,7 @@ export const ru: TranslationKeys = {
   'docs.sidebar.configuration': 'Конфигурация',
   'docs.sidebar.cliReference': 'Справочник CLI',
   'docs.sidebar.reviewRules': 'Правила ревью',
+  'docs.sidebar.reviewingRequirements': 'Ревью с учётом требований',
   'docs.sidebar.architecture': 'Архитектура',
   'docs.sidebar.tools': 'Инструменты',
   'docs.sidebar.mcp': 'MCP-серверы',
@@ -309,6 +310,11 @@ export const ru: TranslationKeys = {
   'docs.search.hint.select': 'Выбрать',
   'docs.search.hint.open': 'Открыть',
   'docs.search.hint.close': 'Закрыть',
+  'docs.content.loading': 'Загрузка документации...',
+  'docs.content.loadError': 'Не удалось загрузить содержимое документации.',
+  'docs.content.retry': 'Повторить',
+  'docs.search.loading': 'Поиск...',
+  'docs.search.loadError': 'Не удалось загрузить содержимое для поиска.',
 
   // Blog
   'blog.title': 'Блог',
