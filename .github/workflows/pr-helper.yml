@@ -1,0 +1,37 @@
+name: PR helper
+
+on:
+  push:
+    branches: [main]
+    paths: &helper-paths
+      - 'skills/open-code-review/scripts/**'
+      - 'plugins/open-code-review/skills/open-code-review/scripts/**'
+      - 'skills/open-code-review/SKILL.md'
+      - 'plugins/open-code-review/skills/open-code-review/SKILL.md'
+      - '.agents/plugins/marketplace.json'
+      - '.kimi-plugin/plugin.json'
+      - 'plugins/open-code-review/.codex-plugin/plugin.json'
+      - 'plugins/open-code-review/.cursor-plugin/plugin.json'
+      - 'plugins/open-code-review/plugin.json'
+      - 'scripts/github-actions/test_review_pr.py'
+      - '.github/workflows/pr-helper.yml'
+  pull_request:
+    branches: [main]
+    paths: *helper-paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-pr-helper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 scripts/github-actions/test_review_pr.py

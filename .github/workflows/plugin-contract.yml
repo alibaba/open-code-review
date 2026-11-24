@@ -34,7 +34,6 @@ on:
       - "CONTRIBUTING*.md"
       - "AGENTS.md"
       - "scripts/github-actions/check-plugin-contract.*"
-      - "scripts/github-actions/test_review_pr.py"
       - ".github/workflows/plugin-contract.yml"
   pull_request:
     branches: [main]
@@ -49,7 +48,6 @@ on:
       - "CONTRIBUTING*.md"
       - "AGENTS.md"
       - "scripts/github-actions/check-plugin-contract.*"
-      - "scripts/github-actions/test_review_pr.py"
       - ".github/workflows/plugin-contract.yml"
 
 permissions:
@@ -60,16 +58,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  installed-pr-helper:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Test installed PR review helpers
-        run: python3 scripts/github-actions/test_review_pr.py
-
   plugin-contract:
     runs-on: self-hosted
     timeout-minutes: 10

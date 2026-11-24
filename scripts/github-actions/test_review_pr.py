@@ -74,9 +74,7 @@ sys.exit(5 if mode == 'failed' else 0)
 """
 
 
-class Standalone(unittest.TestCase):
-    script = ROOT / SCRIPT
-
+class InstalledHelper(unittest.TestCase):
     def setUp(self):
         build = ROOT / "dist" / "pr-helper-tests"
         build.mkdir(parents=True, exist_ok=True)
@@ -141,6 +139,10 @@ class Standalone(unittest.TestCase):
         path = Path(out.strip())
         self.assertTrue(path.is_absolute())
         return path.parent, json.loads(path.read_text())
+
+
+class Standalone(InstalledHelper):
+    script = ROOT / SCRIPT
 
     def test_pinned_range_and_checkout(self):
         index = (self.source / ".git/index").read_bytes()
@@ -374,11 +376,21 @@ class Standalone(unittest.TestCase):
         self.finish(second)
 
 
-class Plugin(Standalone):
-    script = ROOT / 'plugins/open-code-review' / SCRIPT
+class Plugin(InstalledHelper):
+    def setUp(self):
+        marketplace = json.loads((ROOT / '.agents/plugins/marketplace.json').read_text())
+        plugin = next(entry for entry in marketplace['plugins'] if entry['name'] == 'open-code-review-codex')
+        package = ROOT / plugin['source']['path']
+        manifest = json.loads((package / '.codex-plugin/plugin.json').read_text())
+        self.script = package / manifest['skills'] / SCRIPT.relative_to('skills')
+        super().setUp()
 
-    def test_helper_matches_standalone(self):
-        self.assertEqual(self.script.read_bytes(), Standalone.script.read_bytes())
+    def test_installed_plugin_helper(self):
+        self.assertTrue((self.installed.parent.parent / 'SKILL.md').is_file())
+        self.assertEqual(self.installed.read_bytes(), Standalone.script.read_bytes())
+        _, run = self.finish(self.start(URL, cwd=self.root))
+        self.assertEqual(run['snapshot']['head'], self.head)
+        self.assertTrue(Path(run['result']).is_file())
 
 
 if __name__ == '__main__':
