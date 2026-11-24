@@ -1,211 +1,106 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-/* Docs content index — imports all markdown files and provides a lookup by slug + language */
+/* Docs content directory and on-demand language loader.
+ *
+ * This module must stay lightweight: it holds slugs, navigation order and
+ * language availability, but never imports a Markdown body. Each language's
+ * bodies live behind their own bundle (en.ts, zh.ts, ...) and are pulled in
+ * through loadLanguageContent's explicit import() boundaries, so opening a
+ * page downloads only the selected language's content.
+ *
+ * The directory is the source of truth for what a translation may contain:
+ * a transient download failure is never treated as a missing translation. */
 
 import type { Language } from '../../i18n/types';
+import type { DocSlug, DocSearchResult, LocalizedDocs } from './types';
 
-// English docs
-import enQuickstart from './en/quickstart.md';
-import enInstallation from './en/installation.md';
-import enConfiguration from './en/configuration.md';
-import enCliReference from './en/cli-reference.md';
-import enReviewRules from './en/review-rules.md';
-import enArchitecture from './en/architecture.md';
-import enTools from './en/tools.md';
-import enMcp from './en/mcp.md';
-import enViewer from './en/viewer.md';
-import enTelemetry from './en/telemetry.md';
-import enAgentSkill from './en/integrations/agent-skill.md';
-import enClaudeCode from './en/integrations/claude-code.md';
-import enCicd from './en/integrations/ci.md';
-import enDelegate from './en/integrations/delegate.md';
-import enContributing from './en/contributing.md';
-import enFaq from './en/faq.md';
+export type { DocSlug, DocSearchResult, LocalizedDocs };
 
-// Chinese docs
-import zhQuickstart from './zh/quickstart.md';
-import zhInstallation from './zh/installation.md';
-import zhConfiguration from './zh/configuration.md';
-import zhCliReference from './zh/cli-reference.md';
-import zhReviewRules from './zh/review-rules.md';
-import zhArchitecture from './zh/architecture.md';
-import zhTools from './zh/tools.md';
-import zhMcp from './zh/mcp.md';
-import zhViewer from './zh/viewer.md';
-import zhTelemetry from './zh/telemetry.md';
-import zhAgentSkill from './zh/integrations/agent-skill.md';
-import zhClaudeCode from './zh/integrations/claude-code.md';
-import zhCicd from './zh/integrations/ci.md';
-import zhDelegate from './zh/integrations/delegate.md';
-import zhContributing from './zh/contributing.md';
-import zhFaq from './zh/faq.md';
+/* Canonical slug order — search iterates this order, so it must match the
+ * historical enDocs key order to keep result ordering stable. */
+const DOC_SLUG_ORDER: readonly DocSlug[] = [
+  'quickstart',
+  'installation',
+  'configuration',
+  'chatgpt-preview',
+  'cli-reference',
+  'review-rules',
+  'reviewing-requirements',
+  'architecture',
+  'tools',
+  'mcp',
+  'viewer',
+  'telemetry',
+  'agent-skill',
+  'claude-code',
+  'cicd',
+  'delegate',
+  'acp',
+  'copilot-cli',
+  'contributing',
+  'faq',
+];
 
-// Japanese docs
-import jaQuickstart from './ja/quickstart.md';
-import jaInstallation from './ja/installation.md';
-import jaConfiguration from './ja/configuration.md';
-import jaCliReference from './ja/cli-reference.md';
-import jaReviewRules from './ja/review-rules.md';
-import jaArchitecture from './ja/architecture.md';
-import jaTools from './ja/tools.md';
-import jaMcp from './ja/mcp.md';
-import jaViewer from './ja/viewer.md';
-import jaTelemetry from './ja/telemetry.md';
-import jaAgentSkill from './ja/integrations/agent-skill.md';
-import jaClaudeCode from './ja/integrations/claude-code.md';
-import jaCicd from './ja/integrations/ci.md';
-import jaDelegate from './ja/integrations/delegate.md';
-import jaContributing from './ja/contributing.md';
-import jaFaq from './ja/faq.md';
-
-// Korean docs (incremental — partial LocalizedDocs)
-import koQuickstart from './ko/quickstart.md';
-import koInstallation from './ko/installation.md';
-import koConfiguration from './ko/configuration.md';
-import koAgentSkill from './ko/integrations/agent-skill.md';
-import koClaudeCode from './ko/integrations/claude-code.md';
-import koCicd from './ko/integrations/ci.md';
-import koDelegate from './ko/integrations/delegate.md';
-import koCliReference from './ko/cli-reference.md';
-import koReviewRules from './ko/review-rules.md';
-import koTools from './ko/tools.md';
-
-// Russian docs (incremental — partial LocalizedDocs)
-import ruQuickstart from './ru/quickstart.md';
-import ruInstallation from './ru/installation.md';
-import ruConfiguration from './ru/configuration.md';
-import ruCliReference from './ru/cli-reference.md';
-import ruReviewRules from './ru/review-rules.md';
-import ruArchitecture from './ru/architecture.md';
-import ruTools from './ru/tools.md';
-import ruMcp from './ru/mcp.md';
-import ruViewer from './ru/viewer.md';
-import ruTelemetry from './ru/telemetry.md';
-import ruAgentSkill from './ru/integrations/agent-skill.md';
-import ruClaudeCode from './ru/integrations/claude-code.md';
-import ruCicd from './ru/integrations/ci.md';
-import ruDelegate from './ru/integrations/delegate.md';
-import ruContributing from './ru/contributing.md';
-import ruFaq from './ru/faq.md';
-
-export type DocSlug =
-  | 'quickstart'
-  | 'installation'
-  | 'configuration'
-  | 'cli-reference'
-  | 'review-rules'
-  | 'architecture'
-  | 'tools'
-  | 'mcp'
-  | 'viewer'
-  | 'telemetry'
-  | 'agent-skill'
-  | 'claude-code'
-  | 'cicd'
-  | 'delegate'
-  | 'contributing'
-  | 'faq';
-
-type LocalizedDocs = Partial<Record<DocSlug, string>>;
-
-const enDocs: Record<DocSlug, string> = {
-  'quickstart': enQuickstart,
-  'installation': enInstallation,
-  'configuration': enConfiguration,
-  'cli-reference': enCliReference,
-  'review-rules': enReviewRules,
-  'architecture': enArchitecture,
-  'tools': enTools,
-  'mcp': enMcp,
-  'viewer': enViewer,
-  'telemetry': enTelemetry,
-  'agent-skill': enAgentSkill,
-  'claude-code': enClaudeCode,
-  'cicd': enCicd,
-  'delegate': enDelegate,
-  'contributing': enContributing,
-  'faq': enFaq,
+/* Which docs exist per language. When a doc is added without a translation,
+ * remove its slug from that language's list so the page falls back to
+ * English instead of promising a translation the bundle cannot deliver. */
+const availableTranslations: Record<Language, readonly DocSlug[]> = {
+  en: DOC_SLUG_ORDER,
+  zh: DOC_SLUG_ORDER,
+  ja: DOC_SLUG_ORDER,
+  ko: DOC_SLUG_ORDER,
+  ru: DOC_SLUG_ORDER,
+  tr: DOC_SLUG_ORDER,
 };
 
-const zhDocs: Record<DocSlug, string> = {
-  'quickstart': zhQuickstart,
-  'installation': zhInstallation,
-  'configuration': zhConfiguration,
-  'cli-reference': zhCliReference,
-  'review-rules': zhReviewRules,
-  'architecture': zhArchitecture,
-  'tools': zhTools,
-  'mcp': zhMcp,
-  'viewer': zhViewer,
-  'telemetry': zhTelemetry,
-  'agent-skill': zhAgentSkill,
-  'claude-code': zhClaudeCode,
-  'cicd': zhCicd,
-  'delegate': zhDelegate,
-  'contributing': zhContributing,
-  'faq': zhFaq,
+export function hasTranslation(slug: DocSlug, language: Language): boolean {
+  return availableTranslations[language].includes(slug);
+}
+
+export function isPartialLocale(language: Language): boolean {
+  return availableTranslations[language].length !== DOC_SLUG_ORDER.length;
+}
+
+/* One import() boundary per language so webpack emits independent
+ * chunks; a computed specifier would merge them into a single context. */
+const languageLoaders: Record<Language, () => Promise<{ default: LocalizedDocs }>> = {
+  en: () => import('./en'),
+  zh: () => import('./zh'),
+  ja: () => import('./ja'),
+  ko: () => import('./ko'),
+  ru: () => import('./ru'),
+  tr: () => import('./tr'),
 };
 
-const jaDocs: Record<DocSlug, string> = {
-  'quickstart': jaQuickstart,
-  'installation': jaInstallation,
-  'configuration': jaConfiguration,
-  'cli-reference': jaCliReference,
-  'review-rules': jaReviewRules,
-  'architecture': jaArchitecture,
-  'tools': jaTools,
-  'mcp': jaMcp,
-  'viewer': jaViewer,
-  'telemetry': jaTelemetry,
-  'agent-skill': jaAgentSkill,
-  'claude-code': jaClaudeCode,
-  'cicd': jaCicd,
-  'delegate': jaDelegate,
-  'contributing': jaContributing,
-  'faq': jaFaq,
-};
+/* Successful loads stay cached for the session; concurrent callers share the
+ * in-flight promise; failed loads are evicted so a retry starts a fresh
+ * import instead of replaying the rejection. */
+const languageContentCache = new Map<Language, Promise<LocalizedDocs>>();
 
-const koDocs: LocalizedDocs = {
-  'quickstart': koQuickstart,
-  'installation': koInstallation,
-  'configuration': koConfiguration,
-  'agent-skill': koAgentSkill,
-  'claude-code': koClaudeCode,
-  'cicd': koCicd,
-  'delegate': koDelegate,
-  'cli-reference': koCliReference,
-  'review-rules': koReviewRules,
-  'tools': koTools,
-};
+export function loadLanguageContent(language: Language): Promise<LocalizedDocs> {
+  const cached = languageContentCache.get(language);
+  if (cached) return cached;
+  const pending = languageLoaders[language]().then(mod => mod.default);
+  languageContentCache.set(language, pending);
+  pending.catch(() => languageContentCache.delete(language));
+  return pending;
+}
 
-const ruDocs: LocalizedDocs = {
-  'quickstart': ruQuickstart,
-  'installation': ruInstallation,
-  'configuration': ruConfiguration,
-  'cli-reference': ruCliReference,
-  'review-rules': ruReviewRules,
-  'architecture': ruArchitecture,
-  'tools': ruTools,
-  'mcp': ruMcp,
-  'viewer': ruViewer,
-  'telemetry': ruTelemetry,
-  'agent-skill': ruAgentSkill,
-  'claude-code': ruClaudeCode,
-  'cicd': ruCicd,
-  'delegate': ruDelegate,
-  'contributing': ruContributing,
-  'faq': ruFaq,
-};
+/* ─── Loaded-content accessors ───
+ * Pages and search read the same LoadedDocContent, so rendering and full-text
+ * search always agree on what has been loaded. English is attached only for
+ * partial locales that need fallback entries. */
 
-const docsMap: Record<Language, LocalizedDocs> = {
-  en: enDocs,
-  zh: zhDocs,
-  ja: jaDocs,
-  // Korean docs are translated incrementally; untranslated pages fall back to English per-page.
-  ko: koDocs,
-  ru: ruDocs,
-};
+export interface LoadedDocContent {
+  language: Language;
+  docs: LocalizedDocs;
+  english?: LocalizedDocs;
+}
+
+function rawFor(slug: DocSlug, loaded: LoadedDocContent): string {
+  return loaded.docs[slug] ?? loaded.english?.[slug] ?? '';
+}
 
 /**
  * Strip YAML frontmatter from markdown content
@@ -221,26 +116,17 @@ function stripFrontmatter(md: string): string {
 }
 
 /**
- * Get raw content for a slug in the given language, with English fallback.
+ * Get the markdown content for a doc slug from the loaded language content.
  */
-function getRawContent(slug: DocSlug, language: string): string {
-  const langDocs = docsMap[language as Language] || docsMap.en;
-  return langDocs[slug] ?? enDocs[slug] ?? '';
-}
-
-/**
- * Get the markdown content for a given doc slug and language.
- * Falls back to English if the language is not found.
- */
-export function getDocContent(slug: DocSlug, language: string): string {
-  return stripFrontmatter(getRawContent(slug, language));
+export function getDocContent(slug: DocSlug, loaded: LoadedDocContent): string {
+  return stripFrontmatter(rawFor(slug, loaded));
 }
 
 /**
  * Get the title from frontmatter
  */
-export function getDocTitle(slug: DocSlug, language: string): string {
-  const raw = getRawContent(slug, language);
+export function getDocTitle(slug: DocSlug, loaded: LoadedDocContent): string {
+  const raw = rawFor(slug, loaded);
   if (raw.startsWith('---')) {
     const end = raw.indexOf('---', 3);
     if (end !== -1) {
@@ -252,21 +138,42 @@ export function getDocTitle(slug: DocSlug, language: string): string {
   return slug;
 }
 
+function turkishSearchPattern(query: string): RegExp {
+  const literal = query.normalize().toLocaleLowerCase('tr').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(literal.replace(/[i\u0131]/gu, letter => `[${letter}I]`));
+}
+
+declare const __ENGLISH_DOC_IDENTIFIERS__: string[];
+const englishDocIdentifiers = new Set(__ENGLISH_DOC_IDENTIFIERS__);
+
+function foldTurkishDocument(content: string): string {
+  const englishIdentifier = /^(?:AI|ANSI|API|CI|CLI|ID|IDE|IDEA|Intel|Linux|SARIF|TUI|UI|URI|UUID|Windows)$/i;
+  return content.replace(/[\p{L}\p{M}\p{N}_]+/gu, word => {
+    if (!/[Ii\u0130]/u.test(word)) return word.toLowerCase();
+    const lower = word.toLowerCase();
+    if (englishDocIdentifiers.has(lower) || englishIdentifier.test(word)) return lower.replace(/i/g, 'I');
+    return word.toLocaleLowerCase('tr');
+  });
+}
+
 /**
- * Search across all docs for a query string. Returns matching slugs with context.
- * Iterates every English slug so partial locales still search English fallbacks.
+ * Search the loaded language docs for a query string. Returns matching slugs
+ * with context. Iterates the canonical slug order so partial locales with
+ * English attached still search the English fallbacks, preserving the
+ * previous all-language search coverage.
  */
-export function searchDocs(query: string, language: string): { slug: DocSlug; title: string; snippet: string }[] {
+export function searchDocs(query: string, loaded: LoadedDocContent): DocSearchResult[] {
   if (!query.trim()) return [];
-  const langDocs = docsMap[language as Language] || docsMap.en;
-  const results: { slug: DocSlug; title: string; snippet: string }[] = [];
+  const results: DocSearchResult[] = [];
   const lowerQuery = query.toLowerCase();
-  const slugs = Object.keys(enDocs) as DocSlug[];
-  for (const slug of slugs) {
-    const raw = langDocs[slug] ?? enDocs[slug] ?? '';
-    const content = stripFrontmatter(raw);
-    const lowerContent = content.toLowerCase();
-    const idx = lowerContent.indexOf(lowerQuery);
+  const turkishPattern = loaded.language === 'tr' ? turkishSearchPattern(query) : undefined;
+  for (const slug of DOC_SLUG_ORDER) {
+    const raw = rawFor(slug, loaded);
+    if (!raw) continue;
+    const isTurkish = turkishPattern !== undefined && loaded.docs[slug] !== undefined;
+    const body = stripFrontmatter(raw);
+    const content = isTurkish ? body.normalize() : body;
+    const idx = isTurkish ? foldTurkishDocument(content).search(turkishPattern) : content.toLowerCase().indexOf(lowerQuery);
     if (idx !== -1) {
       // Extract snippet around match
       const start = Math.max(0, idx - 30);
@@ -274,7 +181,7 @@ export function searchDocs(query: string, language: string): { slug: DocSlug; ti
       let snippet = content.slice(start, end).replace(/[#*_`[\]()]/g, '').replace(/\n/g, ' ').trim();
       if (start > 0) snippet = '...' + snippet;
       if (end < content.length) snippet = snippet + '...';
-      const title = getDocTitle(slug, language);
+      const title = getDocTitle(slug, loaded);
       results.push({ slug, title, snippet });
     }
   }

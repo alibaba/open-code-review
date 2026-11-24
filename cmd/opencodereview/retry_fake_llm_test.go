@@ -5,7 +5,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -32,23 +34,69 @@ var retryTestFixedTime = time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
 // 429 (which the SDK must retry on its own) or a permanent 402 (which it must
 // not retry).
 type fakeLLM struct {
-	mu sync.Mutex
+	mu              sync.Mutex
+	mainInputTokens int
 	// attemptsByFile counts real HTTP attempts per file, so a test can assert
 	// the SDK retried rather than OCR re-requesting.
 	attemptsByFile map[string]int
+	// groupingCalls counts requests recognized as the GROUPING_TASK call, so a
+	// test can prove the recognition still works — see
+	// assertGroupingRecognized.
+	groupingCalls int
 	// rateLimitOnce lists files whose first attempt returns 429.
 	rateLimitOnce map[string]bool
 	// hardFail lists files whose every attempt returns 402.
 	hardFail map[string]bool
+	// markers maps a per-file token to the file carrying it. It starts as a
+	// copy of the package-level markers and may be extended by a test that
+	// reviews files outside that set (the workspace-resume e2e suite does).
+	markers map[string]string
 }
 
 // newFakeLLM returns a server that succeeds on the first attempt for every
 // file. rateLimitOnce and hardFail are set by the caller before use.
 func newFakeLLM() *fakeLLM {
+	fileMarkers := make(map[string]string, len(markers))
+	maps.Copy(fileMarkers, markers)
 	return &fakeLLM{
-		attemptsByFile: map[string]int{},
-		rateLimitOnce:  map[string]bool{},
-		hardFail:       map[string]bool{},
+		mainInputTokens: 10,
+		attemptsByFile:  map[string]int{},
+		rateLimitOnce:   map[string]bool{},
+		hardFail:        map[string]bool{},
+		markers:         fileMarkers,
+	}
+}
+
+// failAll makes every file in the fixture fail permanently. Tests that mean
+// "the whole review failed" use this rather than naming files, so they keep
+// meaning that when the fixture's file set changes.
+func (f *fakeLLM) failAll() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, name := range markers {
+		f.hardFail[name] = true
+	}
+}
+
+// assertGroupingRecognized fails if no request matched groupingSystemPrompt.
+// Without it a reworded GROUPING_TASK system prompt would degrade these tests
+// silently: the fake would miss the grouping call, fall through to the plan
+// response, fail to parse as a grouping reply, and leave groupDiffs falling back
+// to per-file dispatch — the very shape the grouping branch constructs on
+// purpose. Every assertion would still pass with the coverage gone.
+//
+// One test calling this is enough. A prompt reword is a global event, so a
+// single guard catches it; it is deliberately not in startFakeLLM's cleanup,
+// because a test whose change set never reaches the grouping call would then
+// fail for the wrong reason.
+func (f *fakeLLM) assertGroupingRecognized(t *testing.T) {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.groupingCalls == 0 {
+		t.Fatalf("no request matched %q — did GROUPING_TASK's system prompt change? "+
+			"Point groupingSystemPrompt at a fragment that still appears in "+
+			"internal/config/template/prompts/grouping_task_system.md", groupingSystemPrompt)
 	}
 }
 
@@ -57,9 +105,7 @@ func (f *fakeLLM) attemptCounts() map[string]int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make(map[string]int, len(f.attemptsByFile))
-	for k, v := range f.attemptsByFile {
-		out[k] = v
-	}
+	maps.Copy(out, f.attemptsByFile)
 	return out
 }
 
@@ -67,10 +113,33 @@ func (f *fakeLLM) attemptCounts() map[string]int {
 // file name. The prompt's change_files section lists the *other* file's path,
 // so matching on the path itself would misattribute requests; the marker only
 // occurs in the reviewed file's diff body.
-var markers = map[string]string{"MARKER_ALPHA": "a.go", "MARKER_BETA": "b.go"}
+//
+// Every reviewed file needs its own marker for attribution to work, so this map
+// is also what defines the fixture's file set — see retryTestRepo.
+var markers = map[string]string{
+	"MARKER_ALPHA": "a.go",
+	"MARKER_BETA":  "b.go",
+	"MARKER_GAMMA": "c.go",
+	"MARKER_DELTA": "d.go",
+}
+
+// groupingSystemPrompt is a stable fragment of GROUPING_TASK's system prompt,
+// copied from internal/config/template/prompts/grouping_task_system.md. The
+// grouping call carries file metadata only, never diff bodies, so it has no
+// marker to attribute it by; this is what identifies it instead.
+//
+// Nothing links the two files at compile time, so a reword there silently stops
+// matching here. assertGroupingRecognized is what turns that into a failure.
+const groupingSystemPrompt = "file grouping assistant"
+
+// groupingReply is one element of the JSON array GROUPING_TASK must return.
+type groupingReply struct {
+	Label string   `json:"label"`
+	Files []string `json:"files"`
+}
 
 func (f *fakeLLM) fileOf(body []byte) string {
-	for marker, name := range markers {
+	for marker, name := range f.markers {
 		if bytes.Contains(body, []byte(marker)) {
 			return name
 		}
@@ -84,6 +153,36 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	raw := body.Bytes()
 	file := f.fileOf(raw)
 	hasTools := bytes.Contains(raw, []byte(`"tools"`))
+
+	// Answer the grouping call with one group per file. These tests are about
+	// per-request retry accounting, which needs each file to be its own request;
+	// letting the model bundle them would collapse the very thing under test.
+	// Served before the injection switch on purpose: the grouping call carries no
+	// marker, so it must never absorb a file's 429 or 402.
+	if bytes.Contains(raw, []byte(groupingSystemPrompt)) {
+		f.mu.Lock()
+		f.groupingCalls++
+		f.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		groups := make([]groupingReply, 0, len(f.markers))
+		for _, name := range f.markers {
+			groups = append(groups, groupingReply{Label: name, Files: []string{name}})
+		}
+		// The grouping answer is JSON that has to survive being carried inside a
+		// JSON string, so let the encoder do both levels of quoting.
+		inner, err := json.Marshal(groups)
+		if err != nil {
+			panic(err)
+		}
+		text, err := json.Marshal(string(inner))
+		if err != nil {
+			panic(err)
+		}
+		_, _ = fmt.Fprintf(w, `{"id":"msg_group","type":"message","role":"assistant","model":"claude-test",
+			"content":[{"type":"text","text":%s}],
+			"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}`, text)
+		return
+	}
 
 	f.mu.Lock()
 	f.attemptsByFile[file]++
@@ -111,9 +210,9 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Main-task rounds carry tool definitions; the plan phase does not.
 	if hasTools {
-		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-test",
+		_, _ = fmt.Fprintf(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-test",
 			"content":[{"type":"tool_use","id":"tu_1","name":"task_done","input":{"state":"DONE"}}],
-			"stop_reason":"tool_use","usage":{"input_tokens":10,"output_tokens":5}}`))
+			"stop_reason":"tool_use","usage":{"input_tokens":%d,"output_tokens":5}}`, f.mainInputTokens)
 		return
 	}
 	_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-test",
@@ -137,13 +236,24 @@ func retryTestGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// retryTestRepo builds a two-file repo with one reviewable commit range
-// (HEAD~1..HEAD), each file carrying its own marker in the second commit only.
+// retryTestRepo builds a repo with one reviewable commit range (HEAD~1..HEAD),
+// each file carrying its own marker in the second commit only.
+//
+// The file set is `markers`, which holds enough files to reach
+// GROUPING_MIN_FILES. That matters: below it, grouping is decided locally and a
+// low-churn change set is bundled into a single group — one request covering
+// every file, which would collapse the per-request accounting these tests exist
+// to check. At or above it the grouping call runs, and the fake answers it with
+// one group per file.
 func retryTestRepo(t *testing.T) string {
 	t.Helper()
+	names := make([]string, 0, len(markers))
+	for _, name := range markers {
+		names = append(names, name)
+	}
 	dir := t.TempDir()
 	retryTestGit(t, dir, "init", "-q", "-b", "main")
-	for _, name := range []string{"a.go", "b.go"} {
+	for _, name := range names {
 		body := fmt.Sprintf("package p\n\nfunc %s() int { return 1 }\n", strings.TrimSuffix(name, ".go"))
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
@@ -170,7 +280,7 @@ func retryTestRepo(t *testing.T) string {
 // Windows and never falls back to HOME, so redirecting HOME alone left these
 // runs writing to the real profile. Set both; the one that does not apply is
 // harmless.
-func startFakeLLM(t *testing.T, srv *fakeLLM) {
+func startFakeLLM(t *testing.T, srv http.Handler) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)

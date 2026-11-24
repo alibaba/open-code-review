@@ -4,9 +4,11 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -218,6 +220,118 @@ func TestSetConfigValueProviderEntryNonPresetWritesCustomProvider(t *testing.T) 
 	}
 }
 
+func TestSetConfigValueDottedProviderName(t *testing.T) {
+	fields := []struct {
+		field string
+		value string
+	}{
+		{"url", "https://example.invalid/v1"},
+		{"protocol", llm.ProtocolAnthropicBedrock},
+		{"model", "some-model"},
+		{"api_key", "test-key"},
+		{"api_key_cmd", "secret-tool lookup service x"},
+		{"models", `["some-model","other-model"]`},
+		{"auth_header", "authorization"},
+		{"timeout_sec", "120"},
+		{"extra_body", `{"temperature":0.2}`},
+		{"extra_headers", "X-Gateway=test"},
+		{"retry_codes", "400,403"},
+		{"aws_region", "us-west-2"},
+		{"aws_profile", "test-profile"},
+	}
+	want := ProviderEntry{
+		URL:          "https://example.invalid/v1",
+		Protocol:     llm.ProtocolAnthropicBedrock,
+		Model:        "some-model",
+		APIKey:       "test-key",
+		APIKeyCmd:    "secret-tool lookup service x",
+		Models:       []string{"some-model", "other-model"},
+		AuthHeader:   "authorization",
+		TimeoutSec:   120,
+		ExtraBody:    map[string]any{"temperature": 0.2},
+		ExtraHeaders: map[string]string{"X-Gateway": "test"},
+		RetryCodes:   []int{400, 403},
+		AWSRegion:    "us-west-2",
+		AWSProfile:   "test-profile",
+	}
+	for _, prefix := range []string{"providers", "custom_providers"} {
+		for _, name := range []string{"mimo-v2.6-flash", "openai.gateway.v2", "foo.api_key"} {
+			t.Run(prefix+"."+name, func(t *testing.T) {
+				cfg := &Config{}
+				if err := setConfigValue(cfg, "provider", name); err != nil {
+					t.Fatal(err)
+				}
+				for _, tt := range fields {
+					key := prefix + "." + name + "." + tt.field
+					if err := setConfigValue(cfg, key, tt.value); err != nil {
+						t.Fatalf("setConfigValue(%q): %v", key, err)
+					}
+				}
+				if !reflect.DeepEqual(cfg.CustomProviders, map[string]ProviderEntry{name: want}) {
+					t.Errorf("CustomProviders = %#v, want only %q with %#v", cfg.CustomProviders, name, want)
+				}
+				if len(cfg.Providers) != 0 || cfg.Provider != name {
+					t.Errorf("Providers = %#v, Provider = %q", cfg.Providers, cfg.Provider)
+				}
+			})
+		}
+	}
+}
+
+func TestSetConfigValueRejectsInvalidProviderNames(t *testing.T) {
+	for _, name := range []string{" ", ".a", "a.", "a..b", "a. .b", "anthropic."} {
+		for _, key := range []string{"provider", "providers." + name + ".url", "custom_providers." + name + ".url"} {
+			t.Run(key+"/"+name, func(t *testing.T) {
+				cfg := &Config{Provider: "openai", Model: "saved-model", CustomProviders: map[string]ProviderEntry{name: {}}}
+				before, err := json.Marshal(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				value := "https://example.invalid/v1"
+				if key == "provider" {
+					value = name
+				}
+				if err := setConfigValue(cfg, key, value); err == nil || !strings.Contains(err.Error(), "invalid provider name") {
+					t.Fatalf("setConfigValue(%q, %q) = %v, want invalid provider name", key, value, err)
+				}
+				after, err := json.Marshal(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(after) != string(before) {
+					t.Fatalf("configuration changed after rejected write: %s", after)
+				}
+			})
+		}
+	}
+}
+
+func TestSetConfigValueDottedProviderRequiresExistingEntry(t *testing.T) {
+	for _, prefix := range []string{"providers", "custom_providers"} {
+		for _, name := range []string{"mimo-v2.6-flash", "foo.api_key", "openai.extra_body"} {
+			key := prefix + "." + name + ".model"
+			t.Run(key, func(t *testing.T) {
+				cfg := &Config{Provider: "openai", Model: "saved-model"}
+				want := *cfg
+				err := setConfigValue(cfg, key, "some-model")
+				if err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "ocr config set provider "+name) {
+					t.Fatalf("setConfigValue(%q) = %v, want explicit creation guidance", key, err)
+				}
+				if !reflect.DeepEqual(*cfg, want) {
+					t.Fatalf("configuration changed after rejected write: %#v", cfg)
+				}
+				cfg.CustomProviders = map[string]ProviderEntry{name: {}}
+				if err := setConfigValue(cfg, key, "some-model"); err != nil {
+					t.Fatal(err)
+				}
+				if cfg.Provider != "openai" || cfg.CustomProviders[name].Model != "some-model" {
+					t.Fatalf("unexpected configuration: %#v", cfg)
+				}
+			})
+		}
+	}
+}
+
 func TestSetConfigValueProviderEntryModelsJSON(t *testing.T) {
 	cfg := &Config{}
 
@@ -362,10 +476,15 @@ func TestSetConfigValueProviderEntryInvalidKey(t *testing.T) {
 }
 
 func TestSetConfigValueProviderEntryInvalidPath(t *testing.T) {
-	cfg := &Config{}
-
-	if err := setConfigValue(cfg, "providers.anthropic", "value"); err == nil {
-		t.Fatal("expected error for incomplete provider path")
+	for _, prefix := range []string{"providers", "custom_providers"} {
+		for _, suffix := range []string{"", "anthropic", ".url", "anthropic.", "mimo-v2.6-flash."} {
+			key := prefix + "." + suffix
+			t.Run(key, func(t *testing.T) {
+				if err := setConfigValue(&Config{}, key, "value"); err == nil || !strings.Contains(err.Error(), "invalid") {
+					t.Fatalf("setConfigValue(%q) = %v, want invalid path error", key, err)
+				}
+			})
+		}
 	}
 }
 
@@ -466,6 +585,9 @@ func TestSetConfigValueProviderExtraHeadersInvalid(t *testing.T) {
 func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 	cfg := &Config{}
 
+	if err := setConfigValue(cfg, "custom_providers.my-gateway.protocol", llm.ProtocolAnthropicBedrock); err != nil {
+		t.Fatalf("setConfigValue protocol: %v", err)
+	}
 	if err := setConfigValue(cfg, "custom_providers.my-gateway.extra_headers", "X-Gateway=secret"); err != nil {
 		t.Fatalf("setConfigValue: %v", err)
 	}
@@ -476,6 +598,73 @@ func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 	}
 	if v := entry.ExtraHeaders["X-Gateway"]; v != "secret" {
 		t.Errorf("ExtraHeaders[\"X-Gateway\"] = %q, want %q", v, "secret")
+	}
+	if entry.URL != "" {
+		t.Errorf("URL = %q, want empty for a custom Bedrock provider", entry.URL)
+	}
+}
+
+func TestSetConfigValueCustomProviderAuxiliaryFieldRequiresExistingProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		key      string
+		value    string
+		coreKey  string
+	}{
+		{"extra_body", "nonexistent", "providers.nonexistent.extra_body", `{"temperature":0.2}`, "providers.nonexistent.protocol"},
+		{"extra_headers", "nonexistent", "providers.nonexistent.extra_headers", "X-Custom=value", "providers.nonexistent.protocol"},
+		{"retry_codes", "nonexistent", "providers.nonexistent.retry_codes", "400", "providers.nonexistent.protocol"},
+		{"timeout_sec", "brandnew", "providers.brandnew.timeout_sec", "900", "providers.brandnew.protocol"},
+		{"custom timeout_sec", "brandnew", "custom_providers.brandnew.timeout_sec", "900", "custom_providers.brandnew.protocol"},
+		{"custom provider namespace", "my-gateway", "custom_providers.my-gateway.extra_headers", "X-Custom=value", "custom_providers.my-gateway.protocol"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			err := setConfigValue(cfg, tt.key, tt.value)
+			if err == nil {
+				t.Fatalf("expected error for %s on a missing provider", tt.key)
+			}
+			want := "provider \"" + tt.provider + "\" is not configured; set a core field first (protocol is required for every custom provider):\n" +
+				"  ocr config set " + tt.coreKey + " <protocol>"
+			if err.Error() != want {
+				t.Errorf("error = %q, want %q", err, want)
+			}
+			if cfg.CustomProviders != nil {
+				t.Errorf("CustomProviders = %#v, want nil", cfg.CustomProviders)
+			}
+		})
+	}
+}
+
+func TestSetConfigValueCustomProviderRejectsPresetName(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value string
+	}{
+		{"openai", "url", "https://gateway.internal.com/v1"},
+		{"OpenAI", "extra_headers", "X-Custom=value"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+" "+tt.field, func(t *testing.T) {
+			cfg := &Config{}
+			err := setConfigValue(cfg, "custom_providers."+tt.name+"."+tt.field, tt.value)
+			if err == nil {
+				t.Fatalf("expected preset-name conflict for %s", tt.field)
+			}
+			want := "custom provider name \"" + tt.name + "\" conflicts with a preset provider; use providers.openai." + tt.field +
+				" to configure the preset or choose a different custom provider name"
+			if err.Error() != want {
+				t.Errorf("error = %q, want %q", err, want)
+			}
+			if cfg.CustomProviders != nil {
+				t.Errorf("CustomProviders = %#v, want nil", cfg.CustomProviders)
+			}
+		})
 	}
 }
 
@@ -760,6 +949,59 @@ func TestSetMCPServerValue_ExistingServer(t *testing.T) {
 	}
 	if cfg.MCPServers["srv"].Command != "new-cmd" {
 		t.Errorf("Command = %q, want %q", cfg.MCPServers["srv"].Command, "new-cmd")
+	}
+}
+
+func TestSetMCPServerValue_DottedServerName(t *testing.T) {
+	cfg := &Config{}
+	// The last dot separates the field, so a dotted server name is
+	// addressable the way dotted provider names are (#1661), and stays
+	// deletable through `config unset mcp_servers.<name>`.
+	if err := setMCPServerValue(cfg, "mcp_servers.github.v2.type", "stdio"); err != nil {
+		t.Fatalf("setMCPServerValue dotted name: %v", err)
+	}
+	if err := setMCPServerValue(cfg, "mcp_servers.github.v2.command", "npx"); err != nil {
+		t.Fatalf("setMCPServerValue dotted name field: %v", err)
+	}
+	entry, exists := cfg.MCPServers["github.v2"]
+	if !exists {
+		t.Fatalf("dotted server name not stored: %+v", cfg.MCPServers)
+	}
+	if entry.Type != "stdio" || entry.Command != "npx" {
+		t.Errorf("entry = %+v, want type stdio and command npx", entry)
+	}
+
+	// Dot-free names keep their previous meaning.
+	if err := setMCPServerValue(cfg, "mcp_servers.docs.command", "npx"); err != nil {
+		t.Fatalf("setMCPServerValue dot-free name: %v", err)
+	}
+	if _, exists := cfg.MCPServers["docs"]; !exists {
+		t.Fatalf("dot-free server name not stored: %+v", cfg.MCPServers)
+	}
+	if _, exists := cfg.MCPServers["github"]; exists {
+		t.Errorf("dotted name leaked a prefix entry: %+v", cfg.MCPServers)
+	}
+}
+
+func TestSetMCPServerValue_DottedServerNameRejectsEmptySegments(t *testing.T) {
+	cfg := &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"keep": {Command: "cmd"},
+		},
+	}
+	for _, key := range []string{
+		"mcp_servers..command",
+		"mcp_servers.github..command",
+		"mcp_servers. .command",
+		"mcp_servers.type",
+		"mcp_servers.docs.",
+	} {
+		if err := setMCPServerValue(cfg, key, "val"); err == nil {
+			t.Errorf("key %q: expected error", key)
+		}
+	}
+	if len(cfg.MCPServers) != 1 || cfg.MCPServers["keep"].Command != "cmd" {
+		t.Fatalf("rejected writes mutated config: %+v", cfg.MCPServers)
 	}
 }
 
@@ -1068,8 +1310,8 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
+		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.timeout_sec, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
 		"Protocol values: anthropic, anthropic-bedrock, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
@@ -1318,28 +1560,6 @@ func TestParseModelListValue(t *testing.T) {
 	}
 }
 
-func TestResolveConfigPath_Default(t *testing.T) {
-	t.Setenv("OCR_CONFIG_PATH", "")
-	p, err := resolveConfigPath()
-	if err != nil {
-		t.Fatalf("resolveConfigPath: %v", err)
-	}
-	if p == "" {
-		t.Fatal("expected non-empty default config path")
-	}
-}
-
-func TestResolveConfigPath_Env(t *testing.T) {
-	t.Setenv("OCR_CONFIG_PATH", "/tmp/test-config.json")
-	p, err := resolveConfigPath()
-	if err != nil {
-		t.Fatalf("resolveConfigPath: %v", err)
-	}
-	if p != "/tmp/test-config.json" {
-		t.Errorf("path = %q, want /tmp/test-config.json", p)
-	}
-}
-
 func TestLoadOrCreateConfig_NewFile(t *testing.T) {
 	cfg, err := loadOrCreateConfig(t.TempDir() + "/nonexistent.json")
 	if err != nil {
@@ -1464,6 +1684,80 @@ func TestConfigRoundTripPreservesTimeoutSec(t *testing.T) {
 	}
 }
 
+func TestConfigRoundTripPreservesUnknownFields(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	original := `{
+    "provider": "anthropic",
+    "future_top_level": {"enabled": true},
+    "providers": {
+        "anthropic": {
+            "model": "claude-opus-4-6",
+            "future_provider": {"value": "preserve-me"}
+        }
+    },
+    "llm": {
+        "model": "claude-opus-4-6",
+        "future_llm": 7
+    },
+    "telemetry": {
+        "enabled": true,
+        "future_telemetry": "keep-me"
+    },
+    "mcp_servers": {
+        "docs": {
+            "command": "docs-server",
+            "future_mcp": {"version": 2}
+        }
+    }
+}`
+	if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadOrCreateConfig: %v", err)
+	}
+	if err := setConfigValue(cfg, "language", "English"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse saved config: %v", err)
+	}
+	assertJSONValue(t, got, []string{"future_top_level", "enabled"}, true)
+	assertJSONValue(t, got, []string{"providers", "anthropic", "future_provider", "value"}, "preserve-me")
+	assertJSONValue(t, got, []string{"llm", "future_llm"}, float64(7))
+	assertJSONValue(t, got, []string{"telemetry", "future_telemetry"}, "keep-me")
+	assertJSONValue(t, got, []string{"mcp_servers", "docs", "future_mcp", "version"}, float64(2))
+}
+
+func assertJSONValue(t *testing.T, root map[string]any, path []string, want any) {
+	t.Helper()
+	var current any = root
+	for _, part := range path {
+		object, ok := current.(map[string]any)
+		if !ok {
+			t.Fatalf("JSON path %q entered %T at %q", strings.Join(path, "."), current, part)
+		}
+		current, ok = object[part]
+		if !ok {
+			t.Fatalf("JSON path %q is missing", strings.Join(path, "."))
+		}
+	}
+	if !reflect.DeepEqual(current, want) {
+		t.Errorf("JSON path %q = %#v, want %#v", strings.Join(path, "."), current, want)
+	}
+}
+
 func TestSetMCPServerValue_Type(t *testing.T) {
 	cfg := &Config{}
 	if err := setMCPServerValue(cfg, "mcp_servers.gh.type", "remote"); err != nil {
@@ -1571,7 +1865,7 @@ func TestSetConfigValueLlmRetryCodesRedundantWarning(t *testing.T) {
 }
 
 func TestSetConfigValueProviderRetryCodesRedundantWarning(t *testing.T) {
-	cfg := &Config{}
+	cfg := &Config{CustomProviders: map[string]ProviderEntry{"test": {URL: "https://example.com"}}}
 	stderr := captureConfigStderr(t, func() {
 		if err := setConfigValue(cfg, "custom_providers.test.retry_codes", "408,400"); err != nil {
 			t.Fatalf("setConfigValue: %v", err)
@@ -1598,5 +1892,29 @@ func TestSetConfigValueLlmRetryCodesNoWarningForValidCodes(t *testing.T) {
 	}
 	if len(cfg.Llm.RetryCodes) != 2 {
 		t.Errorf("RetryCodes = %v, want [403 400]", cfg.Llm.RetryCodes)
+	}
+}
+
+func TestSetConfigValueTimeoutSeconds(t *testing.T) {
+	cfg := &Config{CustomProviders: map[string]ProviderEntry{"gateway": {}}}
+	if err := setConfigValue(cfg, "llm.timeout_sec", "120"); err != nil {
+		t.Fatalf("setConfigValue() llm timeout error = %v", err)
+	}
+	if cfg.Llm.TimeoutSec != 120 {
+		t.Fatalf("llm.timeout_sec = %d, want 120", cfg.Llm.TimeoutSec)
+	}
+	if err := setConfigValue(cfg, "custom_providers.gateway.timeout_sec", "45"); err != nil {
+		t.Fatalf("setConfigValue() provider timeout error = %v", err)
+	}
+	if got := cfg.CustomProviders["gateway"].TimeoutSec; got != 45 {
+		t.Fatalf("provider timeout_sec = %d, want 45", got)
+	}
+}
+
+func TestSetConfigValueTimeoutSecondsRejectsInvalidValues(t *testing.T) {
+	for _, value := range []string{"not-a-number", "-1", "9223372037"} {
+		if err := setConfigValue(&Config{}, "llm.timeout_sec", value); err == nil {
+			t.Fatalf("setConfigValue() accepted timeout_sec=%q", value)
+		}
 	}
 }

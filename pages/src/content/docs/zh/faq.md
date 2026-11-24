@@ -84,17 +84,18 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 
 ### 我的文件没被评审
 
-运行 `ocr review --preview`（无 LLM 成本）。输出列出每个候选文件及其被保留或
-丢弃的**原因**：
+运行 `ocr review --preview`（无 LLM 成本）。输出会给出每个候选文件被保留或
+丢弃的**原因**。`vendor/`、`node_modules/` 等 provider 目录下的文件在终端里折叠为
+一行汇总；`ocr review --preview --format json` 仍会列出每一条：
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
+3 file(s) in provider directories (node_modules/) — not reviewable
 ```
 
-五种排除原因对应[文件过滤](../review-rules/#how-files-are-filtered)中的门：
+这些排除原因对应[文件过滤](../review-rules/#how-files-are-filtered)中的门：
 
 | 原因 | 修复 |
 |---|---|
@@ -102,7 +103,9 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | 从你的 `exclude` 列表移除该模式。 |
 | `unsupported_ext` | 把扩展名加入你的 `include` 列表以绕过白名单门。 |
 | `default_path` | 把文件加入 `include`——那会覆盖内置测试文件排除模式。 |
+| `provider_directory` | 无需操作——`vendor/`、`node_modules/` 等 provider 目录永远不可评审，即使被 `include` 匹配也是如此。 |
 | `deleted` | 无需处理——没有新内容可评审。 |
+| `too_large` | 仅 diff 本身就超过 `max_tokens` 的 80%。调高 `--max-tokens`（或已保存的 `max_tokens`），或把改动拆成更小的 commit。 |
 
 ### 我的自定义规则没触发
 
@@ -169,8 +172,8 @@ OCR 跳过该文件并继续——JSON 模式下你也会在 `warnings` 中看�
 先运行 `ocr review --preview`。plan 阶段在下面任一条件成立时运行：组内某个文件的
 `lines.changed` 达到 `PLAN_MODE_LINE_THRESHOLD`（默认 **50**），或该组含 2 个以上
 文件且合计变更行数达到 `PLAN_MODE_GROUP_LINE_THRESHOLD`（默认 **100**）。这是有意
-为之——大 diff 能从 plan 中受益。要为单次评审跳过它，用更小 diff 运行，或临时编辑内嵌模板
-（高级；需覆盖 `--tools`）。
+为之——大 diff 能从 plan 中受益。更小的 diff 可能低于这两个阈值。
+评审规划由内嵌模板控制，而不是工具覆盖参数；修改这一核心行为需要修改源码并重新构建。
 
 ### "Max tool requests reached"
 
@@ -184,17 +187,17 @@ OCR 跳过该文件并继续——JSON 模式下你也会在 `warnings` 中看�
 - 模型不擅长遵循“完成后调 `task_done`”指令。换更强模型（如 Claude Opus）。
 - 某工具持续报错而模型持续重试。看会话 JSONL——若同一工具结果重复，即是原因。
 - 文件确实大或上下文重，100 轮不够。用 `--max-tools <n>` 调高
-  （如 `--max-tools 150`）。`--max-tools` 只能**上调**：小于模板默认值
-  （`100`）的值不生效，1–49 还会先被上调到 `50`；`0`（默认）直接用模板默认
-  `100`。
+  （如 `--max-tools 150`）。解析后的正值会精确设置上限；1–49 会先被上调到
+  `50`，`0`（默认）直接使用模板默认值 `100`。
 - 模型完全不支持原生工具调用（本地模型常见）——见
   ["No tool calls parsed"（本地模型 / Ollama）](#no-tool-calls-parsed-本地模型-ollama)。
 
-### 一些子 agent 失败；运行仍以 0 退出
+### 一些子 agent 失败；为什么运行以非零码退出？
 
-有意为之。OCR 隔离 per-file 失败，使一个有问题的文件不会拖垮 20 文件的评审。只要*有*
-成功的，聚合退出码就是 `0`；仅当完全失败（零成功子 agent）才非零退出。查看 JSON
-模式的 `warnings` 数组或文本模式的 stderr，看哪些文件失败了。
+OCR 会隔离 per-group 失败，并继续发布已完成分组的发现。但 timeout、provider 错误、
+配置错误等操作性失败仍会使命令以非零码退出，即使其他分组已成功，这样 CI 才能发现
+覆盖不完整。仅由已配置预算限制导致的部分评审仍为成功退出。可在 JSON 模式下查看
+`manifest.coverage.failed` 和 `warnings`，或查看文本摘要，以了解哪些分组失败以及能否恢复。
 
 ### CI 运行比本地慢得多
 
@@ -215,8 +218,33 @@ agent` 保证的干净 stdout 是*对解析器友好的*——要屏蔽一切，
 
 ### JSON 输出是 `{ "files_reviewed": 0, "comments": [] }`
 
-工作区没有合格文件。这是有意为之——显式形状让调用方区分“无可评审内容”与“已评审
-文件中无发现”。零评论的正常评审产出的是普通空数组 `[]`。
+没有合格文件可评审。`files_reviewed` 不是顶层字段——它在 `summary` 下面，此路径下读作
+`0`；`comments` 才是顶层的 `[]`。同一个对象还带 `"status": "skipped"`、
+`"message": "Review skipped: no items were selected."`，以及一个 `terminal_state`
+为 `"skipped"`、`coverage.selected` 为空的 `manifest`。筛选阶段排除的文件会列在
+`coverage.excluded` 中，每项都有对应的 `exclude_reason`。
+
+评审过文件但无发现的正常评审同样返回**带 `comments: []` 的 JSON 对象**：
+`summary.files_reviewed` 是实际评审的文件数，`status` 为 `"complete"`，`message` 读作
+`"Review complete: 0 finding(s) across N selected item(s)."`。不同运行的可选顶层字段
+可能不同，因此不要依赖对象形状或某个可选 key 的存在来区分；对于带 manifest 的 review 输出，
+应使用 `summary.files_reviewed` 或 `manifest.terminal_state`。调用方同时必须允许下述
+manifest-less 路径里 `summary` 和 `manifest` 都不存在。`review --format json` 永远向
+stdout 写出恰好一个 JSON 对象，绝不会是裸数组。
+
+`terminal_state: "complete"` 表示已完成选中集合的评审，并不意味着每个变更文件都经过了
+评审。筛选阶段排除的文件（扩展名不受支持、路径规则、内置敏感路径、二进制文件、已删除
+文件，或超过单文件大小限制）会记录在 `manifest.coverage.excluded` 中，其
+`exclude_reason` 与 `--preview` 报告的一致，且不会使运行变成 `partial`。该列表仅覆盖
+进入筛选阶段的文件，不包含 diff provider 更早丢弃的文件：始终跳过的目录（如 `vendor/`
+或 `node_modules/`）下的变更、被 `.gitignore` 忽略的未跟踪文件，以及评审单个 commit
+或 commit 范围时任何匹配 `.gitignore` 的变更。
+
+manifest-less 的 no-files 路径更精简：它同时省略 `summary` 和 `manifest`，但仍会报告
+`"status": "skipped"`、`"message": "No supported files changed."` 以及
+`"comments": []`，并且 `tool_calls` 始终存在。`ocr scan` 总是 manifest-less；当它满足
+no-files 条件时会走这一路径。`ocr review` 在 manifest 构造失败且满足 no-files 条件时
+也可能进入同一路径。`llm`、`trace_id` 等可选元数据可能出现。
 
 ### 会话 JSONL 在哪？
 
@@ -240,7 +268,7 @@ ocr config set telemetry.exporter console
 ocr review
 ```
 
-LLM 调用没有自己的 span——它们记为 metric。关注 `ocr.llm.tokens_used`
+主评审循环中的 LLM 调用会产生 `llm.request` span，同时记录为 metric。关注 `ocr.llm.tokens_used`
 （counter，标 `model` + `type`）、`ocr.llm.requests_total`（counter，标 `model`
 + `status`）、`ocr.llm.request_duration_seconds`（histogram，标 `model`）。
 console exporter 会内联打印这些聚合。如需仪表盘，切换到 OTLP exporter 并发到你的
@@ -250,8 +278,11 @@ metrics 体系——见[遥测](../telemetry/)。
 
 常见因素：
 
-- 文件 ≥ 50 行（或多文件组合计 ≥ 100 行）时 plan 阶段开启。它每组多一次 LLM 调用。
-  降低阈值可减少成本；升高阈值可提升小 PR 的速度。
+- 文件 ≥ 50 行（或多文件组合计 ≥ 100 行）时 plan 阶段开启。它每组多一次 LLM 调用，
+  所以**调高**这些阈值才省钱；调低会让更多组进入规划、反而更贵。两个阈值在 `0` 上
+  行为不同：`PLAN_MODE_LINE_THRESHOLD` 为 `0` 或负数意味着*恒定规划*，是最贵的设置；
+  而 `PLAN_MODE_GROUP_LINE_THRESHOLD` 为 `0` 会关掉分组闸门。只有当该闸门原本会是
+  唯一触发条件时，这才会省下一次 plan 调用。触发条件见上文“plan 阶段花了很久而文件很小”。
 - main 循环默认跑 2 轮（`medium` 档）。用 `--effort low` 只跑 1 轮可近似减半评审
   成本；`--effort high`（3 轮）召回更高但更贵。
 - `MAX_TOOL_REQUEST_TIMES = 100` 很宽松。用满轮数的模型会产出比 3 轮就完成的模型
@@ -303,7 +334,7 @@ issue 已在[此](https://github.com/alibaba/open-code-review/issues)开放。
 
 ### 为什么二进制叫 `opencodereview` 而 CLI 是 `ocr`？
 
-release 中发布的静态二进制以项目命名（`opencodereview`）；NPM wrapper 为了便于使用而安装为 `ocr`。从源码构建得到 `dist/opencodereview`——复制为 `$PATH` 上的
+release 中发布的静态二进制以项目命名（`opencodereview`）；NPM wrapper 为了便于使用而安装为 `ocr`。从源码构建得到 `dist/opencodereview`（Windows 上是 `dist/opencodereview.exe`）——复制为 `$PATH` 上的
 `ocr`。
 
 ### 如何卸载？

@@ -10,16 +10,19 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
@@ -27,6 +30,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 	tiktoken "github.com/pkoukk/tiktoken-go"
 )
@@ -41,6 +45,41 @@ var AppVersion = "dev"
 // solely on the AWS SDK's own defaults. Package var, not const, so tests can
 // shrink it, same as keyCmdTimeout.
 var bedrockConfigLoadTimeout = 60 * time.Second
+
+// responseHeaderTimeoutMargin is added to the request timeout when setting
+// ResponseHeaderTimeout so the per-request context deadline (WithRequestTimeout),
+// which is 30s earlier, is the one to fire first. An equal ResponseHeaderTimeout
+// would race the context deadline, and a header-timeout win surfaces as a
+// nil-response transport error that shouldRetry treats as retryable, so the
+// request would be retried up to 5 more times (each with a fresh full timeout)
+// instead of failing on ctx.Err(). The margin still replaces the SDK's hardcoded
+// 10-minute default.
+const responseHeaderTimeoutMargin = 30 * time.Second
+
+// httpClientWithHeaderTimeout returns an HTTP client whose ResponseHeaderTimeout is
+// the request timeout plus responseHeaderTimeoutMargin, overriding the openai-go and
+// anthropic-sdk-go hardcoded 10-minute default (which each applies unless a client is
+// supplied via WithHTTPClient) so a configured timeout_sec is honored on a slow
+// endpoint (#1161). Shared by the OpenAI, OpenAI Responses and Anthropic constructors.
+// A timeout of zero or less leaves ResponseHeaderTimeout unset (no cap), matching the
+// SDKs' "no timeout" semantics; the callers clamp to a positive value first, so this
+// only guards a direct call. Package var, not func, so a test can assert each
+// constructor installs it, same as bedrockConfigLoadTimeout.
+var httpClientWithHeaderTimeout = func(timeout time.Duration) *http.Client {
+	t, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{Transport: http.DefaultTransport}
+	}
+	t = t.Clone()
+	if timeout > 0 {
+		t.ResponseHeaderTimeout = timeout + responseHeaderTimeoutMargin
+	}
+	return &http.Client{Transport: t}
+}
+
+// defaultAnthropicMaxTokens is used when ChatRequest.MaxTokens is unset.
+// The thinking guard also compares against this to decide whether to drop thinking.
+const defaultAnthropicMaxTokens = 8192
 
 func userAgent(provider string) string {
 	ua := "open-code-review/" + AppVersion
@@ -66,6 +105,110 @@ type Message struct {
 	Content    any        `json:"content"`                // string or []ContentBlock
 	ToolCallID string     `json:"tool_call_id,omitempty"` // OpenAI tool call identifier
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // assistant tool invocations
+	// Native is the opaque per-provider replay state for this assistant turn.
+	// Only the adapter that produced it (matched by type assertion) may reuse
+	// it; others fall back to Content/ToolCalls. json:"-" because Payload is
+	// an SDK struct unsuitable for incidental marshaling; internal/session
+	// persists it deliberately via ChatResponse.Native().
+	Native NativeTurn `json:"-"`
+	// ReasoningContent is a readable projection of reasoning for display-only
+	// consumers (e.g. compression's summarization prompt). Excluded from
+	// ExtractText() and request builders to avoid duplicating what Native
+	// already carries.
+	ReasoningContent string `json:"-"`
+}
+
+// NativeTurn is the opaque replay state for one assistant turn. Payloads are
+// provider-validated (Anthropic signature, OpenAI encrypted_content) and must
+// never be parsed or reordered outside their originating adapter.
+type NativeTurn struct {
+	// Family: "anthropic-messages", "openai-chat-completions", or "openai-responses".
+	// For observability only; safety comes from the Go type assertion on Payload.
+	Family string
+	// Payload: anthropic.MessageParam, []responses.ResponseInputItemUnionParam,
+	// or ReasoningPayload. nil means nothing to preserve beyond Content/ToolCalls.
+	Payload any
+}
+
+// ReasoningPayload is the openai-chat-completions NativeTurn payload.
+// Named type so a type assertion can't accidentally match an unrelated string.
+type ReasoningPayload string
+
+// EstimatedTokens returns a rough token estimate for the portion of Payload
+// not already counted by ExtractText() (thinking blocks, reasoning items,
+// tool-call arguments). Uses marshaled bytes/4 as the heuristic.
+func (n NativeTurn) EstimatedTokens() int {
+	switch p := n.Payload.(type) {
+	case ReasoningPayload:
+		return marshaledLen(p)
+	case anthropic.MessageParam:
+		var total int
+		for _, block := range p.Content {
+			switch {
+			case block.OfThinking != nil:
+				total += marshaledLen(block.OfThinking)
+			case block.OfRedactedThinking != nil:
+				total += marshaledLen(block.OfRedactedThinking)
+			case block.OfToolUse != nil:
+				total += marshaledLen(block.OfToolUse)
+			}
+		}
+		return total
+	case []responses.ResponseInputItemUnionParam:
+		var total int
+		for _, item := range p {
+			switch {
+			case item.OfReasoning != nil:
+				total += marshaledLen(item.OfReasoning)
+			case item.OfFunctionCall != nil:
+				total += marshaledLen(item.OfFunctionCall)
+			}
+		}
+		return total
+	default:
+		return 0
+	}
+}
+
+// countsToolCalls reports whether the NativeTurn payload already accounts for
+// tool invocations (such as Anthropic MessageParam content blocks or Responses
+// API function call items), avoiding double-counting with Message.ToolCalls.
+// It follows the same fallback conditions as buildAnthropicParams and
+// buildResponsesParams, falling back to Message.ToolCalls when the native
+// content or item slice is structurally empty.
+func (n NativeTurn) countsToolCalls() bool {
+	switch p := n.Payload.(type) {
+	case anthropic.MessageParam:
+		return len(p.Content) > 0
+	case []responses.ResponseInputItemUnionParam:
+		return len(p) > 0
+	default:
+		return false
+	}
+}
+
+// EstimatedTokens returns a rough token estimate for the portion of Message
+// not already counted by ExtractText() (thinking blocks, reasoning items,
+// and tool-call arguments/names). Uses bytes/4 as the heuristic.
+func (m Message) EstimatedTokens() int {
+	total := m.Native.EstimatedTokens()
+	if !m.Native.countsToolCalls() {
+		for _, tc := range m.ToolCalls {
+			total += tc.EstimatedTokens()
+		}
+	}
+	return total
+}
+
+func marshaledLen(v any) int {
+	if v == nil {
+		return 0
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return 0
+	}
+	return len(b) / 4
 }
 
 // ContentBlock represents a single block within a multi-part message content.
@@ -82,14 +225,15 @@ func NewTextMessage(role, content string) Message {
 	return Message{Role: role, Content: content}
 }
 
-// NewToolCallMessage creates an assistant message with text content and tool invocations.
-func NewToolCallMessage(content string, toolCalls []ToolCall) Message {
+// NewToolCallMessage creates an assistant history message. Use this instead of
+// NewTextMessage("assistant", ...) to preserve native replay state and reasoning.
+func NewToolCallMessage(content string, toolCalls []ToolCall, native NativeTurn, reasoningContent string) Message {
 	var tc []ToolCall
 	if len(toolCalls) > 0 {
 		tc = make([]ToolCall, len(toolCalls))
 		copy(tc, toolCalls)
 	}
-	return Message{Role: "assistant", Content: content, ToolCalls: tc}
+	return Message{Role: "assistant", Content: content, ToolCalls: tc, Native: native, ReasoningContent: reasoningContent}
 }
 
 // NewToolResultMessage creates a tool-role message with the given result.
@@ -141,6 +285,11 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+	// ExtraContent is opaque provider metadata this tool call must carry back
+	// unchanged on the next turn — Gemini 3 sends a thought signature here
+	// (#1357). Replayed verbatim, never parsed. json:"-" for the reason Native
+	// gives; internal/session persists it deliberately.
+	ExtraContent json.RawMessage `json:"-"`
 }
 
 // FunctionCall holds the name and arguments of a tool call.
@@ -149,20 +298,49 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"` // JSON-encoded string
 }
 
+// EstimatedTokens returns a rough token estimate for the tool call (function
+// name, arguments, ID framing, and opaque provider metadata) using the
+// bytes/4 heuristic.
+func (tc ToolCall) EstimatedTokens() int {
+	b := len(tc.ID) + len(tc.Function.Name) + len(tc.Function.Arguments) + len(tc.ExtraContent)
+	if b == 0 {
+		return 0
+	}
+	t := b / 4
+	if t == 0 {
+		return 1
+	}
+	return t
+}
+
 // ResponseMessage extends Message with optional reasoning content.
 type ResponseMessage struct {
 	Role             string     `json:"role"`
 	Content          *string    `json:"content,omitempty"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	// json:"-" prevents incidental marshal; internal/session persists it explicitly.
+	Native NativeTurn `json:"-"`
 }
 
 // ChatResponse is the parsed result of a completion request.
 type ChatResponse struct {
-	ID      string     `json:"-"`
-	Model   string     `json:"-"`
-	Choices []Choice   `json:"-"`
-	Usage   *UsageInfo `json:"-"` // Token usage extracted from API response
+	ID            string          `json:"-"`
+	Model         string          `json:"-"`
+	Choices       []Choice        `json:"-"`
+	Usage         *UsageInfo      `json:"-"` // Token usage extracted from API response
+	RawUsage      json.RawMessage `json:"-"`
+	rawOutputText string
+}
+
+func (r *ChatResponse) RawOutputText() string {
+	if r.rawOutputText != "" {
+		return r.rawOutputText
+	}
+	if len(r.Choices) == 0 || r.Choices[0].Message.Content == nil {
+		return ""
+	}
+	return *r.Choices[0].Message.Content
 }
 
 // Content extracts the text content from the first choice, falling back to reasoning content.
@@ -176,6 +354,20 @@ func (r *ChatResponse) Content() string {
 		return strings.TrimSpace(cleaned)
 	}
 	return msg.ReasoningContent
+}
+
+// VisibleContent extracts visible text only, never falling back to
+// ReasoningContent. History builders must use this to avoid duplicating
+// reasoning that Native already carries.
+func (r *ChatResponse) VisibleContent() string {
+	if len(r.Choices) == 0 {
+		return ""
+	}
+	msg := r.Choices[0].Message
+	if msg.Content == nil || *msg.Content == "" {
+		return ""
+	}
+	return strings.TrimSpace(stripThinkTags(*msg.Content))
 }
 
 // ToolCalls extracts tool calls from the first choice.
@@ -194,6 +386,14 @@ func (r *ChatResponse) ReasoningContent() string {
 	return r.Choices[0].Message.ReasoningContent
 }
 
+// Native extracts the replay state of the first choice, if any.
+func (r *ChatResponse) Native() NativeTurn {
+	if len(r.Choices) == 0 {
+		return NativeTurn{}
+	}
+	return r.Choices[0].Message.Native
+}
+
 // ToolDef defines a tool/function available to the model.
 type ToolDef struct {
 	Type     string      `json:"type"`
@@ -210,14 +410,18 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL          string            // Full API endpoint URL
-	APIKey       string            // Bearer token / API key
-	Model        string            // Default model override
-	AuthHeader   string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
-	Timeout      time.Duration     // Request timeout
-	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
-	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
-	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	URL                   string            // Full API endpoint URL
+	APIKey                string            // Bearer token / API key
+	Model                 string            // Default model override
+	AuthHeader            string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
+	Timeout               time.Duration     // Request timeout
+	ExtraBody             map[string]any    // Vendor-specific fields merged into every request body
+	ExtraHeaders          map[string]string // Extra HTTP headers sent with every request
+	RetryCodes            []int             // Additional HTTP status codes that trigger retry
+	RequiresStreaming     bool
+	RejectsSamplingParams bool
+	ChatGPTPlan           bool
+	ChatGPTAccount        string
 	// SessionKey is the fallback prompt-cache affinity key
 	// for requests whose context carries none (see ContextWithSessionKey).
 	//
@@ -236,6 +440,12 @@ type ClientConfig struct {
 	// the request path changes. That is the state for llm test, and for any
 	// caller that builds a client without one.
 	retryCollector *RetryCollector
+
+	// rawHolder is the opt-in raw LLM capture sink (see raw.go).
+	// Unexported for the same reason as retryCollector: it is a handle on the
+	// current run, set only by NewLLMClient. A nil holder means capture is off
+	// and no raw middleware is mounted.
+	rawHolder *RawHolder
 
 	// AWSProfile and AWSRegion are used only by SigV4 providers (bedrock).
 	// Empty means the standard AWS credential chain decides.
@@ -281,21 +491,28 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // protocol).
 //
 // collector observes every HTTP attempt the returned client makes; pass nil to
-// build a client that is not observed. It is a parameter rather than a field on
-// ResolvedEndpoint because it belongs to the run, not to the endpoint.
-func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
+// build a client that is not observed. raw, when non-nil, mounts the raw
+// capture middleware (see raw.go) so every HTTP attempt is also recorded
+// verbatim. Both belong to the run, not to the endpoint, which is why they are
+// parameters rather than fields on ResolvedEndpoint.
+func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder) LLMClient {
 	cfg := ClientConfig{
-		URL:            ep.URL,
-		APIKey:         ep.Token,
-		Model:          ep.Model,
-		AuthHeader:     ep.AuthHeader,
-		Timeout:        ep.Timeout,
-		ExtraBody:      ep.ExtraBody,
-		ExtraHeaders:   ep.ExtraHeaders,
-		RetryCodes:     ep.RetryCodes,
-		retryCollector: collector,
-		AWSProfile:     ep.AWSProfile,
-		AWSRegion:      ep.AWSRegion,
+		URL:                   ep.URL,
+		APIKey:                ep.Token,
+		Model:                 ep.Model,
+		AuthHeader:            ep.AuthHeader,
+		Timeout:               ep.Timeout,
+		ExtraBody:             ep.ExtraBody,
+		ExtraHeaders:          ep.ExtraHeaders,
+		RetryCodes:            ep.RetryCodes,
+		RequiresStreaming:     ep.RequiresStreaming,
+		RejectsSamplingParams: ep.RejectsSamplingParams,
+		ChatGPTPlan:           ep.ChatGPTPlan,
+		ChatGPTAccount:        ep.ChatGPTAccount,
+		retryCollector:        collector,
+		rawHolder:             raw,
+		AWSProfile:            ep.AWSProfile,
+		AWSRegion:             ep.AWSRegion,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -406,9 +623,16 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithMaxRetries(5),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
+		openaiopt.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
+	// Raw must register before the retry observer: the SDK wraps middlewares
+	// last-in-innermost, and raw's full-body read plus disk write would
+	// otherwise inflate the observer's DurationToHeadersMS.
+	if cfg.rawHolder != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
@@ -446,6 +670,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
+		err = describeTimeout(ctx, err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 
@@ -466,18 +691,44 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// Skip the "stream" key here. The streaming decision below uses a
-		// dedicated boolean check, and when streaming is enabled the SDK's
-		// NewStreaming method sets stream=true on the wire itself. When
-		// streaming is NOT enabled, leaving the key in the body would make
-		// the API answer with text/event-stream and the non-streaming path
-		// fails to decode (see issue #647).
+		// Only boolean true enables the streaming branch below; NewStreaming
+		// sets stream=true itself. Drop non-boolean values so they cannot
+		// request SSE while the non-streaming SDK expects JSON. Forward
+		// explicit false so gateways that default to streaming return JSON.
+		// stream_options belongs to the streaming branch because providers
+		// reject it unless stream is true.
 		if k == "stream" {
+			stream, isBool := v.(bool)
+			if !isBool || stream {
+				continue
+			}
+		} else if k == "stream_options" {
 			continue
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
+		if streamOptions, ok := c.cfg.ExtraBody["stream_options"]; !ok {
+			// OpenAI-compatible servers omit token usage from streams unless
+			// asked, silently losing cost accounting for streamed requests.
+			// Ask for the final usage chunk by default.
+			params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
+		} else if streamOptions != nil {
+			// An explicit stream_options in extra_body replaces the default,
+			// but usage stays requested unless include_usage itself is spelled
+			// out: configuring an unrelated stream option must not silently
+			// disable cost accounting. An explicit null suppresses the field
+			// entirely, for gateways that reject stream_options.
+			if object, ok := streamOptions.(map[string]any); ok {
+				if _, has := object["include_usage"]; !has {
+					merged := make(map[string]any, len(object)+1)
+					maps.Copy(merged, object)
+					merged["include_usage"] = true
+					streamOptions = merged
+				}
+			}
+			opts = append(opts, openaiopt.WithJSONSet("stream_options", streamOptions))
+		}
 		return c.completionsStreaming(ctx, params, opts...)
 	}
 
@@ -512,7 +763,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, withProviderErrorBody(err)
 	}
 
 	return c.mapOpenAIResponse(sdkResp), nil
@@ -546,6 +797,7 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 
 	accumulator := openai.ChatCompletionAccumulator{}
 	reasoningByChoice := make(map[int64]*strings.Builder)
+	extraContentByChoice := make(map[int64]map[int64]json.RawMessage)
 	seenChoices := make(map[int64]bool)
 	finishedChoices := make(map[int64]bool)
 	var choiceOrder []int64
@@ -564,6 +816,26 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 			}
 			if choice.FinishReason != "" {
 				finishedChoices[choice.Index] = true
+			}
+
+			// extra_content rides on the tool-call delta and the accumulator
+			// drops unmodeled fields, so capture it here — before the
+			// reasoning_content lookup returns early (#1357).
+			for _, toolDelta := range choice.Delta.ToolCalls {
+				ec, ok := toolDelta.JSON.ExtraFields["extra_content"]
+				if !ok {
+					continue
+				}
+				value := normalizeExtraContent(json.RawMessage(ec.Raw()))
+				if value == nil {
+					continue
+				}
+				byTool := extraContentByChoice[choice.Index]
+				if byTool == nil {
+					byTool = make(map[int64]json.RawMessage)
+					extraContentByChoice[choice.Index] = byTool
+				}
+				byTool[clampToZero(toolDelta.Index)] = value
 			}
 
 			extra, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
@@ -587,7 +859,7 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return nil, err
+		return nil, withProviderErrorBody(err)
 	}
 	if len(choiceOrder) == 0 {
 		return nil, &streamIntegrityError{reason: "contained no choices"}
@@ -603,9 +875,20 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		resp.Usage = usage
 	}
 	for i := range resp.Choices {
+		// The accumulator expands to fit the same clamped index, so a tool call's
+		// slice position is the key captured above.
+		byTool := extraContentByChoice[accumulator.Choices[i].Index]
+		for j := range resp.Choices[i].Message.ToolCalls {
+			if ec, ok := byTool[int64(j)]; ok {
+				resp.Choices[i].Message.ToolCalls[j].ExtraContent = ec
+			}
+		}
+
 		builder := reasoningByChoice[accumulator.Choices[i].Index]
-		if builder != nil {
-			resp.Choices[i].Message.ReasoningContent = builder.String()
+		if builder != nil && builder.Len() > 0 {
+			reasoningContent := builder.String()
+			resp.Choices[i].Message.ReasoningContent = reasoningContent
+			resp.Choices[i].Message.Native = NativeTurn{Family: "openai-chat-completions", Payload: ReasoningPayload(reasoningContent)}
 		}
 	}
 
@@ -627,26 +910,29 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 		case "tool":
 			messages = append(messages, openai.ToolMessage(content, msg.ToolCallID))
 		case "assistant":
-			if len(msg.ToolCalls) == 0 {
-				messages = append(messages, openai.AssistantMessage(content))
-			} else {
-				asst := openai.ChatCompletionAssistantMessageParam{}
-				if content != "" {
-					asst.Content.OfString = openai.String(content)
-				}
-				for _, tc := range msg.ToolCalls {
-					asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-							ID: tc.ID,
-							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-								Name:      tc.Function.Name,
-								Arguments: tc.Function.Arguments,
-							},
-						},
-					})
-				}
-				messages = append(messages, openai.ChatCompletionMessageParamUnion{OfAssistant: &asst})
+			asst := openai.ChatCompletionAssistantMessageParam{}
+			if content != "" || len(msg.ToolCalls) == 0 {
+				asst.Content.OfString = openai.String(content)
 			}
+			for _, tc := range msg.ToolCalls {
+				fn := &openai.ChatCompletionMessageFunctionToolCallParam{
+					ID: tc.ID,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
+					},
+				}
+				// extra_content: provider metadata required back verbatim (#1357).
+				if len(tc.ExtraContent) > 0 {
+					fn.SetExtraFields(map[string]any{"extra_content": tc.ExtraContent})
+				}
+				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{OfFunction: fn})
+			}
+			// reasoning_content: gateway extension not modeled by the SDK (#805).
+			if reasoning, ok := msg.Native.Payload.(ReasoningPayload); ok && reasoning != "" {
+				asst.SetExtraFields(map[string]any{"reasoning_content": string(reasoning)})
+			}
+			messages = append(messages, openai.ChatCompletionMessageParamUnion{OfAssistant: &asst})
 		default:
 			messages = append(messages, openai.UserMessage(content))
 		}
@@ -657,12 +943,12 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 		tools = append(tools, openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
 			Name:        t.Function.Name,
 			Description: openai.String(t.Function.Description),
-			Parameters:  shared.FunctionParameters(t.Function.Parameters),
+			Parameters:  t.Function.Parameters,
 		}))
 	}
 
 	params := openai.ChatCompletionNewParams{
-		Model:    shared.ChatModel(model),
+		Model:    model,
 		Messages: messages,
 	}
 
@@ -682,6 +968,125 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 	}
 
 	return params
+}
+
+// maxErrorBodyBytes bounds the provider payload quoted in an error message.
+const maxErrorBodyBytes = 64 << 10
+
+func ProviderHTTPStatus(err error) int {
+	var openAI *openai.Error
+	if errors.As(err, &openAI) {
+		return openAI.StatusCode
+	}
+	var anthropicErr *anthropic.Error
+	if errors.As(err, &anthropicErr) {
+		return anthropicErr.StatusCode
+	}
+	var httpErr interface{ HTTPStatusCode() int }
+	if errors.As(err, &httpErr) {
+		return httpErr.HTTPStatusCode()
+	}
+	return 0
+}
+
+// withProviderErrorBody appends the provider's response body to an API error the
+// SDK left without one. It extracts the payload with the gjson path "error",
+// which misses when a provider array-wraps its error document (#1042). The
+// response body is restored so later consumers still see it whole; only the
+// diagnostic text is bounded.
+func withProviderErrorBody(err error) error {
+	// Enriching restores the body it reads, so without this a second pass would
+	// find it readable and append the payload again.
+	var done *enrichedError
+	if errors.As(err, &done) {
+		return err
+	}
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) || apiErr.Response == nil || apiErr.Response.Body == nil {
+		return err
+	}
+	// "null" is what gjson reports for an "error" key holding null: a payload in
+	// name only, so the body is still the useful thing.
+	if raw := strings.TrimSpace(apiErr.RawJSON()); raw != "" && raw != "null" {
+		return err
+	}
+	// The SDK buffers every non-2xx body and bails before building the error if
+	// that read fails, so what arrives here is an in-memory reader that cannot
+	// fail. A short read would still leave its bytes the most useful thing to
+	// hand back: an error-replaying reader would only blind DumpResponse.
+	body, readErr := io.ReadAll(apiErr.Response.Body)
+	_ = apiErr.Response.Body.Close()
+	apiErr.Response.Body = io.NopCloser(bytes.NewReader(body))
+	if readErr != nil || len(bytes.TrimSpace(body)) == 0 {
+		return err
+	}
+	return &enrichedError{err: err, body: limitErrorBodyForLog(body)}
+}
+
+// enrichedError carries an API error together with the provider payload the SDK
+// could not extract, and marks it as already enriched.
+type enrichedError struct {
+	err  error
+	body string
+}
+
+func (e *enrichedError) Error() string { return e.err.Error() + ": " + e.body }
+func (e *enrichedError) Unwrap() error { return e.err }
+
+// limitErrorBodyForLog bounds the payload included in terminal and session logs
+// without truncating the response the SDK parsed. Control bytes are dropped so a
+// body cannot rewrite the terminal; newlines and tabs stay for readability.
+func limitErrorBodyForLog(raw []byte) string {
+	raw = bytes.TrimSpace(raw)
+	var suffix string
+	if len(raw) > maxErrorBodyBytes {
+		// Cut the bytes before building the string so an oversized body is never
+		// copied whole just to be discarded.
+		raw = raw[:maxErrorBodyBytes]
+		suffix = "... (truncated)"
+	}
+	trimmed := strings.ToValidUTF8(string(raw), "")
+	return strings.Map(func(r rune) rune {
+		// unicode.IsControl covers C1 (U+0080-U+009F) as well as C0, so a body
+		// cannot reach the terminal through the bare CSI or DCS forms either.
+		if r == '\n' || r == '\t' || !unicode.IsControl(r) {
+			return r
+		}
+		return -1
+	}, trimmed) + suffix
+}
+
+// clampToZero matches the SDK accumulator's handling of the negative tool-call
+// delta index some gateways send for a single call.
+func clampToZero(i int64) int64 {
+	if i < 0 {
+		return 0
+	}
+	return i
+}
+
+// toolCallExtraContent reads extra_content from a tool call's raw response
+// JSON. The SDK's tool-call union has no ExtraFields map, so the raw payload is
+// the only place the field survives.
+func toolCallExtraContent(raw string) json.RawMessage {
+	if raw == "" {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil
+	}
+	return normalizeExtraContent(fields["extra_content"])
+}
+
+// normalizeExtraContent drops absent, empty and null values so that a provider
+// sending "extra_content": null produces the same wire format as one omitting it.
+func normalizeExtraContent(ec json.RawMessage) json.RawMessage {
+	trimmed := bytes.TrimSpace(ec)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	return trimmed
 }
 
 // mapOpenAIResponse converts the SDK response into ChatResponse.
@@ -711,6 +1116,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
 				},
+				ExtraContent: toolCallExtraContent(tc.RawJSON()),
 			})
 		}
 
@@ -721,10 +1127,16 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 		}
 
 		var reasoningContent string
-		if extra, ok := ch.Message.JSON.ExtraFields["reasoning_content"]; ok && extra.Valid() {
+		// Presence (ok) is the only signal; Valid() is always false for extra fields.
+		if extra, ok := ch.Message.JSON.ExtraFields["reasoning_content"]; ok {
 			if err := json.Unmarshal([]byte(extra.Raw()), &reasoningContent); err != nil {
 				reasoningContent = extra.Raw()
 			}
+		}
+
+		var native NativeTurn
+		if reasoningContent != "" {
+			native = NativeTurn{Family: "openai-chat-completions", Payload: ReasoningPayload(reasoningContent)}
 		}
 
 		choices = append(choices, Choice{
@@ -733,6 +1145,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 				Content:          contentPtr,
 				ReasoningContent: reasoningContent,
 				ToolCalls:        toolCalls,
+				Native:           native,
 			},
 			FinishReason: ch.FinishReason,
 		})
@@ -800,6 +1213,11 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
+		// anthropic-sdk-go's default client hardcodes the same 10-minute
+		// ResponseHeaderTimeout as openai-go, applied because this path does not
+		// pass WithoutEnvironmentDefaults, so a long timeout_sec is capped at 10
+		// minutes on a slow endpoint without this (#1161).
+		option.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 
 	switch authHeader {
@@ -817,6 +1235,10 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
+	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
+	if cfg.rawHolder != nil {
+		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
@@ -856,6 +1278,10 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
+		// No httpClientWithHeaderTimeout here (unlike NewAnthropicClient): bedrock.WithConfig
+		// is an option.Join carrying WithoutEnvironmentDefaults, so NewClient skips
+		// DefaultClientOptions and never installs the SDK's 10-minute-header-timeout
+		// default client. Adding one would impose a new cap, not remove one.
 		// Bedrock authenticates by SigV4 signature, added by the middleware
 		// below at transport time. Any API-key header the SDK would otherwise
 		// attach — including an empty one — is rejected outright with
@@ -868,6 +1294,10 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	// session key template can expand — same as the plain Anthropic client.
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
+	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
+	if cfg.rawHolder != nil {
+		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
@@ -1032,8 +1462,28 @@ func listProfilesRegionArg(region string) string {
 	return " --region " + region
 }
 
-// CompletionsWithCtx sends a chat completion request with context support.
-//
+// anthropicThinkingBudgetTokens extracts budget_tokens from an
+// extra_body.thinking map. Returns ok=false for unrecognized shapes.
+func anthropicThinkingBudgetTokens(v any) (int64, bool) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	switch n := m["budget_tokens"].(type) {
+	case float64:
+		return int64(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil
+	case int:
+		return int64(n), true
+	case int64:
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
 // The deferred finalizeRequest is this client's boundary for the retry report;
 // see the OpenAI counterpart for why it is deferred and why the results are
 // named. A parameter-building failure returns before any HTTP attempt, so
@@ -1044,6 +1494,7 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
 			panic(r)
 		}
+		err = describeTimeout(ctx, err)
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
 
@@ -1071,12 +1522,28 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		opts = append(opts, option.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// This client is non-streaming: it calls Messages.New, which expects a
-		// single JSON body. If a provider config sets extra_body.stream=true,
-		// forwarding it here makes the API answer with SSE and every call fails
-		// to decode. Drop the key rather than forward it.
+		// Messages.New expects a single JSON body, not SSE. Drop true and
+		// non-boolean stream values to preserve that contract, but forward
+		// explicit false so gateways that default to streaming return JSON.
 		if k == "stream" {
-			continue
+			stream, isBool := v.(bool)
+			if !isBool || stream {
+				continue
+			}
+		}
+		// Drop thinking when it conflicts with this request's constraints:
+		// forced tool_choice or budget_tokens >= max_tokens.
+		if k == "thinking" {
+			if req.ToolChoice == "required" {
+				continue
+			}
+			effectiveMaxTokens := int64(req.MaxTokens)
+			if effectiveMaxTokens <= 0 {
+				effectiveMaxTokens = defaultAnthropicMaxTokens
+			}
+			if budget, ok := anthropicThinkingBudgetTokens(v); ok && budget >= effectiveMaxTokens {
+				continue
+			}
 		}
 		opts = append(opts, option.WithJSONSet(k, v))
 	}
@@ -1122,6 +1589,14 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 			pendingToolResults = append(pendingToolResults, msg)
 		case "assistant":
 			flushToolResults()
+			// Reuse the native MessageParam whole to preserve thinking blocks
+			// and signatures. Copy the slice to avoid mutating shared state
+			// when the cache_control breakpoint writes below.
+			if native, ok := msg.Native.Payload.(anthropic.MessageParam); ok && len(native.Content) > 0 {
+				native.Content = append([]anthropic.ContentBlockParamUnion(nil), native.Content...)
+				messages = append(messages, native)
+				continue
+			}
 			var blocks []anthropic.ContentBlockParamUnion
 			if s, ok := msg.Content.(string); ok && s != "" {
 				blocks = append(blocks, anthropic.NewTextBlock(s))
@@ -1181,11 +1656,11 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 
 	maxTokens := int64(req.MaxTokens)
 	if maxTokens <= 0 {
-		maxTokens = 8192
+		maxTokens = defaultAnthropicMaxTokens
 	}
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(model),
+		Model:     model,
 		MaxTokens: maxTokens,
 		Messages:  messages,
 	}
@@ -1207,9 +1682,15 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	// cached incrementally: read the full previous prefix, write only the delta.
 	if len(messages) > 0 {
 		last := &messages[len(messages)-1]
-		if len(last.Content) > 0 {
-			if cc := last.Content[len(last.Content)-1].GetCacheControl(); cc != nil {
-				*cc = anthropic.NewCacheControlEphemeralParam()
+		if n := len(last.Content); n > 0 {
+			lastIdx := n - 1
+			// Clone before mutating: the block may be shared with stored history.
+			cloned, err := cloneContentBlockParam(last.Content[lastIdx])
+			if err == nil {
+				if cc := cloned.GetCacheControl(); cc != nil {
+					*cc = anthropic.NewCacheControlEphemeralParam()
+					last.Content[lastIdx] = cloned
+				}
 			}
 		}
 	}
@@ -1218,6 +1699,19 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	}
 
 	return params, nil
+}
+
+// cloneContentBlockParam deep-copies a content block via JSON round trip.
+func cloneContentBlockParam(b anthropic.ContentBlockParamUnion) (anthropic.ContentBlockParamUnion, error) {
+	raw, err := json.Marshal(b)
+	if err != nil {
+		return anthropic.ContentBlockParamUnion{}, err
+	}
+	var clone anthropic.ContentBlockParamUnion
+	if err := json.Unmarshal(raw, &clone); err != nil {
+		return anthropic.ContentBlockParamUnion{}, err
+	}
+	return clone, nil
 }
 
 func buildToolInputSchema(params map[string]any) anthropic.ToolInputSchemaParam {
@@ -1249,15 +1743,19 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 	var textParts []string
 	var thinkingParts []string
 	var toolCalls []ToolCall
+	var hasThinking bool
 
 	for _, block := range sdkResp.Content {
 		switch block.Type {
 		case "text":
 			textParts = append(textParts, block.Text)
 		case "thinking":
+			hasThinking = true
 			if block.Thinking != "" {
 				thinkingParts = append(thinkingParts, block.Thinking)
 			}
+		case "redacted_thinking":
+			hasThinking = true
 		case "tool_use":
 			toolCalls = append(toolCalls, ToolCall{
 				ID:   block.ID,
@@ -1281,6 +1779,13 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 		reasoningContent = strings.Join(thinkingParts, "\n")
 	}
 
+	// Only set when thinking is present; ordinary turns round-trip via
+	// Content()/ToolCalls(). Anthropic rejects empty content blocks.
+	var native NativeTurn
+	if hasThinking {
+		native = NativeTurn{Family: "anthropic-messages", Payload: sdkResp.ToParam()}
+	}
+
 	finishReason := string(sdkResp.StopReason)
 	if finishReason == "" {
 		finishReason = "stop"
@@ -1302,13 +1807,14 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 
 	return &ChatResponse{
 		ID:    sdkResp.ID,
-		Model: string(sdkResp.Model),
+		Model: sdkResp.Model,
 		Choices: []Choice{{
 			Message: ResponseMessage{
 				Role:             "assistant",
 				Content:          contentStr,
 				ReasoningContent: reasoningContent,
 				ToolCalls:        toolCalls,
+				Native:           native,
 			},
 			FinishReason: finishReason,
 		}},

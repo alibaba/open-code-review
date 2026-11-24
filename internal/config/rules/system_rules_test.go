@@ -13,6 +13,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
+	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
 func TestExpandBraces_NoBraces(t *testing.T) {
@@ -71,6 +72,28 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"foo.ftl", "Template Injection"},
 		{"foo.ftlh", "Template Injection"},
 		{"foo.ftlx", "Template Injection"},
+		{"templates/account.hbs", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/account.HBS", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/email.mustache", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/email.MUSTACHE", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/account.jinja2", "Jinja Escaping Boundaries"},
+		{"templates/email.j2", "Jinja Escaping Boundaries"},
+		{"templates/account.JINJA2", "Jinja Escaping Boundaries"},
+		{"templates/email.J2", "Jinja Escaping Boundaries"},
+		{"templates/account.pug", "Pug Escaping and Output Contexts"},
+		{"templates/account.PUG", "Pug Escaping and Output Contexts"},
+		{"index.ejs", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"app/views/users/show.html.EJS", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"index.liquid", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"app/views/users/show.html.LIQUID", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"index.njk", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"app/views/users/show.html.NJK", "EJS, Liquid and Nunjucks Escaping and Output Contexts"},
+		{"index.haml", "HAML and Slim Escaping and Output Contexts"},
+		{"app/views/users/show.html.HAML", "HAML and Slim Escaping and Output Contexts"},
+		{"index.slim", "HAML and Slim Escaping and Output Contexts"},
+		{"app/views/users/show.html.SLIM", "HAML and Slim Escaping and Output Contexts"},
+		{"index.erb", "ERB Escaping and Output Contexts"},
+		{"app/views/users/show.html.ERB", "ERB Escaping and Output Contexts"},
 		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},
 		{"src/main/resources/dao/userdao.xml", "SQL Logic Error Detection"},
 		{"pom.xml", "snapshot"},
@@ -84,20 +107,41 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/pages/index.astro", "client:*"},
 		{"src/components/app.tsx", "React"},
 		{"lib/utils.ts", "TypeScript"},
+		{"scripts/config.mjs", "TypeScript"},
+		{"server/bootstrap.cjs", "TypeScript"},
 		{"app.kt", "Null Safety"},
+		{"scripts/setup.kts", "Null Safety"},
+		{"src/main/scala/com/example/Service.scala", "Scala Review Principles"},
+		{"src/domain/Order.fs", "Discriminated Unions and Pattern Matching"},
+		{"src/domain/Order.fsi", "Discriminated Unions and Pattern Matching"},
+		{"scripts/migrate.fsx", "Discriminated Unions and Pattern Matching"},
+		{"src/Api/Controllers/UserController.cs", "Nullability and Reference Types"},
+		{"tests/Domain/OrderTests.cs", "Nullability and Reference Types"},
 		{"src/main/handler.cpp", "Smart Pointer"},
+		{"src/main/handler.cxx", "Smart Pointer"},
+		{"include/handler.hxx", "Smart Pointer"},
 		{"driver.c", "malloc"},
 		{"pages/Index.ets", "State Decorator"},
 		{"components/Button.ets", "State Decorator"},
 		{"entry/src/main/module.json5", "json-key"},
 		{"entry/oh-package.json5", "json-key"},
+		{"config/profile.jsonc", "json-key"},
 		{"src/lib.rs", "Ownership and Lifetime Correctness"},
 		{"crates/service/src/main.rs", "Unsafe Code Boundaries"},
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
 		{"scripts/deploy.py", "Mutable Default Arguments"},
 		{"src/app/main.py", "Mutable Default Arguments"},
+		{"stubs/example.pyi", "Mutable Default Arguments"},
+		{"src/app/main.pyi", "Mutable Default Arguments"},
 		{"notebook.ipynb", "Mutable Default Arguments"},
 		{"src/notebooks/data.ipynb", "Mutable Default Arguments"},
+		{"app/models/user.rb", "Nil, False, and Absent Values"},
+		{"lib/tasks/cleanup.rake", "Nil, False, and Absent Values"},
+		{"mygem.gemspec", "Nil, False, and Absent Values"},
+		{"Gemfile", "Nil, False, and Absent Values"},
+		{"Rakefile", "Nil, False, and Absent Values"},
+		{"lib/Rakefile", "Nil, False, and Absent Values"},
+		{"app/views/users/show.html.erb", "ERB Escaping and Output Contexts"},
 		{"public/index.php", "PHP Review Principles"},
 		{"templates/account/profile.phtml", "Web and Template Security Boundaries"},
 		{"locale/zh_CN/LC_MESSAGES/messages.po", "Placeholder Mismatch"},
@@ -109,6 +153,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/model.jl", "Type Stability"},
 		{"MyPkg/src/solver.jl", "Type Stability"},
 		{"main.tf", "Hardcoded Secrets"},
+		{"main.tofu", "Hardcoded Secrets"},
 		{"modules/network/vpc.hcl", "Overly Permissive Access"},
 		{"envs/prod.tfvars", "Hardcoded Secrets"},
 		{"infra/main.bicep", "Hardcoded Secrets"},
@@ -122,6 +167,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"Sources/App/ContentView.swift", "Swift Review Principles"},
 		{"MyApp/Models/UserStore.swift", "Swift Review Principles"},
 		{"ChattyFit/ChattyFit/Views/WorkoutSessionView.swift", "SwiftUI State and Lifecycle"},
+		{"scripts/setup.nu", "Nushell Script Review Checklist"},
+		{"modules/user/init.nu", "Nushell Script Review Checklist"},
 		{"src/Main.elm", "Elm Architecture"},
 		{"app/Page/Home.elm", "Elm Architecture"},
 		{"lib/config.libsonnet", "Late Binding"},
@@ -133,13 +180,57 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"build.zig", "Illegal Behavior"},
 		{"idl/service.thrift", "Field IDs and Wire Compatibility"},
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
+		{"rules/library.bzl", "Starlark Code Review Guide"},
+		{"config.star", "Starlark Code Review Guide"},
+		{"MODULE.bazel", "Starlark Code Review Guide"},
+		{"BUILD", "Starlark Code Review Guide"},
+		{"src/library/BUILD", "Starlark Code Review Guide"},
+		{"WORKSPACE", "Starlark Code Review Guide"},
+		{"legacy/WORKSPACE", "Starlark Code Review Guide"},
+		{"src/library/BUILD.bazel", "Starlark Code Review Guide"},
+		{"legacy/WORKSPACE.bazel", "Starlark Code Review Guide"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
+		{"shaders/fragment.glsl", "Texture and Buffer Access Safety"},
+		{"Shaders/Lighting.hlsl", "Texture and Buffer Access Safety"},
+		{"shaders/compute.wgsl", "Texture and Buffer Access Safety"},
+		{"Shaders/Blur.metal", "Texture and Buffer Access Safety"},
+		{"src/parser.ml", "Pattern Matching"},
+		{"lib/parser.mli", "Pattern Matching"},
+		{"src/Component.re", "Pattern Matching"},
+		{"lib/Component.rei", "Pattern Matching"},
+		{"rtl/counter.v", "Blocking and Non-Blocking Assignments"},
+		{"rtl/alu.sv", "Blocking and Non-Blocking Assignments"},
+		{"rtl/defines.vh", "Blocking and Non-Blocking Assignments"},
+		{"rtl/fifo.vhd", "numeric_std"},
+		{"rtl/fifo.vhdl", "numeric_std"},
 		{"Models/main.m", "Indexing, Shapes, and Implicit Expansion"},
+		{"ios/ViewController.mm", "ARC and Object Ownership"},
+		{"ios/ViewController.MM", "ARC and Object Ownership"},
 		{"src/Counter.sol", "Checks-Effects-Interactions"},
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
 		{"contracts/token.vy", "Language Restrictions"},
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
+		{"policies/authz.rego", "Default Posture"},
+		{"policies/authz.REGO", "Default Posture"},
+		{"kernels/softmax.cu", "CUDA and HIP Kernel Review Principles"},
+		{"src/attention.cuh", "CUDA and HIP Kernel Review Principles"},
+		{"kernels/hip_softmax.hip", "CUDA and HIP Kernel Review Principles"},
+		{"scripts/deploy.ps1", "PowerShell Review Principles"},
+		{"modules/Build/Build.psm1", "PowerShell Review Principles"},
+		{"modules/Build/Build.psd1", "PowerShell Review Principles"},
+		{"src/myapp/core.clj", "Laziness, Sequences, and Resource Scope"},
+		{"src/myapp/views.cljs", "Laziness, Sequences, and Resource Scope"},
+		{"src/myapp/shared.cljc", "Laziness, Sequences, and Resource Scope"},
+		{"deps.edn", "EDN Data, Configuration, and Untrusted Input"},
+		{"db/migrate/20260101_add_users.sql", "Destructive and Irreversible Migrations"},
+		{"sql/reports/monthly.sql", "Destructive and Irreversible Migrations"},
+		{"sources/pool.move", "Ability Grants"},
+		{"contracts/amm/sources/router.move", "Ability Grants"},
+		{"Move.toml", "Move Package Manifest"},
+		{"contracts/amm/Move.toml", "Move Package Manifest"},
+		{"config/prod.dhall", "Integrity Hashes"},
+		{"schemas/package.dhall", "Integrity Hashes"},
 	}
 
 	for _, tt := range tests {
@@ -163,9 +254,6 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
-		// Note: .m now matches matlab.md, so it's no longer a "no rule
-		// matches" example; .mm remains one.
-		"ios/ViewController.mm",
 	}
 
 	for _, path := range paths {
@@ -525,12 +613,10 @@ func TestNewResolver_ProjectRuleMergesSystemRule(t *testing.T) {
 	wantUserRule := "project-go-rule"
 
 	got := resolver.Resolve("main.go")
-	systemIdx := strings.Index(got, wantSystemRule)
-	if systemIdx < 0 {
+	if !strings.Contains(got, wantSystemRule) {
 		t.Fatalf("expected merged system rule, got %q", truncate(got, 120))
 	}
-	userIdx := strings.Index(got, wantUserRule)
-	if userIdx < 0 {
+	if !strings.Contains(got, wantUserRule) {
 		t.Fatalf("expected merged project rule, got %q", truncate(got, 120))
 	}
 }
@@ -878,6 +964,70 @@ func TestResolveDetail_SystemPatternMatch(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_SystemPowerShellPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, name := range []string{"Deploy.ps1", "Build.psm1", "Build.psd1", "Deploy.Tests.ps1"} {
+		for _, path := range []string{name, "scripts/" + name, "tests/unit/" + strings.ToUpper(name)} {
+			t.Run(path, func(t *testing.T) {
+				if !allowedext.IsAllowedExt(filepath.Ext(path)) || allowedext.IsExcludedPath(path) {
+					t.Fatalf("PowerShell file %q must remain reviewable", path)
+				}
+				detail := dr.ResolveDetail(path)
+				if detail.Source != "system" || detail.Pattern != "**/*.{ps1,psm1,psd1}" {
+					t.Errorf("unexpected rule source/pattern: %q / %q", detail.Source, detail.Pattern)
+				}
+				if !strings.Contains(detail.Rule, "PowerShell Review Principles") {
+					t.Errorf("expected PowerShell rule, got %q", truncate(detail.Rule, 80))
+				}
+			})
+		}
+	}
+}
+
+func TestResolveDetail_SystemSQLPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{
+		"db/migrate/20260101_add_users.sql",
+		"sql/reports/monthly.sql",
+		"SQL/REPORTS/MONTHLY.SQL",
+	} {
+		t.Run(path, func(t *testing.T) {
+			if !allowedext.IsAllowedExt(filepath.Ext(path)) || allowedext.IsExcludedPath(path) {
+				t.Fatalf("SQL file %q must remain reviewable", path)
+			}
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.sql" {
+				t.Errorf("expected pattern '**/*.sql', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Destructive and Irreversible Migrations",
+				"Locking and Online-Migration Hazards",
+				"NULL Semantics",
+				"sqlfluff",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected SQL rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveDetail_SystemPrismaPatternMatch(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
@@ -897,6 +1047,38 @@ func TestResolveDetail_SystemPrismaPatternMatch(t *testing.T) {
 			}
 			if !strings.Contains(detail.Rule, "Prisma Schema Review Principles") {
 				t.Errorf("expected Prisma rule, got %q", truncate(detail.Rule, 80))
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemPugPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"index.pug", "views/account/profile.pug", "VIEWS/INDEX.PUG"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.pug" {
+				t.Errorf("expected pattern '**/*.pug', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Pug Escaping and Output Contexts",
+				"server-side template injection",
+				"&attributes",
+				"compileClient",
+				"Accessibility",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected Pug rule to contain %q", required)
+				}
 			}
 		})
 	}
@@ -964,6 +1146,83 @@ func TestResolveDetail_SystemPHPPatternMatch(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_SystemMoveTomlPatternPrecedesMove(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"Move.toml", "packages/library/Move.toml", "PACKAGES/APP/MOVE.TOML"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/Move.toml" {
+				t.Errorf("expected pattern '**/Move.toml', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Move Package Manifest Hygiene",
+				"`Move.lock`",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected rule to contain %q for %s", required, path)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemMoveRulesDialectAndEnvironmentScope(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	manifest := dr.ResolveDetail("Move.toml").Rule
+	source := dr.ResolveDetail("sources/pool.move").Rule
+
+	tests := []struct {
+		name    string
+		rule    string
+		want    []string
+		notWant []string
+	}{
+		{
+			name: "manifest does not flag valid per-environment overrides",
+			rule: manifest,
+			want: []string{
+				"Do not flag a replacement `rev`, `published-at` or `original-id` for differing from the default dependency or from another environment",
+				"Flag only a mismatch inside one environment",
+			},
+			notWant: []string{"whose `rev` does not match the corresponding `[dependencies]` entry"},
+		},
+		{
+			name: "source rule scopes dialect advice",
+			rule: source,
+			want: []string{"(Sui, Move 2024)", "(Aptos and legacy editions)", "Sui: "},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, w := range tt.want {
+				if !strings.Contains(tt.rule, w) {
+					t.Errorf("rule missing %q", w)
+				}
+			}
+			for _, nw := range tt.notWant {
+				if strings.Contains(tt.rule, nw) {
+					t.Errorf("rule still contains %q", nw)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveDetail_SystemComposerPatternPrecedesJSON(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
@@ -988,6 +1247,49 @@ func TestResolveDetail_SystemComposerPatternPrecedesJSON(t *testing.T) {
 			} {
 				if !strings.Contains(detail.Rule, required) {
 					t.Errorf("expected Composer rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemCUDAHIPPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	// CUDA and HIP share one rule doc, mapped by two patterns, the way
+	// ocaml.md serves both {ml,mli} and {re,rei}. The reported Pattern must
+	// stay the one that actually matched.
+	tests := []struct {
+		path        string
+		wantPattern string
+	}{
+		{"kernels/softmax.cu", "**/*.{cu,cuh}"},
+		{"src/kernels/attention.cuh", "**/*.{cu,cuh}"},
+		{"KERNELS/SOFTMAX.CU", "**/*.{cu,cuh}"},
+		{"kernels/hip_softmax.hip", "**/*.hip"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			detail := dr.ResolveDetail(tt.path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != tt.wantPattern {
+				t.Errorf("expected pattern %q, got %q", tt.wantPattern, detail.Pattern)
+			}
+			for _, required := range []string{
+				"CUDA and HIP Kernel Review Principles",
+				"__syncthreads",
+				"cudaGetLastError",
+				"__syncwarp",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected CUDA/HIP rule to contain %q", required)
 				}
 			}
 		})
@@ -1158,7 +1460,7 @@ func TestResolveRuleEntries_BasicFile(t *testing.T) {
 		{Path: "**/*.xml", Rule: "sql-rules.md"},
 		{Path: "**/*.go", Rule: "Always check for nil"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "Check for SQL injection" {
 		t.Errorf("expected file content, got %q", entries[0].Rule)
@@ -1179,7 +1481,7 @@ func TestResolveRuleEntries_MultiLineInline(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.ts", Rule: "security.md\nBut this is multi-line\nso it should stay inline"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "security.md\nBut this is multi-line\nso it should stay inline" {
 		t.Errorf("multi-line rule should stay inline, got %q", entries[0].Rule)
@@ -1192,7 +1494,7 @@ func TestResolveRuleEntries_MissingFile(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.xml", Rule: "nonexistent.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	// Missing file should clear the rule.
 	if entries[0].Rule != "" {
@@ -1211,7 +1513,7 @@ func TestResolveRuleEntries_AbsolutePath(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: ruleFile},
 	}
-	resolveRuleEntries(entries, "/some/other/repo")
+	resolveRuleEntries(entries, "/some/other/repo", "")
 
 	if entries[0].Rule != "absolute rule content" {
 		t.Errorf("expected absolute file content, got %q", entries[0].Rule)
@@ -1232,7 +1534,7 @@ func TestResolveRuleEntries_TooLarge(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "big.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "" {
 		t.Errorf("oversized file should clear rule, got %q", entries[0].Rule)
@@ -1248,7 +1550,7 @@ func TestResolveRuleEntries_RelativePath(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "shared.md"},
 	}
-	resolveRuleEntries(entries, repoDir)
+	resolveRuleEntries(entries, repoDir, "")
 
 	if entries[0].Rule != "repo-level" {
 		t.Errorf("repo-level should win, got %q", entries[0].Rule)
@@ -1261,7 +1563,7 @@ func TestResolveRuleEntries_EmptyRule(t *testing.T) {
 		{Path: "**/*.ts", Rule: "  "},
 		{Path: "**/*.java", Rule: "\t\n"},
 	}
-	resolveRuleEntries(entries, "/tmp")
+	resolveRuleEntries(entries, "/tmp", "")
 
 	if entries[0].Rule != "" {
 		t.Errorf("empty rule should stay empty, got %q", entries[0].Rule)
@@ -1294,7 +1596,7 @@ func TestResolveRuleEntries_SymlinkSafety(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "evil.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 	// The symlink target is .json, which is not in the whitelist.
 	// The rule should be cleared.
 	if entries[0].Rule != "" {
@@ -1311,7 +1613,7 @@ func TestResolveRuleEntries_TxtExtension(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "rules.txt"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "rule from txt" {
 		t.Errorf(".txt should be accepted, got %q", entries[0].Rule)
@@ -1327,7 +1629,7 @@ func TestResolveRuleEntries_MarkdownExtension(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "rules.markdown"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "rule from markdown" {
 		t.Errorf(".markdown should be accepted, got %q", entries[0].Rule)
@@ -1347,7 +1649,7 @@ func TestResolveRuleEntries_SubdirectoryPath(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "docs/my-rule.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "nested rule" {
 		t.Errorf("subdirectory path should work, got %q", entries[0].Rule)
@@ -1429,7 +1731,7 @@ func TestReadRuleFileSafe_NormalFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	content, err := readRuleFileSafe(f)
+	content, err := readRuleFileSafe(f, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1445,7 +1747,7 @@ func TestReadRuleFileSafe_UnsupportedExt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := readRuleFileSafe(f)
+	_, err := readRuleFileSafe(f, "")
 	if err == nil {
 		t.Fatal("expected error for .json")
 	}
@@ -1459,14 +1761,14 @@ func TestReadRuleFileSafe_TooLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := readRuleFileSafe(f)
+	_, err := readRuleFileSafe(f, "")
 	if err == nil {
 		t.Fatal("expected error for oversized file")
 	}
 }
 
 func TestReadRuleFileSafe_Missing(t *testing.T) {
-	_, err := readRuleFileSafe("/nonexistent/path.md")
+	_, err := readRuleFileSafe("/nonexistent/path.md", "")
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -1486,7 +1788,7 @@ func TestResolveRuleEntries_PathTraversalBlocked(t *testing.T) {
 		{Path: "**/*.go", Rule: outside},         // absolute path to outside — allowed
 		{Path: "**/*.ts", Rule: "../outside.md"}, // relative traversal — blocked
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	// Absolute path to outside is allowed (explicit design choice).
 	if entries[0].Rule != "should not be read" {
@@ -1503,7 +1805,7 @@ func TestResolveRuleEntries_EmptyRepoDirRelative(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "rules.md"},
 	}
-	resolveRuleEntries(entries, "")
+	resolveRuleEntries(entries, "", "")
 
 	if entries[0].Rule != "" {
 		t.Errorf("relative path with empty repoDir should be rejected, got %q", entries[0].Rule)
@@ -1520,7 +1822,7 @@ func TestResolveRuleEntries_EmptyRepoDirAbsolute(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: absFile},
 	}
-	resolveRuleEntries(entries, "")
+	resolveRuleEntries(entries, "", "")
 
 	if entries[0].Rule != "absolute content" {
 		t.Errorf("absolute path with empty repoDir should work, got %q", entries[0].Rule)
@@ -1544,10 +1846,219 @@ func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
 		{Path: "**/*.go", Rule: "reusable.md"},
 	}
 	// repoDir = ~/.opencodereview (where rule.json lives)
-	resolveRuleEntries(entries, globalRuleDir)
+	resolveRuleEntries(entries, globalRuleDir, "")
 
 	if entries[0].Rule != "global reusable rule" {
 		t.Errorf("global rule file should be resolved, got %q", entries[0].Rule)
+	}
+}
+
+// ── project-layer confinement tests ──
+
+// canonicalRoot returns the canonical (symlink-resolved) form of dir, mirroring
+// loadProjectRule's pathutil.CanonicalPath call.
+func canonicalRoot(t *testing.T, dir string) string {
+	t.Helper()
+	root, err := pathutil.CanonicalPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// TestResolveRuleEntries_ProjectConfinesAbsolutePath verifies that with a confineRoot
+// (the untrusted project rule layer) an absolute rule path is confined to repoDir: an
+// absolute path inside the repo is allowed, one outside the repo is rejected.
+func TestResolveRuleEntries_ProjectConfinesAbsolutePath(t *testing.T) {
+	repoDir := t.TempDir()
+	inside := filepath.Join(repoDir, "inside.md")
+	if err := os.WriteFile(inside, []byte("inside repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outside, []byte("OUTSIDE SECRET\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: inside},  // absolute, inside repo — allowed
+		{Path: "**/*.ts", Rule: outside}, // absolute, outside repo — blocked
+	}
+	resolveRuleEntries(entries, repoDir, canonicalRoot(t, repoDir))
+
+	if entries[0].Rule != "inside repo" {
+		t.Errorf("absolute path inside repo should be allowed, got %q", entries[0].Rule)
+	}
+	if entries[1].Rule != "" {
+		t.Errorf("absolute path outside repo should be blocked, got %q", entries[1].Rule)
+	}
+}
+
+// TestResolveRuleEntries_ProjectConfinesSymlinkEscape verifies that with confine=true,
+// an in-repo symlink pointing at an out-of-repo file is rejected after resolution.
+func TestResolveRuleEntries_ProjectConfinesSymlinkEscape(t *testing.T) {
+	repoDir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "host-secret.md")
+	if err := os.WriteFile(outside, []byte("HOST SECRET\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(repoDir, "rules.md")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "rules.md"},
+	}
+	resolveRuleEntries(entries, repoDir, canonicalRoot(t, repoDir))
+
+	if entries[0].Rule != "" {
+		t.Errorf("symlink escaping repo should be blocked, got %q", entries[0].Rule)
+	}
+}
+
+// TestResolveRuleEntries_TrustedAbsoluteOutsideAllowed guards that the trusted layers
+// (confine=false) keep the previous behavior: absolute paths may point outside repoDir.
+func TestResolveRuleEntries_TrustedAbsoluteOutsideAllowed(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "shared.md")
+	if err := os.WriteFile(outside, []byte("shared rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: outside},
+	}
+	resolveRuleEntries(entries, dir, "")
+
+	if entries[0].Rule != "shared rules" {
+		t.Errorf("trusted absolute path should still be allowed, got %q", entries[0].Rule)
+	}
+}
+
+// TestReadRuleFileSafe_ConfineRejectsOutside verifies the confinement check itself.
+func TestReadRuleFileSafe_ConfineRejectsOutside(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.md")
+	if err := os.WriteFile(outside, []byte("secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := readRuleFileSafe(outside, canonicalRoot(t, root)); err == nil {
+		t.Fatal("expected confinement error for path outside root")
+	}
+
+	inside := filepath.Join(root, "ok.md")
+	if err := os.WriteFile(inside, []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readRuleFileSafe(inside, canonicalRoot(t, root)); err != nil {
+		t.Fatalf("path inside root should be allowed, got %v", err)
+	}
+}
+
+// TestLoadProjectRule_ConfinesUntrustedReferences exercises the real entry point: a
+// malicious .opencodereview/rule.json referencing an absolute path outside the repo
+// must not leak that file's contents into the resolved rule.
+func TestLoadProjectRule_ConfinesUntrustedReferences(t *testing.T) {
+	repoDir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(outside, []byte("AWS_KEY=AKIA-SECRET\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgDir := filepath.Join(repoDir, ".opencodereview")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgData, err := json.Marshal(ProjectRule{
+		Rules: []ProjectRuleEntry{{Path: "**/*.go", Rule: outside}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "rule.json"), cfgData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pr, err := loadProjectRule(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr == nil || len(pr.Rules) != 1 {
+		t.Fatalf("expected one project rule, got %+v", pr)
+	}
+	if pr.Rules[0].Rule != "" {
+		t.Errorf("untrusted absolute reference must be cleared, got %q", pr.Rules[0].Rule)
+	}
+}
+
+// TestLoadProjectRule_RejectsSymlinkedDir verifies that an attacker-committed
+// ".opencodereview" directory symlink pointing outside the repo cannot make
+// loadProjectRule read a rule file from outside the repository.
+func TestLoadProjectRule_RejectsSymlinkedDir(t *testing.T) {
+	repoDir := t.TempDir()
+	outsideDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideDir, "rule.json"), []byte(`{"rules":[{"path":"**/*.go","rule":"OUTSIDE"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(repoDir, ".opencodereview")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	pr, err := loadProjectRule(repoDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr != nil {
+		t.Errorf("symlinked .opencodereview dir outside repo must be skipped, got %+v", pr)
+	}
+}
+
+// TestLoadProjectRule_RejectsSymlinkedRuleFile verifies that a symlinked "rule.json"
+// pointing outside the repo cannot be read.
+func TestLoadProjectRule_RejectsSymlinkedRuleFile(t *testing.T) {
+	repoDir := t.TempDir()
+	cfgDir := filepath.Join(repoDir, ".opencodereview")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside-rule.json")
+	if err := os.WriteFile(outside, []byte(`{"rules":[{"path":"**/*.go","rule":"OUTSIDE"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(cfgDir, "rule.json")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	pr, err := loadProjectRule(repoDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr != nil {
+		t.Errorf("symlinked rule.json outside repo must be skipped, got %+v", pr)
+	}
+}
+
+// TestResolveRuleEntries_ProjectRelativeInsideAllowed covers the confined relative
+// (non-symlink) path that stays inside the repo.
+func TestResolveRuleEntries_ProjectRelativeInsideAllowed(t *testing.T) {
+	repoDir := t.TempDir()
+	docs := filepath.Join(repoDir, "docs")
+	if err := os.MkdirAll(docs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docs, "my-rule.md"), []byte("nested rule\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "docs/my-rule.md"},
+	}
+	resolveRuleEntries(entries, repoDir, canonicalRoot(t, repoDir))
+
+	if entries[0].Rule != "nested rule" {
+		t.Errorf("confined relative in-repo path should be read, got %q", entries[0].Rule)
 	}
 }
 

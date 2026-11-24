@@ -153,7 +153,7 @@ function testMissingReferenceOnlyIsFine() {
   assert.strictEqual(ok, true);
 }
 
-// --- docs en -> zh/ja/ru counterpart sync -------------------------------------
+// --- docs en -> zh/ja/ru/ko/tr counterpart sync ----------------------------------
 
 function testCounterpartPaths() {
   assert.deepStrictEqual(
@@ -162,6 +162,8 @@ function testCounterpartPaths() {
       { locale: "zh", path: "pages/src/content/docs/zh/integrations/ci.md" },
       { locale: "ja", path: "pages/src/content/docs/ja/integrations/ci.md" },
       { locale: "ru", path: "pages/src/content/docs/ru/integrations/ci.md" },
+      { locale: "ko", path: "pages/src/content/docs/ko/integrations/ci.md" },
+      { locale: "tr", path: "pages/src/content/docs/tr/integrations/ci.md" },
     ]
   );
 }
@@ -172,13 +174,15 @@ function testEnOnlyChangeWarns() {
     "internal/agent/agent.go",
   ];
   const warnings = findMissingTranslations(changed);
-  // zh, ja, and ru counterparts missing -> three warnings.
-  assert.strictEqual(warnings.length, 3);
+  // zh, ja, ru, ko, and tr counterparts missing -> five warnings.
+  assert.strictEqual(warnings.length, 5);
   assert.deepStrictEqual(
     warnings.map((w) => w.counterpart).sort(),
     [
       "pages/src/content/docs/ja/faq.md",
+      "pages/src/content/docs/ko/faq.md",
       "pages/src/content/docs/ru/faq.md",
+      "pages/src/content/docs/tr/faq.md",
       "pages/src/content/docs/zh/faq.md",
     ]
   );
@@ -190,6 +194,8 @@ function testEnWithBothCounterpartsNoWarn() {
     "pages/src/content/docs/zh/faq.md",
     "pages/src/content/docs/ja/faq.md",
     "pages/src/content/docs/ru/faq.md",
+    "pages/src/content/docs/ko/faq.md",
+    "pages/src/content/docs/tr/faq.md",
   ];
   assert.deepStrictEqual(findMissingTranslations(changed), []);
 }
@@ -197,19 +203,21 @@ function testEnWithBothCounterpartsNoWarn() {
 function testEnWithOnlyOneCounterpartWarnsForTheOther() {
   const changed = [
     "pages/src/content/docs/en/mcp.md",
-    "pages/src/content/docs/zh/mcp.md", // ja and ru still missing
+    "pages/src/content/docs/zh/mcp.md", // ja, ru, ko, and tr still missing
   ];
   const warnings = findMissingTranslations(changed);
-  assert.strictEqual(warnings.length, 2);
+  assert.strictEqual(warnings.length, 4);
   assert.deepStrictEqual(
     warnings.map((w) => w.locale).sort(),
-    ["ja", "ru"]
+    ["ja", "ko", "ru", "tr"]
   );
   assert.deepStrictEqual(
     warnings.map((w) => w.counterpart).sort(),
     [
       "pages/src/content/docs/ja/mcp.md",
+      "pages/src/content/docs/ko/mcp.md",
       "pages/src/content/docs/ru/mcp.md",
+      "pages/src/content/docs/tr/mcp.md",
     ]
   );
 }

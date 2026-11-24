@@ -5,7 +5,10 @@
 // used for CLI rendering of review suggestions with ANSI color codes.
 package suggestdiff
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // DiffLineType marks a line as context, added, or deleted.
 type DiffLineType int
@@ -51,7 +54,13 @@ func ComputeLineDiff(oldLines, newLines []string) []DiffLine {
 	back := make([]DiffLine, 0, max(m, n)*2)
 	for i > 0 || j > 0 {
 		if i > 0 && j > 0 && strings.EqualFold(strings.TrimSpace(oldLines[i-1]), strings.TrimSpace(newLines[j-1])) {
-			back = append(back, DiffLine{Type: DiffContext, Content: oldLines[i-1]})
+			if oldLines[i-1] == newLines[j-1] {
+				back = append(back, DiffLine{Type: DiffContext, Content: oldLines[i-1]})
+			} else {
+				// Fuzzy equality is only for alignment; preserve raw changes in the rendered diff.
+				back = append(back, DiffLine{Type: DiffAdded, Content: newLines[j-1]})
+				back = append(back, DiffLine{Type: DiffDeleted, Content: oldLines[i-1]})
+			}
 			i--
 			j--
 		} else if j > 0 && (i == 0 || lcs[i][j-1] >= lcs[i-1][j]) {
@@ -64,15 +73,8 @@ func ComputeLineDiff(oldLines, newLines []string) []DiffLine {
 	}
 
 	// Reverse
-	for idx := len(back) - 1; idx >= 0; idx-- {
-		result = append(result, back[idx])
+	for _, b := range slices.Backward(back) {
+		result = append(result, b)
 	}
 	return result
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

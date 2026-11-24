@@ -11,12 +11,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 func TestNewOpenAIClient_URLNormalization(t *testing.T) {
@@ -848,21 +850,156 @@ func TestOpenAIClient_StreamOnlyGateway(t *testing.T) {
 	}
 }
 
+// TestOpenAIClient_StreamingRequestsUsageByDefault verifies that streaming
+// requests ask for the final usage chunk via stream_options.include_usage
+// when the provider config does not set stream_options itself.
+// OpenAI-compatible servers omit usage from streams unless asked, silently
+// losing token accounting for every streamed request.
+func TestOpenAIClient_StreamingRequestsUsageByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		streamOptions, ok := body["stream_options"].(map[string]any)
+		if !ok || streamOptions["include_usage"] != true {
+			t.Errorf("stream_options = %#v, want include_usage true", body["stream_options"])
+			http.Error(w, "usage request required", http.StatusBadRequest)
+			return
+		}
+
+		writeOpenAISSE(t, w,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}`,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:       server.URL + "/v1",
+		APIKey:    "test-key",
+		Model:     "gpt-stream",
+		ExtraBody: map[string]any{"stream": true},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Usage == nil {
+		t.Fatal("Usage = nil, want usage from the final stream chunk")
+	}
+	if resp.Usage.PromptTokens != 12 || resp.Usage.CompletionTokens != 3 || resp.Usage.TotalTokens != 15 {
+		t.Errorf("Usage = %+v, want prompt 12 / completion 3 / total 15", resp.Usage)
+	}
+}
+
+// TestOpenAIClient_StreamOptionsConfigOverrides verifies the
+// extra_body.stream_options states: an explicit include_usage value is
+// respected, an object configuring only unrelated options keeps the usage
+// default merged in, an explicit null suppresses the field entirely (for
+// gateways that reject stream_options), and non-streaming requests never
+// carry the field regardless of config.
+func TestOpenAIClient_StreamOptionsConfigOverrides(t *testing.T) {
+	tests := []struct {
+		name       string
+		extraBody  map[string]any
+		want       any
+		wantAbsent bool
+	}{
+		{
+			name:      "explicit include_usage false is respected",
+			extraBody: map[string]any{"stream": true, "stream_options": map[string]any{"include_usage": false}},
+			want:      map[string]any{"include_usage": false},
+		},
+		{
+			name:      "unrelated option keeps the usage default",
+			extraBody: map[string]any{"stream": true, "stream_options": map[string]any{"continuous_usage_stats": true}},
+			want:      map[string]any{"continuous_usage_stats": true, "include_usage": true},
+		},
+		{
+			name:       "explicit null suppresses field",
+			extraBody:  map[string]any{"stream": true, "stream_options": nil},
+			wantAbsent: true,
+		},
+		{
+			name:       "non-streaming never sends stream_options",
+			extraBody:  map[string]any{"stream_options": map[string]any{"include_usage": true}},
+			wantAbsent: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			streaming, _ := tt.extraBody["stream"].(bool)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode request body: %v", err)
+					http.Error(w, "invalid request body", http.StatusBadRequest)
+					return
+				}
+
+				value, present := body["stream_options"]
+				if tt.wantAbsent {
+					if present {
+						t.Errorf("stream_options = %#v, want absent", value)
+					}
+				} else if !reflect.DeepEqual(value, tt.want) {
+					t.Errorf("stream_options = %#v, want %#v", value, tt.want)
+				}
+
+				if streaming {
+					writeOpenAISSE(t, w,
+						`{"id":"chatcmpl-s","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}`,
+						`{"id":"chatcmpl-s","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+					)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"id":"chatcmpl-n","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+			}))
+			defer server.Close()
+
+			client := NewOpenAIClient(ClientConfig{
+				URL:       server.URL + "/v1",
+				APIKey:    "test-key",
+				Model:     "m",
+				ExtraBody: tt.extraBody,
+			})
+
+			if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "ping"}},
+			}); err != nil {
+				t.Fatalf("CompletionsWithCtx: %v", err)
+			}
+		})
+	}
+}
+
 // TestOpenAIClient_NonStreamingRequestDropsStreamField verifies that the
 // "stream" key in extra_body is NOT forwarded to the non-streaming Chat
 // Completions request. Forwarding it makes the API answer with
 // text/event-stream (SSE) while Chat.Completions.New expects a JSON body,
 // breaking every call (see issue #647). Only extra_body.stream=true as a
-// boolean triggers the streaming path; other types (string "true", bool
-// false) must be dropped from the wire body entirely so the server returns
-// JSON. Other extra_body keys are still forwarded.
+// boolean triggers the streaming path. A false boolean must be forwarded so
+// gateways that stream by default can be explicitly told to return JSON;
+// other non-boolean values must still be dropped. Other extra_body keys are
+// still forwarded.
 func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 	tests := []struct {
-		name  string
-		value any
+		name       string
+		value      any
+		wantStream bool
 	}{
 		{name: "missing"},
-		{name: "boolean false", value: false},
+		{name: "boolean false", value: false, wantStream: true},
 		{name: "string true", value: "true"},
 	}
 
@@ -876,8 +1013,13 @@ func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 					return
 				}
 
-				if _, exists := body["stream"]; exists {
-					t.Errorf("stream field should NOT be present in non-streaming request body, got %v", body["stream"])
+				stream, present := body["stream"]
+				if tt.wantStream {
+					if !present || stream != false {
+						t.Errorf("stream = %v (present %v), want false", stream, present)
+					}
+				} else if present {
+					t.Errorf("stream field should NOT be present in non-streaming request body, got %v", stream)
 				}
 
 				w.Header().Set("Content-Type", "application/json")
@@ -1278,12 +1420,77 @@ func TestAnthropicClient_NoExtraHeadersWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestAnthropicClient_ExtraBodyStreamDropped verifies that an
-// extra_body.stream=true is NOT forwarded to the Messages API. Forwarding it
-// makes the API answer with text/event-stream (SSE) while Messages.New expects
-// a JSON body, breaking every call (see issue #647). Other extra_body keys
-// must still be forwarded.
+// True and non-boolean stream values must not request SSE while Messages.New
+// expects JSON. Other extra_body keys must still be forwarded.
 func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
+	testCases := []struct {
+		name  string
+		value any
+	}{
+		{name: "boolean true", value: true},
+		{name: "string true", value: "true"},
+		{name: "string false", value: "false"},
+		{name: "null", value: nil},
+		{name: "number", value: 1},
+		{name: "object", value: map[string]any{}},
+		{name: "array", value: []any{}},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(test *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					test.Errorf("decode request body: %v", err)
+					http.Error(writer, "invalid request body", http.StatusBadRequest)
+					return
+				}
+				if value, present := body["stream"]; present {
+					test.Errorf("request body should NOT contain a stream field, got %v", value)
+				}
+				if body["keep_me"] != "yes" {
+					test.Errorf("other extra_body keys must still be forwarded; keep_me = %v", body["keep_me"])
+				}
+
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{
+					"id":"msg_stream_test",
+					"type":"message",
+					"role":"assistant",
+					"model":"claude-test",
+					"content":[{"type":"text","text":"ok"}],
+					"stop_reason":"end_turn",
+					"usage":{"input_tokens":1,"output_tokens":1}
+				}`))
+			}))
+			defer server.Close()
+
+			client := NewAnthropicClient(ClientConfig{
+				URL:    server.URL + "/v1/messages",
+				APIKey: "test-key",
+				Model:  "claude-test",
+				ExtraBody: map[string]any{
+					"stream":               testCase.value,
+					"keep_me":              "yes",
+					"temperature_override": 0.1,
+				},
+			})
+
+			resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages:  []Message{{Role: "user", Content: "hi"}},
+				MaxTokens: 64,
+			})
+			if err != nil {
+				test.Fatalf("CompletionsWithCtx: %v", err)
+			}
+			if resp.Content() != "ok" {
+				test.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+			}
+		})
+	}
+}
+
+func TestAnthropicClient_ExtraBodyStreamFalseForwarded(t *testing.T) {
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1291,7 +1498,7 @@ func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
 		_ = json.Unmarshal(raw, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"id":"msg_stream_test",
+			"id":"msg_stream_false_test",
 			"type":"message",
 			"role":"assistant",
 			"model":"claude-test",
@@ -1307,28 +1514,141 @@ func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
 		APIKey: "test-key",
 		Model:  "claude-test",
 		ExtraBody: map[string]any{
-			"stream":               true,
-			"keep_me":              "yes",
-			"temperature_override": 0.1,
+			"stream": false,
 		},
 	})
 
-	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
 		Messages:  []Message{{Role: "user", Content: "hi"}},
 		MaxTokens: 64,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("CompletionsWithCtx: %v", err)
 	}
 
-	if _, present := gotBody["stream"]; present {
-		t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
+	if got, present := gotBody["stream"]; !present || got != false {
+		t.Errorf("stream = %v (present %v), want false", got, present)
 	}
-	if gotBody["keep_me"] != "yes" {
-		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
+}
+
+// TestAnthropicClient_ExtraBodyThinkingDroppedWithForcedToolChoice verifies
+// that extra_body.thinking — the supported way to turn on extended thinking
+// today, see the CompletionsWithCtx comment — is dropped for a request whose
+// ToolChoice is "required". The Anthropic API rejects extended thinking
+// together with a forced tool_choice, and ExtraBody is a client-wide setting
+// forwarded to every request regardless of task, so a provider config that
+// enables thinking for the main review loop (ToolChoice "auto") must not
+// break ReviewFilterTask's forced single-shot tool call. Other requests
+// (ToolChoice "auto" or unset) must still get it forwarded.
+func TestAnthropicClient_ExtraBodyThinkingDroppedWithForcedToolChoice(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_thinking_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+		ExtraBody: map[string]any{
+			"thinking": map[string]any{"type": "enabled", "budget_tokens": 10000},
+		},
+	})
+
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:   []Message{{Role: "user", Content: "hi"}},
+		MaxTokens:  64,
+		ToolChoice: "required",
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
 	}
-	if resp.Content() != "ok" {
-		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+	if _, present := gotBody["thinking"]; present {
+		t.Errorf("thinking must be dropped for a forced tool_choice request, got %v", gotBody["thinking"])
+	}
+
+	gotBody = nil
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:   []Message{{Role: "user", Content: "hi"}},
+		MaxTokens:  20000, // > budget_tokens (10000), so only ToolChoice is under test here
+		ToolChoice: "auto",
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotBody["thinking"] == nil {
+		t.Error("thinking must still be forwarded for a non-forced tool_choice request")
+	}
+}
+
+// TestAnthropicClient_ExtraBodyThinkingDroppedWhenBudgetExceedsMaxTokens
+// guards the real failure this reproduces: a provider config's
+// extra_body.thinking.budget_tokens is a single client-wide value, but
+// MaxTokens varies per call (see internal/agent/grouping.go's grouping call,
+// which had a hardcoded MaxTokens: 4096 well under a typical thinking
+// budget). The API rejects the request outright when budget_tokens isn't
+// strictly less than max_tokens ("max_tokens must be greater than
+// thinking.budget_tokens") — dropping thinking for that one call is safer
+// than letting an unrelated small-output task fail.
+func TestAnthropicClient_ExtraBodyThinkingDroppedWhenBudgetExceedsMaxTokens(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_thinking_budget_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+		ExtraBody: map[string]any{
+			"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(10000)},
+		},
+	})
+
+	// budget_tokens (10000) >= MaxTokens (4096): must be dropped.
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "hi"}},
+		MaxTokens: 4096,
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if _, present := gotBody["thinking"]; present {
+		t.Errorf("thinking must be dropped when budget_tokens >= MaxTokens, got %v", gotBody["thinking"])
+	}
+
+	// budget_tokens (10000) < MaxTokens (32000): must be forwarded.
+	gotBody = nil
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "hi"}},
+		MaxTokens: 32000,
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotBody["thinking"] == nil {
+		t.Error("thinking must still be forwarded when budget_tokens < MaxTokens")
 	}
 }
 
@@ -1519,7 +1839,7 @@ func TestNewLLMClient_ExpandsSessionKeyInExtraBody(t *testing.T) {
 		Model:     "gpt-test",
 		Protocol:  "openai",
 		ExtraBody: map[string]any{"prompt_cache_key": "{ocr_session_key}"},
-	}, nil)
+	}, nil, nil)
 
 	ctx := ContextWithSessionKey(context.Background(), "sess-from-run")
 	_, err := client.CompletionsWithCtx(ctx, ChatRequest{
@@ -1711,7 +2031,7 @@ func TestNewLLMClient_Dispatch(t *testing.T) {
 				Model:    "test-model",
 				Protocol: tt.protocol,
 			}
-			client := NewLLMClient(ep, nil)
+			client := NewLLMClient(ep, nil, nil)
 			got := typeName(client)
 			if got != tt.want {
 				t.Errorf("NewLLMClient(protocol=%q) = %s, want %s", tt.protocol, got, tt.want)
@@ -1730,7 +2050,7 @@ func TestNewLLMClient_OpenAIAliasDispatchesToOpenAIClient(t *testing.T) {
 		Model:    "test-model",
 		Protocol: NormalizeProtocol("openai"),
 	}
-	client := NewLLMClient(ep, nil)
+	client := NewLLMClient(ep, nil, nil)
 	if got := typeName(client); got != "*llm.OpenAIClient" {
 		t.Errorf("NormalizeProtocol(\"openai\") dispatched to %s, want *llm.OpenAIClient", got)
 	}
@@ -1921,4 +2241,219 @@ func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
 	if got := resp.Content(); got != "success" {
 		t.Errorf("Content() = %q, want %q", got, "success")
 	}
+}
+
+func TestToolCall_EstimatedTokens(t *testing.T) {
+	tests := []struct {
+		name string
+		tc   ToolCall
+		want int
+	}{
+		{
+			name: "empty tool call",
+			tc:   ToolCall{},
+			want: 0,
+		},
+		{
+			name: "short tool call",
+			tc: ToolCall{
+				ID: "call_1",
+				Function: FunctionCall{
+					Name:      "read",
+					Arguments: "{}",
+				},
+			},
+			want: (len("call_1") + len("read") + len("{}")) / 4,
+		},
+		{
+			name: "large tool call arguments",
+			tc: ToolCall{
+				ID: "call_large",
+				Function: FunctionCall{
+					Name:      "file_write",
+					Arguments: strings.Repeat("x", 400),
+				},
+			},
+			want: (len("call_large") + len("file_write") + 400) / 4,
+		},
+		{
+			name: "tool call with extra content",
+			tc: ToolCall{
+				ID: "call_extra",
+				Function: FunctionCall{
+					Name:      "read_file",
+					Arguments: `{"path":"main.go"}`,
+				},
+				ExtraContent: json.RawMessage(`{"google":{"thought_signature":"sig-abc-123"}}`),
+			},
+			want: (len("call_extra") + len("read_file") + len(`{"path":"main.go"}`) + len(`{"google":{"thought_signature":"sig-abc-123"}}`)) / 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.tc.EstimatedTokens()
+			if got != tt.want {
+				t.Errorf("ToolCall.EstimatedTokens() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMessage_EstimatedTokens(t *testing.T) {
+	t.Run("text only message", func(t *testing.T) {
+		m := Message{Role: "user", Content: "hello world"}
+		if got := m.EstimatedTokens(); got != 0 {
+			t.Errorf("EstimatedTokens() = %d, want 0 for text-only message", got)
+		}
+	})
+
+	t.Run("message with tool calls", func(t *testing.T) {
+		m := Message{
+			Role: "assistant",
+			ToolCalls: []ToolCall{
+				{
+					ID: "call_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"main.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.ToolCalls[0].EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected || got == 0 {
+			t.Errorf("EstimatedTokens() = %d, want %d", got, expected)
+		}
+	})
+
+	t.Run("message with reasoning payload and tool calls", func(t *testing.T) {
+		reasoning := ReasoningPayload(strings.Repeat("thinking ", 50))
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "openai-chat-completions",
+				Payload: reasoning,
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "call_1",
+					Function: FunctionCall{
+						Name:      "code_search",
+						Arguments: `{"query":"func Test"}`,
+					},
+				},
+			},
+		}
+		expected := m.Native.EstimatedTokens() + m.ToolCalls[0].EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected {
+			t.Errorf("EstimatedTokens() = %d, want %d", got, expected)
+		}
+	})
+
+	t.Run("anthropic message param with tool use does not double count", func(t *testing.T) {
+		toolUseParam := anthropic.ToolUseBlockParam{
+			ID:    "tool_1",
+			Name:  "file_read",
+			Input: map[string]any{"path": "foo.go"},
+		}
+		p := anthropic.MessageParam{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				{OfToolUse: &toolUseParam},
+			},
+		}
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "anthropic-messages",
+				Payload: p,
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "tool_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"foo.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.Native.EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected {
+			t.Errorf("EstimatedTokens() = %d, want %d (should not double-count)", got, expected)
+		}
+	})
+
+	t.Run("empty anthropic message param falls back to tool calls", func(t *testing.T) {
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "anthropic-messages",
+				Payload: anthropic.MessageParam{},
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "tool_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"foo.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.ToolCalls[0].EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected || got == 0 {
+			t.Errorf("EstimatedTokens() = %d, want %d", got, expected)
+		}
+	})
+
+	t.Run("empty responses items param falls back to tool calls", func(t *testing.T) {
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "openai-responses",
+				Payload: []responses.ResponseInputItemUnionParam{},
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "call_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"foo.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.ToolCalls[0].EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected || got == 0 {
+			t.Errorf("EstimatedTokens() = %d, want %d", got, expected)
+		}
+	})
+
+	t.Run("responses item param with function call does not double count", func(t *testing.T) {
+		p := []responses.ResponseInputItemUnionParam{
+			responses.ResponseInputItemParamOfFunctionCall(`{"path":"foo.go"}`, "call_1", "file_read"),
+		}
+		m := Message{
+			Role: "assistant",
+			Native: NativeTurn{
+				Family:  "openai-responses",
+				Payload: p,
+			},
+			ToolCalls: []ToolCall{
+				{
+					ID: "call_1",
+					Function: FunctionCall{
+						Name:      "file_read",
+						Arguments: `{"path":"foo.go"}`,
+					},
+				},
+			},
+		}
+		expected := m.Native.EstimatedTokens()
+		if got := m.EstimatedTokens(); got != expected || got == 0 {
+			t.Errorf("EstimatedTokens() = %d, want %d (should not double-count)", got, expected)
+		}
+	})
 }

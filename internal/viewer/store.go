@@ -9,12 +9,16 @@ package viewer
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -82,29 +86,30 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 
 // SessionSummary is built from session_start and session_end records.
 type SessionSummary struct {
-	SessionID      string
-	Timestamp      time.Time
-	CWD            string
-	GitBranch      string
-	Model          string
-	ReviewMode     string
-	DiffFrom       string
-	DiffTo         string
-	DiffCommit     string
-	FilesReviewed  []string
-	DurationSec    float64
-	FileCount      int
-	LLMFailures    int
-	CommentCount   int
-	Aborted        bool
-	Legacy         bool
-	TerminalState  string
-	SelectedCount  int
-	CompletedCount int
-	ReusedCount    int
-	FailedCount    int
-	WaivedCount    int
-	RunManifest    *session.RunManifest
+	AnalysisEnabled bool
+	SessionID       string
+	Timestamp       time.Time
+	CWD             string
+	GitBranch       string
+	Model           string
+	ReviewMode      string
+	DiffFrom        string
+	DiffTo          string
+	DiffCommit      string
+	FilesReviewed   []string
+	DurationSec     float64
+	FileCount       int
+	LLMFailures     int
+	CommentCount    int
+	Aborted         bool
+	Legacy          bool
+	TerminalState   string
+	SelectedCount   int
+	CompletedCount  int
+	ReusedCount     int
+	FailedCount     int
+	WaivedCount     int
+	RunManifest     *session.RunManifest
 }
 
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
@@ -129,8 +134,17 @@ func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 		summaries = append(summaries, s)
 	}
 
+	// Timestamp alone is not a total order: two sessions can share one
+	// (same second, or both zero for an aborted run before its first
+	// timestamped record). sessions.html pairs row i with row i+1 as
+	// "compare", so an order that reshuffles on ties makes that pairing
+	// non-deterministic across renders. SessionID breaks the tie so the
+	// order is deterministic across calls, not just stable within one sort.
 	sort.Slice(summaries, func(i, j int) bool {
-		return summaries[i].Timestamp.After(summaries[j].Timestamp)
+		if !summaries[i].Timestamp.Equal(summaries[j].Timestamp) {
+			return summaries[i].Timestamp.After(summaries[j].Timestamp)
+		}
+		return summaries[i].SessionID > summaries[j].SessionID
 	})
 	return summaries, nil
 }
@@ -147,37 +161,14 @@ func peekSession(path string) (SessionSummary, error) {
 	summary := SessionSummary{Aborted: true}
 	var lastLine []byte
 	readErr := readJSONLLines(f, func(line []byte) {
-		lastLine = append([]byte(nil), line...)
+		lastLine = line
 
 		if summary.Timestamp.IsZero() {
 			var rec map[string]any
 			if err := json.Unmarshal(line, &rec); err != nil {
 				return
 			}
-			if ts, ok := rec["timestamp"].(string); ok {
-				summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
-			}
-			if cwd, ok := rec["cwd"].(string); ok {
-				summary.CWD = cwd
-			}
-			if branch, ok := rec["gitBranch"].(string); ok {
-				summary.GitBranch = branch
-			}
-			if model, ok := rec["model"].(string); ok {
-				summary.Model = model
-			}
-			if rm, ok := rec["reviewMode"].(string); ok {
-				summary.ReviewMode = rm
-			}
-			if v, ok := rec["diffFrom"].(string); ok {
-				summary.DiffFrom = v
-			}
-			if v, ok := rec["diffTo"].(string); ok {
-				summary.DiffTo = v
-			}
-			if v, ok := rec["diffCommit"].(string); ok {
-				summary.DiffCommit = v
-			}
+			applySessionStart(&summary, rec)
 			return
 		}
 
@@ -206,6 +197,7 @@ func peekSession(path string) (SessionSummary, error) {
 // readJSONLLines visits each physical JSONL record without bufio.Scanner's
 // fixed token ceiling. session_end embeds the complete run manifest and can
 // legitimately exceed the former 10 MiB scanner limit on very large reviews.
+// Each record owns its buffer, so visit may retain it after returning.
 func readJSONLLines(r io.Reader, visit func([]byte)) error {
 	reader := bufio.NewReaderSize(r, 64*1024)
 	for {
@@ -238,12 +230,14 @@ type ReviewComment struct {
 	EndLine        int
 	Category       string // bug, security, performance, maintainability, test, style, documentation, other
 	Severity       string // critical, high, medium, low
+	MarkID         string `json:"-"`
 }
 
 // ViewSession holds fully parsed records for one session.
 type ViewSession struct {
 	Summary      SessionSummary
 	TokenUsage   TokenUsageSummary
+	requests     []*TaskCard
 	Files        []*FileGroup     // ordered by file path
 	SessionTasks []*FileGroup     // session-level tasks (grouping, etc.) separated from file-level
 	Comments     []*ReviewComment // review findings from review_item_done/reused records
@@ -295,9 +289,11 @@ func isSessionLevelPath(fp string) bool {
 
 // TaskCard links an LLM request with its response and tool calls.
 type TaskCard struct {
+	TaskType         TaskType
 	RequestMessages  any // preserved for display
 	RequestNo        int
 	ResponseContent  string
+	ReasoningContent string // the model's reasoning/thinking text for this turn, if the provider exposed any
 	ToolCalls        []ToolCallInfo
 	DurationMs       int64
 	Error            string
@@ -317,75 +313,223 @@ type ToolCallInfo struct {
 	DurationMs int64
 }
 
+// GroupingFileRef is one file inside a grouping group, resolved from the integer
+// index the model returned back to its path. Resolved is false when the index
+// named no file in the request's list — rendered as "#<idx>" so an auditor sees
+// the anomaly rather than a silently dropped entry.
+type GroupingFileRef struct {
+	Index    int
+	Path     string
+	Resolved bool
+}
+
+// GroupingGroupView is one semantic group as shown in the viewer: the model's
+// label plus its files resolved back to paths. It represents the grouping LLM
+// call's *proposed* partition — the record this card holds. The final partition
+// the reviewer actually used can differ, because enforceMaxFilesPerGroup and
+// enforceGroupTokenBudget may re-split it afterwards; that is not part of this
+// record (it surfaces only in the CLI `--format json` "groups" field).
+type GroupingGroupView struct {
+	Label string
+	Files []GroupingFileRef
+}
+
+// groupingFileListRe matches one line of the numbered file list buildFileList
+// emits into the grouping request, e.g. "[0] MODIFIED   internal/x.go (+12/-3)".
+// It couples the viewer to buildFileList's "[%d] " prefix + formatDiffEntry's
+// "STATUS   path (+N/-M)" shape (internal/agent/grouping.go, agent/agent.go);
+// TestBuildGroupingIndex guards that coupling. The trailing "(+N/-M)" anchors
+// the path capture so a path with spaces still resolves.
+var groupingFileListRe = regexp.MustCompile(`(?m)^\[(\d+)\]\s+\S+\s+(.+?)\s+\(\+\d+/-\d+\)\s*$`)
+
+// buildGroupingIndex scans the grouping request messages for the numbered file
+// list and returns an index→path map. reqMessages is the raw JSONL value
+// (a []any of map[string]any with a string "content"). Returns nil if nothing
+// parses, which makes groupingView fall back to the raw response text.
+func buildGroupingIndex(reqMessages any) map[int]string {
+	msgs, ok := reqMessages.([]any)
+	if !ok {
+		return nil
+	}
+	index := make(map[int]string)
+	for _, m := range msgs {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		// Only the user message carries the actual file list. Scanning the system
+		// prompt too would let its worked example (grouping_task_system.md's
+		// "[0] MODIFIED path ...") — which users can reword onto its own line —
+		// seed a bogus index→path entry that silently mislabels an out-of-range
+		// index instead of showing it as "#idx".
+		if role, _ := mm["role"].(string); role != "user" {
+			continue
+		}
+		content, ok := mm["content"].(string)
+		if !ok {
+			continue
+		}
+		for _, match := range groupingFileListRe.FindAllStringSubmatch(content, -1) {
+			idx, err := strconv.Atoi(match[1])
+			if err != nil {
+				continue
+			}
+			index[idx] = match[2]
+		}
+	}
+	if len(index) == 0 {
+		return nil
+	}
+	return index
+}
+
+// groupingResponseView mirrors one element of the grouping LLM response (label
+// plus integer file indices) as the viewer consumes it.
+type groupingResponseView struct {
+	Label string `json:"label"`
+	Files []int  `json:"files"`
+}
+
+// parseGroupingGroups parses the grouping LLM response into label + integer
+// indices. It mirrors parseGroupingResponse's one-shot Unmarshal and
+// markdown-fence stripping. ok is false when the content is not the index-shaped
+// JSON — a parse failure, or (notably) a session recorded before the index
+// switch whose "files" held path strings; the caller then keeps showing the raw
+// response, which for those older sessions is already the readable path form.
+func parseGroupingGroups(content string) (groups []groupingResponseView, ok bool) {
+	content = strings.TrimSpace(content)
+	if strings.HasPrefix(content, "```") {
+		lines := strings.Split(content, "\n")
+		if len(lines) >= 2 {
+			lines = lines[1:]
+		}
+		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+			lines = lines[:len(lines)-1]
+		}
+		content = strings.Join(lines, "\n")
+	}
+	if err := json.Unmarshal([]byte(content), &groups); err != nil {
+		return nil, false
+	}
+	return groups, true
+}
+
+// groupingView resolves a grouping task card into a path-labelled view of the
+// model's proposed groups, or nil when either side is missing/unparseable (the
+// template then falls back to the raw response text).
+func groupingView(card *TaskCard) []GroupingGroupView {
+	if card == nil {
+		return nil
+	}
+	groups, ok := parseGroupingGroups(card.ResponseContent)
+	if !ok {
+		return nil
+	}
+	index := buildGroupingIndex(card.RequestMessages)
+	if index == nil {
+		return nil
+	}
+	views := make([]GroupingGroupView, 0, len(groups))
+	anyResolved := false
+	for _, g := range groups {
+		gv := GroupingGroupView{Label: g.Label, Files: make([]GroupingFileRef, 0, len(g.Files))}
+		for _, idx := range g.Files {
+			path, resolved := index[idx]
+			anyResolved = anyResolved || resolved
+			gv.Files = append(gv.Files, GroupingFileRef{Index: idx, Path: path, Resolved: resolved})
+		}
+		views = append(views, gv)
+	}
+	// The request list matched the regex (index != nil) yet not one referenced
+	// index resolved: the list format has drifted from what the response indexes
+	// into. Rendering every file as "#idx" would be more misleading than the raw
+	// response, so fall back to it.
+	if !anyResolved {
+		return nil
+	}
+	return views
+}
+
+// safeSegment validates that s is safe to use as a single path component and
+// returns it unchanged. Every caller must join the returned value, not its
+// own copy of s: a validate-then-use-the-original-variable shape leaves the
+// join sourced from the untrusted argument, which static path-injection
+// analysis (this codebase's CodeQL scan included) cannot tell apart from a
+// join with no check at all. Returning the checked value is what makes the
+// join provably downstream of the check.
+func safeSegment(s string) (string, error) {
+	if s == "" || strings.Contains(s, "..") || strings.ContainsAny(s, `/\`) {
+		return "", fmt.Errorf("invalid path segment: %q", s)
+	}
+	return s, nil
+}
+
 // LoadSession fully parses a JSONL file into a ViewSession.
 func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
+	encodedRepo, err := safeSegment(encodedRepo)
+	if err != nil {
+		return nil, err
+	}
+	sessionID, err = safeSegment(sessionID)
+	if err != nil {
+		return nil, err
+	}
 	path := filepath.Join(root, encodedRepo, sessionID+".jsonl")
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // encodedRepo and sessionID are validated by safeSegment above
 	if err != nil {
 		return nil, fmt.Errorf("open session file: %w", err)
 	}
 	defer f.Close()
 
+	return readSession(f, sessionID)
+}
+
+func readSession(reader io.Reader, sessionID string) (*ViewSession, error) {
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
 	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
+	markOccurrences := make(map[string]int)
 
-	readErr := readJSONLLines(f, func(line []byte) {
+	readErr := readJSONLLines(reader, func(line []byte) {
+		var header struct {
+			Type      string
+			FilePath  string
+			TaskType  TaskType
+			RequestNo int `json:"request_no"`
+		}
+		if json.Unmarshal(line, &header) != nil {
+			return
+		}
+		if header.Type == "llm_request" {
+			card := &TaskCard{TaskType: header.TaskType, RequestNo: header.RequestNo}
+			if header.TaskType == GroupingTask {
+				var request struct{ Messages any }
+				if json.Unmarshal(line, &request) == nil {
+					card.RequestMessages = request.Messages
+				}
+			}
+			group := fileIndex[header.FilePath]
+			if group == nil {
+				group = &FileGroup{FilePath: header.FilePath, Tasks: make(map[TaskType][]*TaskCard)}
+				fileIndex[header.FilePath] = group
+				vs.Files = append(vs.Files, group)
+			}
+			group.Tasks[header.TaskType] = append(group.Tasks[header.TaskType], card)
+			vs.requests = append(vs.requests, card)
+			return
+		}
 		var rec map[string]any
 		if err := json.Unmarshal(line, &rec); err != nil {
 			return // skip malformed lines
 		}
-		typ, _ := rec["type"].(string)
-
-		switch typ {
+		switch header.Type {
 		case "session_start":
-			if ts, ok := rec["timestamp"].(string); ok {
-				vs.Summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
-			}
-			if cwd, ok := rec["cwd"].(string); ok {
-				vs.Summary.CWD = cwd
-			}
-			if branch, ok := rec["gitBranch"].(string); ok {
-				vs.Summary.GitBranch = branch
-			}
-			if model, ok := rec["model"].(string); ok {
-				vs.Summary.Model = model
-			}
-			if rm, ok := rec["reviewMode"].(string); ok {
-				vs.Summary.ReviewMode = rm
-			}
-			if v, ok := rec["diffFrom"].(string); ok {
-				vs.Summary.DiffFrom = v
-			}
-			if v, ok := rec["diffTo"].(string); ok {
-				vs.Summary.DiffTo = v
-			}
-			if v, ok := rec["diffCommit"].(string); ok {
-				vs.Summary.DiffCommit = v
-			}
-
-		case "llm_request":
-			fp, _ := rec["filePath"].(string)
-			tt, _ := rec["taskType"].(string)
-			reqNo := 0
-			if n, ok := rec["request_no"].(float64); ok {
-				reqNo = int(n)
-			}
-			msgs := rec["messages"]
-
-			tc := &TaskCard{RequestMessages: msgs, RequestNo: reqNo}
-
-			fg := fileIndex[fp]
-			if fg == nil {
-				fg = &FileGroup{FilePath: fp, Tasks: make(map[TaskType][]*TaskCard)}
-				fileIndex[fp] = fg
-				vs.Files = append(vs.Files, fg)
-			}
-			fg.Tasks[TaskType(tt)] = append(fg.Tasks[TaskType(tt)], tc)
+			applySessionStart(&vs.Summary, rec)
 
 		case "llm_response":
 			fp, _ := rec["filePath"].(string)
 			content, _ := rec["content"].(string)
+			reasoning, _ := rec["reasoning_content"].(string)
 			durationMs := int64(0)
 			if d, ok := rec["duration_ms"].(float64); ok {
 				durationMs = int64(d)
@@ -419,6 +563,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				if len(cards) > 0 && cards[len(cards)-1].ResponseContent == "" {
 					card := cards[len(cards)-1]
 					card.ResponseContent = content
+					card.ReasoningContent = reasoning
 					card.DurationMs = durationMs
 					card.Model = model
 					card.Error = errStr
@@ -505,8 +650,9 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 		case "review_item_done", "review_item_reused":
 			fp, _ := rec["filePath"].(string)
+			recUUID, _ := rec["uuid"].(string)
 			if comments, ok := rec["comments"].([]any); ok {
-				for _, c := range comments {
+				for ci, c := range comments {
 					cm, ok := c.(map[string]any)
 					if !ok {
 						continue
@@ -536,6 +682,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 					if v, ok := cm["severity"].(string); ok {
 						rc.Severity = v
 					}
+					rc.MarkID = commentMarkID(recUUID, ci, rc, markOccurrences)
 					vs.Comments = append(vs.Comments, rc)
 				}
 			}
@@ -591,6 +738,38 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	return vs, readErr
 }
 
+// commentMarkID returns a stable identity for one comment within an immutable
+// session file. Records carry a top-level uuid: uuid#commentIndex is exact,
+// collision-free, and identical on every reload. Legacy records without a
+// uuid fall back to a sha256 over every comment field plus an occurrence
+// counter, so exact duplicate comments still get distinct identities.
+func commentMarkID(recordUUID string, commentIndex int, rc *ReviewComment, occurrences map[string]int) string {
+	if recordUUID != "" {
+		return fmt.Sprintf("%s#%d", recordUUID, commentIndex)
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%s\x00%s",
+		rc.FilePath, rc.Content, rc.SuggestionCode, rc.ExistingCode,
+		rc.StartLine, rc.EndLine, rc.Category, rc.Severity)))
+	key := hex.EncodeToString(sum[:])
+	n := occurrences[key]
+	occurrences[key] = n + 1
+	return fmt.Sprintf("%s#%d", key, n)
+}
+
+func applySessionStart(summary *SessionSummary, rec map[string]any) {
+	ts, _ := rec["timestamp"].(string)
+	summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
+	summary.CWD, _ = rec["cwd"].(string)
+	summary.GitBranch, _ = rec["gitBranch"].(string)
+	summary.Model, _ = rec["model"].(string)
+	summary.ReviewMode, _ = rec["reviewMode"].(string)
+	summary.DiffFrom, _ = rec["diffFrom"].(string)
+	summary.DiffTo, _ = rec["diffTo"].(string)
+	summary.DiffCommit, _ = rec["diffCommit"].(string)
+	options, _ := rec["analysis"].(map[string]any)
+	summary.AnalysisEnabled, _ = options["enabled"].(bool)
+}
+
 func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 	summary.Aborted = false
 	if dur, ok := rec["duration_seconds"].(float64); ok {
@@ -615,6 +794,7 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 			if err := json.Unmarshal(data, &manifest); err == nil && manifest.SchemaVersion == session.ManifestSchemaVersion {
 				summary.RunManifest = &manifest
 				summary.TerminalState = string(manifest.TerminalState)
+				summary.FilesReviewed = filesReviewedFromSelected(manifest.Coverage.Selected)
 				summary.SelectedCount = len(manifest.Coverage.Selected)
 				summary.CompletedCount = len(manifest.Coverage.Completed)
 				summary.ReusedCount = len(manifest.Coverage.Reused)
@@ -628,6 +808,14 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 		summary.Legacy = true
 		summary.FileCount = len(summary.FilesReviewed)
 	}
+}
+
+func filesReviewedFromSelected(selected []session.CoverageItem) []string {
+	files := make([]string, 0, len(selected))
+	for _, item := range selected {
+		files = append(files, item.Path)
+	}
+	return files
 }
 
 func taskDoneSucceeded(arguments string) bool {

@@ -73,8 +73,7 @@ func (s *sniffer) resolveDetail(path string) RuleDetail {
 }
 
 // CanonicalConfig forwards the wrapped layer's fields and appends the objc
-// rule text, so editing objc.md changes the run manifest's
-// rule_config_sha256 exactly as editing any other rule doc does.
+// rule text, so editing objc.md changes the run manifest's rule_config_sha256.
 func (s *sniffer) CanonicalConfig() []string {
 	fields := s.inner.CanonicalConfig()
 	if s.objcRule != "" {
@@ -108,8 +107,14 @@ func (s *sniffer) peekFirstLine(path string) string {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	firstLine := true
 	for scanner.Scan() {
-		if line := strings.TrimSpace(scanner.Text()); line != "" {
+		line := scanner.Text()
+		if firstLine {
+			line = strings.TrimPrefix(line, "\ufeff")
+			firstLine = false
+		}
+		if line = strings.TrimSpace(line); line != "" {
 			return line
 		}
 	}
@@ -173,7 +178,8 @@ func looksLikeObjC(firstLine string) bool {
 }
 
 func firstNonBlankLine(content string) string {
-	for _, line := range strings.Split(content, "\n") {
+	content = strings.TrimPrefix(content, "\ufeff")
+	for line := range strings.SplitSeq(content, "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			return trimmed
 		}

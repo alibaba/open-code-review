@@ -4,7 +4,10 @@
 package main
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestParseReviewFlagsBackgroundFile(t *testing.T) {
@@ -147,10 +150,70 @@ func TestParseReviewFlags_ConflictingModes(t *testing.T) {
 	}
 }
 
-func TestParseReviewFlags_FromWithoutTo(t *testing.T) {
-	_, err := parseReviewFlags([]string{"--from", "main"})
-	if err == nil {
-		t.Fatal("expected error for --from without --to")
+func TestParseReviewFlags_FromDefaultsToHead(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--from", "main"})
+	if err != nil {
+		t.Fatalf("--from without --to must be accepted: %v", err)
+	}
+	if opts.from != "main" || opts.to != "HEAD" {
+		t.Fatalf("from = %q, to = %q, want from=main to=HEAD", opts.from, opts.to)
+	}
+}
+
+func TestParseReviewFlags_PlainReviewKeepsWorkspaceMode(t *testing.T) {
+	opts, err := parseReviewFlags([]string{})
+	if err != nil {
+		t.Fatalf("plain review must parse: %v", err)
+	}
+	if opts.from != "" || opts.to != "" {
+		t.Fatalf("plain review must not default refs: from=%q to=%q", opts.from, opts.to)
+	}
+}
+
+func TestParseReviewFlags_FromWithCommitStillConflicts(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--from", "main", "--commit", "abc123"})
+	if err == nil || !strings.Contains(err.Error(), "only one review mode allowed") {
+		t.Fatalf("--from with --commit must stay a mode conflict, got %v", err)
+	}
+}
+
+func TestDelegateDiffModes(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantTo  string
+		wantErr string
+	}{
+		{name: "workspace"},
+		{name: "default target", args: []string{"--from", "main"}, wantTo: "HEAD"},
+		{name: "explicit target", args: []string{"--from", "main", "--to", "feature"}, wantTo: "feature"},
+		{name: "commit", args: []string{"--commit", "abc123"}},
+		{name: "missing base", args: []string{"--to", "HEAD"}, wantErr: "--from is required when --to is specified"},
+		{name: "conflicting shorthand", args: []string{"--from", "main", "--commit", "abc123"}, wantErr: "only one review mode allowed"},
+		{name: "conflicting range", args: []string{"--from", "main", "--to", "HEAD", "--commit", "abc123"}, wantErr: "only one review mode allowed"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var opts delegateOptions
+			cmd := &cobra.Command{Use: "delegate"}
+			registerDelegateFlags(cmd, &opts)
+			if err := cmd.ParseFlags(test.args); err != nil {
+				t.Fatal(err)
+			}
+			err := validateDelegateOptions(&opts)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("error = %v, want %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if opts.to != test.wantTo {
+				t.Fatalf("to = %q, want %q", opts.to, test.wantTo)
+			}
+		})
 	}
 }
 
@@ -174,6 +237,84 @@ func TestParseReviewFlags_ShortFlags(t *testing.T) {
 	}
 	if !opts.preview {
 		t.Error("expected preview=true")
+	}
+}
+
+func TestCommandNeedsGit(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+		want bool
+	}{
+		{name: "review", cmd: &cobra.Command{Use: "review"}, want: true},
+		{name: "scan", cmd: &cobra.Command{Use: "scan"}, want: true},
+		{name: "delegate", cmd: &cobra.Command{Use: "delegate"}, want: true},
+		{name: "version", cmd: &cobra.Command{Use: "version"}, want: false},
+		{name: "completion", cmd: &cobra.Command{Use: "completion"}, want: false},
+		{name: "help", cmd: &cobra.Command{Use: "help"}, want: false},
+		{name: "config", cmd: &cobra.Command{Use: "config"}, want: false},
+		{name: "llm", cmd: &cobra.Command{Use: "llm"}, want: false},
+		{name: "viewer", cmd: &cobra.Command{Use: "viewer"}, want: false},
+		{name: "session", cmd: &cobra.Command{Use: "session"}, want: false},
+		{name: "rules", cmd: &cobra.Command{Use: "rules"}, want: false},
+		{name: "root", cmd: &cobra.Command{Use: "ocr"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := commandNeedsGit(tt.cmd); got != tt.want {
+				t.Errorf("commandNeedsGit(%q) = %v, want %v", tt.cmd.Use, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCommandNeedsGit_Subcommands verifies that the git check keys off the
+// top-level command rather than the leaf: the delegate subcommands shell out to
+// git, while the no-op parent help commands do not.
+func TestCommandNeedsGit_Subcommands(t *testing.T) {
+	root := &cobra.Command{Use: "ocr"}
+	delegate := &cobra.Command{Use: "delegate"}
+	delegatePreview := &cobra.Command{Use: "preview"}
+	delegateRule := &cobra.Command{Use: "rule"}
+	delegate.AddCommand(delegatePreview, delegateRule)
+	root.AddCommand(delegate)
+
+	rules := &cobra.Command{Use: "rules"}
+	rulesCheck := &cobra.Command{Use: "check"}
+	rules.AddCommand(rulesCheck)
+	root.AddCommand(rules)
+
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+		want bool
+	}{
+		{name: "delegate preview", cmd: delegatePreview, want: true},
+		{name: "delegate rule", cmd: delegateRule, want: true},
+		{name: "delegate", cmd: delegate, want: true},
+		{name: "rules check", cmd: rulesCheck, want: false},
+		{name: "rules", cmd: rules, want: false},
+		{name: "root", cmd: root, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := commandNeedsGit(tt.cmd); got != tt.want {
+				t.Errorf("commandNeedsGit(%q) = %v, want %v", tt.cmd.CommandPath(), got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCommandNeedsGit_RootVersionFlag(t *testing.T) {
+	cmd := &cobra.Command{Use: "ocr"}
+	cmd.Flags().BoolP("version", "V", false, "version for ocr")
+	if err := cmd.Flags().Set("version", "true"); err != nil {
+		t.Fatalf("set version flag: %v", err)
+	}
+	if commandNeedsGit(cmd) {
+		t.Error("commandNeedsGit() = true for root --version, want false")
 	}
 }
 
@@ -242,5 +383,76 @@ func TestParseScanFlags_NormalizedFormat(t *testing.T) {
 	}
 	if opts.outputFormat != "sarif" {
 		t.Errorf("outputFormat = %q, want sarif", opts.outputFormat)
+	}
+}
+
+func TestConcurrencyFlagUsageUsesSubtask(t *testing.T) {
+	var reviewOpts reviewOptions
+	reviewCmd := &cobra.Command{Use: "review"}
+	registerReviewFlags(reviewCmd, &reviewOpts)
+	reviewFlag := reviewCmd.Flags().Lookup("concurrency")
+	if reviewFlag == nil {
+		t.Fatal("review --concurrency flag missing")
+	}
+
+	var scanOpts scanOptions
+	scanCmd := &cobra.Command{Use: "scan"}
+	registerScanFlags(scanCmd, &scanOpts)
+	scanFlag := scanCmd.Flags().Lookup("concurrency")
+	if scanFlag == nil {
+		t.Fatal("scan --concurrency flag missing")
+	}
+
+	for _, tc := range []struct {
+		cmd   string
+		usage string
+	}{
+		{"review", reviewFlag.Usage},
+		{"scan", scanFlag.Usage},
+	} {
+		if !strings.Contains(tc.usage, "subtask") {
+			t.Errorf("%s --concurrency usage %q: want subtask unit", tc.cmd, tc.usage)
+		}
+		for _, leaked := range []string{"file-group", "file group", "file scans"} {
+			if strings.Contains(tc.usage, leaked) {
+				t.Errorf("%s --concurrency usage %q: leaked %q", tc.cmd, tc.usage, leaked)
+			}
+		}
+	}
+	if reviewFlag.Usage != scanFlag.Usage {
+		t.Errorf("review and scan --concurrency should share phrasing: review %q scan %q", reviewFlag.Usage, scanFlag.Usage)
+	}
+}
+
+func TestScanMaxToolsFlagUsageUsesSubtask(t *testing.T) {
+	var reviewOpts reviewOptions
+	reviewCmd := &cobra.Command{Use: "review"}
+	registerReviewFlags(reviewCmd, &reviewOpts)
+	reviewFlag := reviewCmd.Flags().Lookup("max-tools")
+	if reviewFlag == nil {
+		t.Fatal("review --max-tools flag missing")
+	}
+
+	var scanOpts scanOptions
+	scanCmd := &cobra.Command{Use: "scan"}
+	registerScanFlags(scanCmd, &scanOpts)
+	scanFlag := scanCmd.Flags().Lookup("max-tools")
+	if scanFlag == nil {
+		t.Fatal("scan --max-tools flag missing")
+	}
+
+	for _, tc := range []struct {
+		cmd   string
+		usage string
+	}{
+		{"review", reviewFlag.Usage},
+		{"scan", scanFlag.Usage},
+	} {
+		if !strings.Contains(tc.usage, "subtask") {
+			t.Errorf("%s --max-tools usage %q: want subtask unit", tc.cmd, tc.usage)
+		}
+		if strings.Contains(tc.usage, "per file") {
+			t.Errorf("%s --max-tools usage %q: leaked per file", tc.cmd, tc.usage)
+		}
 	}
 }

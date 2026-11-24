@@ -12,9 +12,30 @@ const (
 	ExcludeUserRule    ExcludeReason = "user_exclude"
 	ExcludeExtension   ExcludeReason = "unsupported_ext"
 	ExcludeDefaultPath ExcludeReason = "default_path"
-	ExcludeDeleted     ExcludeReason = "deleted"
-	ExcludeBinary      ExcludeReason = "binary"
+	// ExcludeSecret is a built-in credential path (for example .env or
+	// id_rsa). Like provider_directory and unlike default_path, an include
+	// rule cannot make the file reviewable.
+	ExcludeSecret ExcludeReason = "secret_exclude"
+	// ExcludeProviderDirectory is an unconditional diff-provider directory
+	// exclusion (for example vendor/ or node_modules/). Unlike default_path,
+	// an include rule cannot make the file reviewable.
+	ExcludeProviderDirectory ExcludeReason = "provider_directory"
+	ExcludeDeleted           ExcludeReason = "deleted"
+	ExcludeBinary            ExcludeReason = "binary"
+	ExcludeTooLarge          ExcludeReason = "too_large"
 )
+
+// IsExclusion reports whether r is one of the defined exclusion reasons.
+// ExcludeNone is not: it marks a file that was selected.
+func (r ExcludeReason) IsExclusion() bool {
+	switch r {
+	case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath, ExcludeSecret,
+		ExcludeProviderDirectory, ExcludeDeleted, ExcludeBinary, ExcludeTooLarge:
+		return true
+	default:
+		return false
+	}
+}
 
 // PreviewEntry is one file's preview record (mode-agnostic).
 type PreviewEntry struct {

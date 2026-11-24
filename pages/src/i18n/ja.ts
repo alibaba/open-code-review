@@ -12,6 +12,11 @@ export const ja: TranslationKeys = {
   'navbar.blog': 'ブログ',
   'navbar.getStarted': '始める',
 
+  'providers.title': '主要モデルプロバイダーに標準対応',
+  'providers.description': 'API キーを設定するだけでレビューを開始。主要プロトコルに対応したプライベートモデルサービスにも接続できます。',
+  'providers.listLabel': '対応モデルのブランド',
+  'providers.explore': '対応プロバイダーを見る',
+
   // Hero
   'hero.title': 'AIコードレビュー\n数百万の実タスクで検証済み',
   'hero.description': 'Open Code Review は、アリババの実戦検証済みコードレビュー Agent をワークフローに統合します。任意の LLM に接続し、データを完全にプライベートに保ち、開発者が実際に採用するレビューコメントを取得できます。',
@@ -22,7 +27,6 @@ export const ja: TranslationKeys = {
   'hero.copyFailed': 'コピー失敗',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
-  'hero.installMacPorts': 'MacPorts',
   'hero.installMacOS': 'MacOS',
   'hero.installLinux': 'Linux',
   'hero.installWindows': 'Windows',
@@ -43,9 +47,9 @@ export const ja: TranslationKeys = {
   'highlights.stat1Label': '社内アクティブユーザー',
   'highlights.stat1Caption': 'Alibabaグループ内で実戦検証済み',
   'highlights.stat2Value': '150K+',
-  'highlights.stat2Label': 'NPM コミュニティダウンロード',
+  'highlights.stat2Label': 'NPM ダウンロード',
   'highlights.stat2Caption': 'npm 過去30日の実ダウンロード数',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': '実タスク',
   'highlights.stat3Caption': '実行済みのコードレビュータスク',
   'highlights.stat4Value': '1/9',
@@ -75,12 +79,12 @@ export const ja: TranslationKeys = {
   'features.feat2Desc': '独立した行レベルのコメント配置モジュールと3段階の漸進的 LLM 戦略により、各コメントを正確な行番号に配置。独立したリフレクションモジュールが幻覚や知識のドリフトを早期に検出します。',
   'features.feat3Title': 'マルチモデルプロトコルサポート',
   'features.feat3Desc': 'Anthropic Messages API、OpenAI Chat Completions API、OpenAI Responses API をサポート。Anthropic、OpenAI、DashScope、DeepSeek、Z.AI などのプリセットプロバイダーを内蔵し、カスタムモデルエンドポイントにも対応。',
-  'features.feat4Title': '動的並行処理',
-  'features.feat4Desc': '設定可能な goroutine ワーカー（デフォルト8）でサブタスクを動的に分割し並列レビュー。大規模な変更セットでも迅速に完了します。',
+  'features.feat4Title': 'Effort 駆動の多段階レビュー',
+  'features.feat4Desc': 'コントロールできる Agent のレビュー深度：low は高速なフィードバック、medium は品質とコストの均衡、high は見落としが許されない重要な変更向け。階層が上がるほど、すでに見つけた問題を踏まえてさらに深く問い直します。新たなリスクが出ないラウンドに達した時点で自ら収束し、深さのために余計なコストを払いません。',
   'features.feat5Title': 'スマートメモリ圧縮',
   'features.feat5Desc': 'コードレビュー専用のメモリ圧縮方式。3段階パーティション（凍結/圧縮/アクティブ）コンテキスト管理により、トークン制限を突破して深いレビューを実現。',
   'features.feat6Title': '組み込みレビュールール',
-  'features.feat6Desc': '大規模な実環境で検証されたレビュールール。Java、TypeScript、Go、Python、Kotlin、Rust、C++、C など10以上の言語をカバーし、NPE、スレッドセーフティ、XSS、SQLインジェクションなどの専門ルールを搭載。',
+  'features.feat6Desc': '大規模な実環境で検証されたレビュールール。Java、TypeScript、Go、Python、Kotlin、Rust、C/C++、Swift、Solidity、Verilog など 40 以上の言語とファイル種別をカバーし、NPE、スレッドセーフティ、XSS、SQL インジェクションなどの専門チェックを標準搭載。',
 
   // Benchmark
   'benchmark.sectionLabel': 'オープンベンチマーク',
@@ -118,6 +122,7 @@ export const ja: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': 'お問い合わせ',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
 
   // Docs Page
@@ -195,7 +200,7 @@ export const ja: TranslationKeys = {
   'docs.reviewFlag10Desc': 'ファイルあたりの最大ツール呼び出しラウンド数',
   'docs.reviewFlag10Default': '内蔵',
   'docs.reviewFlag11Desc': '最大並行 git サブプロセス数',
-  'docs.reviewNote': '注意：<code>--from/--to</code> と <code>--commit</code> は同時に使用できません。<code>--from</code> を指定する場合、<code>--to</code> も指定する必要があります。',
+  'docs.reviewNote': '注意：<code>--from/--to</code> と <code>--commit</code> は同時に使用できません。<code>--from</code> のみを指定した場合、比較先は <code>HEAD</code> になります。',
   'docs.scanTitle': 'ocr scan',
   'docs.scanDesc': '<code>ocr scan</code> は diff の代わりにファイル全体をレビューします。Git 履歴や意味のある diff は不要です。未知のコードベースの調査、移行前のディレクトリ調査、diff の対象がないプロジェクトのレビューに使用します。',
   'docs.scanVsTitle': 'ocr scan と ocr review の違い',
@@ -249,8 +254,6 @@ export const ja: TranslationKeys = {
   'docs.scanFlag14Default': '内蔵',
   'docs.scanFlag15Desc': '最大並行 git サブプロセス数',
   'docs.scanFlag16Desc': 'カスタム JSON レビュールールのパス',
-  'docs.scanFlag17Desc': 'カスタム JSON ツール設定のパス',
-  'docs.scanFlag17Default': '内蔵',
   'docs.scanFlag18Desc': 'スキャンするリポジトリまたはディレクトリのルート',
   'docs.scanFlag18Default': '現在のディレクトリ',
   'docs.scanNote': '注：<code>--max-tools</code> はスキャンテンプレートのファイル単位ツール呼び出し予算を引き上げる場合にのみ効果があります —— テンプレートのデフォルトより低い値を設定しても効果はありません。',
@@ -288,6 +291,7 @@ export const ja: TranslationKeys = {
   'docs.sidebar.configuration': '設定',
   'docs.sidebar.cliReference': 'CLI リファレンス',
   'docs.sidebar.reviewRules': 'レビュールール',
+  'docs.sidebar.reviewingRequirements': '要件に基づくレビュー',
   'docs.sidebar.architecture': 'アーキテクチャ',
   'docs.sidebar.tools': 'ツール',
   'docs.sidebar.mcp': 'MCP サーバー',
@@ -298,13 +302,21 @@ export const ja: TranslationKeys = {
   'docs.sidebar.claudeCode': 'Command（Claude Code）',
   'docs.sidebar.delegate': 'デリゲーションモード',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': 'コントリビュート',
   'docs.sidebar.faq': 'FAQ',
+  'docs.sidebar.chatgptPreview': 'ChatGPT サインインのプレビュー',
   'docs.search.placeholder': '検索...',
   'docs.search.noResults': '結果が見つかりません',
   'docs.search.hint.select': '選択',
   'docs.search.hint.open': '開く',
   'docs.search.hint.close': '閉じる',
+  'docs.content.loading': 'ドキュメントを読み込み中...',
+  'docs.content.loadError': 'ドキュメントの読み込みに失敗しました。',
+  'docs.content.retry': '再試行',
+  'docs.search.loading': '検索中...',
+  'docs.search.loadError': '検索コンテンツの読み込みに失敗しました。',
 
   // Blog
   'blog.title': 'ブログ',

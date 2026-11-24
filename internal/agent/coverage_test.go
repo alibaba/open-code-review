@@ -12,6 +12,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -128,7 +129,8 @@ func TestInjectDiffMap(t *testing.T) {
 	})
 	a.diffs = []model.Diff{
 		{NewPath: "main.go", OldPath: "main.go", Diff: "+new code"},
-		{NewPath: "/dev/null", OldPath: "deleted.go", Diff: "-deleted"},
+		{NewPath: "/dev/null", OldPath: "deleted.go", Diff: "-deleted", IsDeleted: true},
+		{NewPath: "renamed.go", OldPath: "old_name.go", Diff: "+renamed", IsRenamed: true},
 	}
 
 	a.injectDiffMap()
@@ -146,12 +148,19 @@ func TestInjectDiffMap(t *testing.T) {
 	result2, _ := frd.Execute(context.Background(), map[string]any{
 		"path_array": []any{"deleted.go"},
 	})
-	if !strings.Contains(result2, "not found") {
-		t.Errorf("/dev/null path should not be in DiffMap, got: %q", result2)
+	if !strings.Contains(result2, "-deleted") {
+		t.Errorf("DiffMap did not contain deleted.go diff, got: %q", result2)
+	}
+
+	result3, _ := frd.Execute(context.Background(), map[string]any{
+		"path_array": []any{"renamed.go"},
+	})
+	if !strings.Contains(result3, "+renamed") {
+		t.Errorf("DiffMap did not contain renamed.go diff, got: %q", result3)
 	}
 }
 
-func TestFilterDiffs(t *testing.T) {
+func TestSelectFilesDropsFilteredPaths(t *testing.T) {
 	a := New(Args{
 		FileFilter: &rules.FileFilter{
 			Exclude: []string{"vendor/**"},
@@ -164,7 +173,7 @@ func TestFilterDiffs(t *testing.T) {
 		{NewPath: "handler.go"},
 	}
 
-	kept := a.filterDiffs(a.diffs)
+	kept, _ := summarizeSelection(a.selectFiles(a.diffs))
 
 	names := make(map[string]bool)
 	for _, d := range kept {
@@ -242,6 +251,62 @@ func TestExecuteReviewFilter_NoComments(t *testing.T) {
 	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
 	if client.calls != 0 {
 		t.Errorf("no LLM calls expected when no comments exist, got %d", client.calls)
+	}
+}
+
+type filterRequestCaptureClient struct {
+	response *llm.ChatResponse
+	request  llm.ChatRequest
+	calls    int
+}
+
+func (c *filterRequestCaptureClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.request = req
+	c.calls++
+	if c.response != nil {
+		return c.response, nil
+	}
+	content := "I approve all comments."
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
+		Model:   "fake",
+	}, nil
+}
+
+func TestExecuteReviewFilter_OmitsToolChoiceAndFailsOpenWithoutToolCall(t *testing.T) {
+	sess := session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: "diff"})
+	client := &filterRequestCaptureClient{}
+	collector := tool.NewCommentCollector()
+	collector.Add(model.LlmComment{Path: "a.go", Content: "keep this"})
+
+	a := New(Args{
+		LLMClient:        client,
+		Model:            "test",
+		Session:          sess,
+		CommentCollector: collector,
+		Template: template.Template{
+			ReviewFilterTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+			},
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+		},
+	})
+
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
+
+	if client.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1", client.calls)
+	}
+	if client.request.ToolChoice != "" {
+		t.Errorf("ToolChoice = %q, want provider default", client.request.ToolChoice)
+	}
+	if len(client.request.Tools) != len(filterTools) {
+		t.Errorf("tools = %d, want %d", len(client.request.Tools), len(filterTools))
+	}
+	if got := len(collector.CommentsForPath("a.go")); got != 1 {
+		t.Errorf("comments = %d, want 1 after text-only response", got)
 	}
 }
 
@@ -579,6 +644,73 @@ func TestExecuteGroupPlanPhase(t *testing.T) {
 	}
 }
 
+type planReferenceProvider struct{ calls int }
+
+func (p *planReferenceProvider) Tool() tool.Tool { return tool.FileRead }
+func (p *planReferenceProvider) Execute(context.Context, map[string]any) (string, error) {
+	p.calls++
+	return "unexpected read", nil
+}
+
+func TestPlanToolReferencesRemainReferenceOnly(test *testing.T) {
+	tpl, err := template.LoadDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	entries, err := toolsconfig.LoadDefault()
+	if err != nil {
+		test.Fatal(err)
+	}
+	references, err := toolsconfig.Resolve(entries, tpl.PlanTask.ToolReferences)
+	if err != nil {
+		test.Fatal(err)
+	}
+	response := agentTaskDoneResponse()
+	response.Choices[0].Message.ToolCalls[0].Function.Name = "file_read"
+	client := &filterRequestCaptureClient{response: response}
+	provider := &planReferenceProvider{}
+	registry := tool.NewRegistry()
+	registry.Register(provider)
+	tpl.MaxToolRequestTimes = 1
+	reviewer := New(Args{
+		Template:     *tpl,
+		Tools:        registry,
+		PlanToolDefs: references,
+		LLMClient:    client,
+		Model:        "test-model",
+		Session:      session.New(test.TempDir(), "main", "test-model", session.SessionOptions{}),
+	})
+	group := FileGroup{Label: "sample", Diffs: []model.Diff{{NewPath: "sample.go", Diff: "+package sample"}}}
+	if _, err := reviewer.executeGroupPlanPhase(context.Background(), group, "+package sample", "", ""); err != nil {
+		test.Fatal(err)
+	}
+	if client.calls != 1 || len(client.request.Tools) != 0 {
+		test.Fatalf("plan must remain a single request without callable tools: %+v", client.request)
+	}
+	content := client.request.Messages[0].ExtractText()
+	if !strings.Contains(content, formatToolDefs(references)) || strings.Contains(content, "{{plan_tools}}") {
+		test.Fatal("plan tool references were not rendered into the system prompt")
+	}
+	for _, name := range []string{"code_search", "file_read", "file_read_diff", "file_find"} {
+		if !strings.Contains(content, "- **"+name+"**:") {
+			test.Errorf("missing plan reference %s", name)
+		}
+	}
+	for _, name := range []string{"task_done", "code_comment"} {
+		if strings.Contains(content, "- **"+name+"**:") {
+			test.Errorf("unexpected plan reference %s", name)
+		}
+	}
+
+	if provider.calls != 0 {
+		test.Fatal("plan executed a reference-only tool")
+	}
+	completed, _, err := reviewer.runner.RunMainTask(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "sample.go")
+	if err != nil || completed || provider.calls != 0 {
+		test.Fatalf("tool references granted main execution: completed=%v, calls=%d, err=%v", completed, provider.calls, err)
+	}
+}
+
 func TestExecuteGroupPlanPhase_LLMError(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
@@ -897,6 +1029,7 @@ func TestClassifyItemError(t *testing.T) {
 	}{
 		{"deadline", context.DeadlineExceeded, session.FailureTimeout},
 		{"deadline_wrapped", fmt.Errorf("review %s: %w", secret, context.DeadlineExceeded), session.FailureTimeout},
+		{"request_timeout", fmt.Errorf("%w: %w", llm.ErrRequestTimeout, context.DeadlineExceeded), session.FailureTimeout},
 		{"cancelled", context.Canceled, session.FailureCancelled},
 		{"cancelled_wrapped", fmt.Errorf("aborted %s: %w", secret, context.Canceled), session.FailureCancelled},
 		{"main_task_empty", errMainTaskEmpty, session.FailureConfiguration},
@@ -910,6 +1043,12 @@ func TestClassifyItemError(t *testing.T) {
 			}
 			if reason == "" {
 				t.Error("reason is empty; a static safe reason is required")
+			}
+			if errors.Is(tc.err, llm.ErrRequestTimeout) && !strings.Contains(reason, "OCR_LLM_TIMEOUT") {
+				t.Errorf("request timeout reason = %q", reason)
+			}
+			if errors.Is(tc.err, context.DeadlineExceeded) && !errors.Is(tc.err, llm.ErrRequestTimeout) && !strings.Contains(reason, "--timeout") {
+				t.Errorf("task deadline reason = %q", reason)
 			}
 			if strings.Contains(reason, "sk-LEAKED-SECRET") || strings.Contains(reason, "/home/alice") {
 				t.Errorf("reason leaked raw error text: %q", reason)

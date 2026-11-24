@@ -34,18 +34,18 @@ type SealedInput struct {
 // session.New — which writes session_start the moment it is called.
 //
 // It reproduces the run's selection exactly — the same diff load followed by the
-// same two filter passes — because the identity is derived from the filtered,
-// sealed selected set, not from every parsed diff. See runIdentity for what
-// skipping a pass would cost.
+// same selectFiles pass — because the identity is derived from the diffs that
+// selection retains, not from every parsed diff. See runIdentity for what
+// skipping it would cost.
 //
-// Those filter passes are chatty, and the review that follows in the same
-// command prints them again, so this stays silent. stdout.Quiet is safe here for
-// the reason it documents: this is pre-flight work on the main goroutine, before
-// any concurrent output exists.
+// The review that follows in the same command reports its own diff load and
+// selection, so this stays silent. stdout.Quiet is safe here for the reason it
+// documents: this is pre-flight work on the main goroutine, before any
+// concurrent output exists.
 func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	defer stdout.Quiet()()
 
-	resolution, err := resolveInputBeforeDiff(ctx, args)
+	resolution, err := ResolveComparisonInput(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -57,22 +57,25 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	if err := a.loadDiffs(ctx); err != nil {
 		return nil, fmt.Errorf("load diffs: %w", err)
 	}
-	a.diffs = a.filterDiffs(a.diffs)
-	a.diffs = a.filterLargeDiffs(a.diffs)
+	a.diffs, _ = summarizeSelection(a.selectFiles(a.diffs))
+	if resolution != nil {
+		a.inputResolution = *resolution
+	}
 	return &SealedInput{Identity: a.runIdentity(), Resolution: a.inputResolution}, nil
 }
 
-// resolveInputBeforeDiff turns every moving head ref into an immutable commit
-// before the diff used for admission is loaded. Range mode then computes its
-// merge-base against that frozen head; commit mode needs only the frozen head.
-func resolveInputBeforeDiff(ctx context.Context, args Args) (*diff.InputResolution, error) {
+// ResolveComparisonInput turns every moving head ref into an immutable commit
+// before loading the diff. Range mode computes its merge-base against frozen
+// endpoints; commit mode verifies the first parent or a genuine empty old tree.
+// Workspace mode freezes HEAD as the base while leaving the working tree live.
+func ResolveComparisonInput(ctx context.Context, args Args) (*diff.InputResolution, error) {
 	switch {
 	case args.Commit != "":
-		head, err := resolveCommitHead(ctx, args, args.Commit)
+		resolution, err := diff.NewCommitProvider(args.RepoDir, args.Commit, args.GitRunner).ResolveCommitComparison(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return &diff.InputResolution{ResolvedHead: head}, nil
+		return &resolution, nil
 	case args.From != "" && args.To != "":
 		from, err := resolveCommitHead(ctx, args, args.From)
 		if err != nil {
@@ -88,7 +91,11 @@ func resolveInputBeforeDiff(ctx context.Context, args Args) (*diff.InputResoluti
 		}
 		return &resolved, nil
 	default:
-		return nil, nil
+		resolution, err := diff.NewWorkspaceProvider(args.RepoDir, args.GitRunner).ResolveWorkspaceComparison(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &resolution, nil
 	}
 }
 
@@ -103,12 +110,14 @@ func resolveCommitHead(ctx context.Context, args Args, ref string) (string, erro
 // runIdentity reads the identity off the agent's current selection.
 //
 // It is only meaningful once the selection is final: sourceArtifactSHA256 hashes
-// whatever a.diffs holds, so calling it before both filter passes yields a digest
-// no run ever records, and a resume comparing that digest against a parent
-// manifest would reject work it should have reused.
+// whatever a.diffs holds, so calling it before selectFiles has been applied
+// yields a digest no run ever records, and a resume comparing that digest
+// against a parent manifest would reject work it should have reused.
 func (a *Agent) runIdentity() session.RunIdentity {
 	id := session.RunIdentity{
 		Mode:                 a.manifestMode(),
+		ResolvedBase:         a.inputResolution.ResolvedBase,
+		ResolvedHead:         a.inputResolution.ResolvedHead,
 		SourceArtifactSHA256: a.sourceArtifactSHA256(),
 		RuleConfigSHA256:     a.ruleConfigSHA256(),
 	}
