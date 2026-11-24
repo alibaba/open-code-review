@@ -184,6 +184,9 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			if trimmedErr == "" {
 				return "", fmt.Errorf("git grep failed: %w", err)
 			}
+			if usePerlRegexp && exitCode == 128 && isPerlRegexpCompileError(trimmedErr) {
+				trimmedErr += `; fix the regular expression (e.g. use \( for a literal opening parenthesis), or set use_perl_regexp=false to search for the entire text literally`
+			}
 			return "", fmt.Errorf("git grep failed: %w: %s", err, trimmedErr)
 		}
 	}
@@ -276,6 +279,22 @@ func isNotGitRepoError(err error, stderr string) bool {
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 128 &&
 		(strings.Contains(stderr, "not a git repository") || strings.Contains(stderr, ".git")) {
 		return true
+	}
+	return false
+}
+
+func isPerlRegexpCompileError(stderr string) bool {
+	for line := range strings.SplitSeq(stderr, "\n") {
+		line = strings.Replace(line, "\uFF1A", ":", 1)
+		_, diagnostic, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		diagnostic = strings.TrimSpace(diagnostic)
+		if strings.HasPrefix(diagnostic, "-e option, '") ||
+			strings.HasPrefix(diagnostic, "pcre2_compile failed") {
+			return true
+		}
 	}
 	return false
 }
