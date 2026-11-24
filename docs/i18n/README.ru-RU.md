@@ -35,7 +35,7 @@
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский | <a href="README.tr-TR.md">Türkçe</a> | <a href="README.fr-FR.md">Français</a>
+  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский | <a href="README.tr-TR.md">Türkçe</a> | <a href="README.fr-FR.md">Français</a> | <a href="README.vi-VN.md">Tiếng Việt</a>
 </p>
 
 ---

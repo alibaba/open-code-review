@@ -17,6 +17,7 @@ const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'ko', label: '한국어' }, // allow-non-english: language options are labelled in their own language
   { value: 'tr', label: 'Türkçe' }, // allow-non-english: language options are labelled in their own language
   { value: 'ru', label: 'Русский' }, // allow-non-english: language options are labelled in their own language
+  { value: 'vi', label: 'Tiếng Việt' }, // allow-non-english: language options are labelled in their own language
 ];
 
 const LANG_BADGE: Record<Language, string> = {
@@ -26,6 +27,7 @@ const LANG_BADGE: Record<Language, string> = {
   ko: '한', // allow-non-english: single-glyph locale badge
   ru: 'Ru',
   tr: 'Tr',
+  vi: 'Vi',
 };
 
 // Locales whose badge glyph needs a script-specific face; everything else uses

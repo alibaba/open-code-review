@@ -16,6 +16,7 @@ const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'ko', label: '한국어' }, // allow-non-english: language options are labelled in their own language
   { value: 'tr', label: 'Türkçe' }, // allow-non-english: language options are labelled in their own language
   { value: 'ru', label: 'Русский' }, // allow-non-english: language options are labelled in their own language
+  { value: 'vi', label: 'Tiếng Việt' }, // allow-non-english: language options are labelled in their own language
 ];
 
 const Footer: React.FC = () => {

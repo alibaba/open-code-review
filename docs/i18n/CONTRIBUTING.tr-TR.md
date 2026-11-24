@@ -2,7 +2,7 @@
 
 OpenCodeReview'a katkıda bulunmak istediğiniz için teşekkür ederiz. İster bir yazım hatasını düzeltin, ister bir hata bildirin, ister yeni bir özellik geliştirin; her katkı değerlidir.
 
-[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md) | Türkçe
+[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md) | Türkçe | [Tiếng Việt](CONTRIBUTING.vi-VN.md)
 
 ## Davranış kuralları
 

@@ -67,3 +67,4 @@ do not edit them by hand:
   - docs/i18n/README.ru-RU.md
   - docs/i18n/README.tr-TR.md
   - docs/i18n/README.fr-FR.md
+  - docs/i18n/README.vi-VN.md
