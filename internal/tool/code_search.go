@@ -68,10 +68,9 @@ func (p *CodeSearchProvider) execute(ctx context.Context, args map[string]any) (
 	return result, nil
 }
 
-func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string) []string {
-	// core.quotepath=false reports non-ASCII paths literally instead of as
-	// quoted octal escapes, which file_read cannot open.
-	cmdArgs := []string{"--no-pager", "-c", "core.quotepath=false", "grep"}
+func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string, options ...string) []string {
+	cmdArgs := []string{"--no-pager", "grep", "-z", "-n", "--no-column", "--no-color"}
+	cmdArgs = append(cmdArgs, options...)
 
 	if noIndex {
 		// Non-git directory: search the working tree directly while still
@@ -90,7 +89,6 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 		cmdArgs = append(cmdArgs, "-F")
 	}
 
-	cmdArgs = append(cmdArgs, "-n", "--no-color")
 	// git grep limits matches per file. Fetch one extra to distinguish an exact
 	// limit from truncated results, then enforce the global limit below.
 	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
@@ -120,10 +118,7 @@ func hasTraversalPathComponent(pathspec string) bool {
 	return slices.Contains(strings.Split(norm, "/"), "..")
 }
 
-func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []string) (string, string, error) {
-	ctx, cancel := context.WithTimeout(parentCtx, gitGrepTimeout)
-	defer cancel()
-
+func (p *CodeSearchProvider) runGitGrep(ctx context.Context, cmdArgs []string) (string, string, error) {
 	if p.FileReader.Runner != nil {
 		stdout, stderr, err := p.FileReader.Runner.RunSplit(ctx, p.FileReader.RepoDir, cmdArgs...)
 		if ctx.Err() != nil && err != nil {
@@ -150,43 +145,33 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	if p.FileReader.Mode == ModeEmpty {
 		return "No matches found", nil
 	}
-	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
+	searchCtx, cancel := context.WithTimeout(ctx, gitGrepTimeout)
+	defer cancel()
+
+	noIndex := false
+	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, noIndex, pathspec)
 	if cmdArgs == nil {
 		return "Error: ref must not start with '-'", nil
 	}
 
-	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
+	outStr, errStr, err := p.runGitGrep(searchCtx, cmdArgs)
 
 	// Non-git directory: `git grep` exits 128 with "not a git repository".
 	// `ocr scan` supports plain directories, so retry in --no-index mode, which
 	// searches the working tree directly while still honoring .gitignore.
 	// Ref-based search needs a real repo, so it is not retried.
 	if err != nil && p.FileReader.Ref == "" && isNotGitRepoError(err, errStr) {
-		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
-		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
+		noIndex = true
+		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, noIndex, pathspec)
+		outStr, errStr, err = p.runGitGrep(searchCtx, cmdArgs)
 	}
 
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return "", fmt.Errorf("git grep timed out; try narrowing file_patterns to a more specific path: %w", err)
+		if outStr == "" && errStr == "" && gitGrepExitCode(err) == 1 {
+			return "No matches found", nil
 		}
-		if errors.Is(err, context.Canceled) {
-			return "", err
-		}
-		if outStr == "" {
-			var exitErr *exec.ExitError
-			exitCode := -1
-			if errors.As(err, &exitErr) {
-				exitCode = exitErr.ExitCode()
-			}
-			if errStr == "" && exitCode == 1 {
-				return "No matches found", nil
-			}
-			trimmedErr := trimGitUsage(errStr, exitCode)
-			if trimmedErr == "" {
-				return "", fmt.Errorf("git grep failed: %w", err)
-			}
-			return "", fmt.Errorf("git grep failed: %w: %s", err, trimmedErr)
+		if outStr == "" || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", gitGrepError(errStr, err)
 		}
 	}
 
@@ -205,40 +190,35 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	matchCount := 0
 	truncated := false
 	matchedFiles := make(map[string]bool)
-	binaryPrefix := "Binary file " + refPrefix
-	for line := range strings.SplitSeq(outStr, "\n") {
-		text, hasRefPrefix := strings.CutPrefix(line, refPrefix)
-		parts := strings.SplitN(text, ":", 3)
-		var ln int
-		var parseErr error
-		if hasRefPrefix && len(parts) == 3 {
-			ln, parseErr = strconv.Atoi(parts[1])
+	listPaths := func() (string, error) {
+		cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, noIndex, pathspec, "--files-with-matches")
+		paths, stderr, err := p.runGitGrep(searchCtx, cmdArgs)
+		if err != nil {
+			return "", gitGrepError(stderr, err)
 		}
-		var fname string
-		if ln > 0 && parseErr == nil {
-			fname = parts[0]
-		} else {
-			path, hasPrefix := strings.CutPrefix(line, binaryPrefix)
-			path, hasSuffix := strings.CutSuffix(path, " matches")
-			if !hasPrefix || !hasSuffix || path == "" {
-				continue
-			}
-			fname, ln = path, 0
-		}
-		seen := matchedFiles[fname]
-		matchedFiles[fname] = true
+		return paths, nil
+	}
+	pathWarning, parseErr := scanGrepMatches(outStr, refPrefix, listPaths, func(path string, line int, content string) {
+		seen := matchedFiles[path]
+		matchedFiles[path] = true
 		if matchCount >= gitGrepMaxCount {
 			// Keep scanning to finish counting matched files, but render no more.
 			truncated = true
-			continue
+			return
 		}
 		if !seen {
-			fileOrder = append(fileOrder, fname)
+			fileOrder = append(fileOrder, path)
 		}
-		if ln > 0 {
-			fileMatches[fname] = append(fileMatches[fname], match{lineNum: ln, content: parts[2]})
+		if line > 0 {
+			fileMatches[path] = append(fileMatches[path], match{lineNum: line, content: content})
 		}
 		matchCount++
+	})
+	if parseErr != nil {
+		return "", parseErr
+	}
+	if ctx.Err() != nil {
+		return "", gitGrepError("", ctx.Err())
 	}
 
 	var sb strings.Builder
@@ -248,6 +228,10 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 
 	for _, path := range fileOrder {
 		matches := fileMatches[path]
+		// Keep File headers on one line and distinguish escaped paths from literal ones.
+		if strings.ContainsAny(path, "\\\r\n") {
+			path = strconv.Quote(path)
+		}
 		if len(matches) == 0 {
 			fmt.Fprintf(&sb, "File: %s\n%s\n\n", path, CodeSearchBinaryMatch)
 			continue
@@ -261,8 +245,141 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	if err != nil && errStr != "" {
 		sb.WriteString(fmt.Sprintf("Warning: %s\n", strings.TrimSpace(errStr)))
 	}
+	if pathWarning != nil {
+		message := strings.NewReplacer("\r", " ", "\n", " ").Replace(pathWarning.Error())
+		fmt.Fprintf(&sb, "Warning: Some git grep matches could not be verified: %s\n", message)
+	}
 
 	return sb.String(), nil
+}
+
+func scanGrepMatches(output, refPrefix string, listPaths func() (string, error), emit func(string, int, string)) (warning error, err error) {
+	binaryPrefix := "Binary file " + refPrefix
+	ignoreMatch := func(string, int, string) {}
+	var lastName string
+	for output != "" {
+		name, record, hasSeparator := strings.Cut(output, "\x00")
+		if strings.HasPrefix(name, binaryPrefix) && (!hasSeparator || strings.Contains(name, " matches\n")) {
+			if !hasSeparator && strings.Count(name, "\n") == 1 {
+				path, ok := strings.CutSuffix(name[len(binaryPrefix):], " matches\n")
+				if ok && path != "" {
+					emit(path, 0, "")
+					break
+				}
+			}
+			// Binary diagnostics lack NUL delimiters and their paths can contain
+			// newlines. Match them against Git's separately delimited path list.
+			if warning == nil {
+				paths, pathErr := listPaths()
+				if pathErr == nil {
+					// Verify the entire file list before trusting any of its record boundaries.
+					pathErr = scanGrepMatchesByPath(output, paths, lastName, refPrefix, ignoreMatch)
+					if pathErr == nil {
+						return nil, scanGrepMatchesByPath(output, paths, lastName, refPrefix, emit)
+					}
+				}
+				if errors.Is(pathErr, context.Canceled) {
+					return nil, pathErr
+				}
+				warning = pathErr
+				continue
+			}
+			if !hasSeparator {
+				break
+			}
+			// The next NUL belongs to a text match, but its path may overlap
+			// the binary diagnostics. Skip that record and resume after it.
+			output, err = scanGrepTextLine("", record, ignoreMatch)
+			if err != nil {
+				return errors.Join(warning, err), nil
+			}
+			continue
+		}
+		path, hasRef := strings.CutPrefix(name, refPrefix)
+		if !hasSeparator || !hasRef || path == "" {
+			return errors.Join(warning, fmt.Errorf("invalid path in git grep output")), nil
+		}
+		output, err = scanGrepTextLine(path, record, emit)
+		if err != nil {
+			return errors.Join(warning, err), nil
+		}
+		lastName = name
+	}
+	return warning, nil
+}
+
+func scanGrepMatchesByPath(output, paths, lastName, refPrefix string, emit func(string, int, string)) error {
+	paths, terminated := strings.CutSuffix(paths, "\x00")
+	if !terminated {
+		return fmt.Errorf("incomplete git grep file list")
+	}
+	for name := range strings.SplitSeq(paths, "\x00") {
+		if lastName != "" {
+			if name == lastName {
+				lastName = ""
+			}
+			continue
+		}
+		path, ok := strings.CutPrefix(name, refPrefix)
+		if !ok || path == "" {
+			return fmt.Errorf("invalid path in git grep file list")
+		}
+		if rest, binary := strings.CutPrefix(output, "Binary file "+name+" matches\n"); binary {
+			emit(path, 0, "")
+			output = rest
+			continue
+		}
+		prefix := name + "\x00"
+		if !strings.HasPrefix(output, prefix) {
+			return fmt.Errorf("git grep results differ from the matching file list")
+		}
+		for strings.HasPrefix(output, prefix) {
+			var err error
+			output, err = scanGrepTextLine(path, output[len(prefix):], emit)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if lastName != "" || output != "" {
+		return fmt.Errorf("git grep results differ from the matching file list")
+	}
+	return nil
+}
+
+func scanGrepTextLine(path, record string, emit func(string, int, string)) (string, error) {
+	number, payload, hasSeparator := strings.Cut(record, "\x00")
+	line, err := strconv.Atoi(number)
+	if !hasSeparator || err != nil || line <= 0 {
+		return "", fmt.Errorf("invalid line number in git grep output")
+	}
+	content, rest, terminated := strings.Cut(payload, "\n")
+	if !terminated {
+		return "", fmt.Errorf("incomplete text record in git grep output")
+	}
+	emit(path, line, content)
+	return rest, nil
+}
+
+func gitGrepExitCode(err error) int {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
+}
+
+func gitGrepError(stderr string, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("git grep timed out; try narrowing file_patterns to a more specific path: %w", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return err
+	}
+	if message := trimGitUsage(stderr, gitGrepExitCode(err)); message != "" {
+		return fmt.Errorf("git grep failed: %w: %s", err, message)
+	}
+	return fmt.Errorf("git grep failed: %w", err)
 }
 
 func trimGitUsage(stderr string, exitCode int) string {
@@ -276,10 +393,6 @@ func trimGitUsage(stderr string, exitCode int) string {
 }
 
 func isNotGitRepoError(err error, stderr string) bool {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 128 &&
-		(strings.Contains(stderr, "not a git repository") || strings.Contains(stderr, ".git")) {
-		return true
-	}
-	return false
+	return gitGrepExitCode(err) == 128 &&
+		(strings.Contains(stderr, "not a git repository") || strings.Contains(stderr, ".git"))
 }

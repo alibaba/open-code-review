@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -120,6 +121,30 @@ func TestScopedSearchBinaryMatches(test *testing.T) {
 	if err != nil || !strings.Contains(mixed.ReturnedContent, want) || strings.Contains(mixed.ReturnedContent, "excluded.bin") ||
 		len(mixed.Locations) != 1 || mixed.Locations[0].Path != "main.go" || mixed.Locations[0].StartLine != 1 {
 		test.Fatalf("mixed search returned %+v, error=%v", mixed, err)
+	}
+}
+
+func TestScopedSearchLiteralQuotedBinaryPath(test *testing.T) {
+	if runtime.GOOS == "windows" {
+		test.Skip("Windows filenames cannot contain double quotes")
+	}
+	const path = "asset\"v2.bin"
+	input := fixture(test)
+	writeSearchBoundaryFile(test, input.RepoDir, path, "\x00binary needle\n")
+	writeSearchBoundaryFile(test, input.RepoDir, "excluded.bin", "\x00binary needle\n")
+	git(test, input.RepoDir, "add", ".")
+	git(test, input.RepoDir, "commit", "-qm", "Add quoted binary search fixture")
+	input.Resolution.ResolvedHead = git(test, input.RepoDir, "rev-parse", "HEAD")
+	input.ExcludePatterns = append(input.ExcludePatterns, "excluded.bin")
+	code, err := prepareCodeTools(test.Context(), input)
+	if err != nil {
+		test.Fatal(err)
+	}
+
+	got, err := code.execute(test.Context(), "code_search", map[string]any{"search_text": "binary needle"})
+	want := "File: " + path + "\n" + tool.CodeSearchBinaryMatch + "\n\n"
+	if err != nil || got.ReturnedContent != want || len(got.Locations) != 0 || got.Truncated || got.ErrorClass != "" {
+		test.Fatalf("search returned %+v, error = %v; want %q with no locations", got, err, want)
 	}
 }
 
