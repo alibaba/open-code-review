@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -103,7 +104,10 @@ func TestReviewE2E_CleanRunEmitsNoRetryReport(t *testing.T) {
 }
 
 func TestReviewE2E_RecoveredAndFailedReachesJSONExit(t *testing.T) {
-	repoDir := retryTestRepo(t)
+	repoDir, err := resolveRepoDir(retryTestRepo(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv := newFakeLLM()
 	srv.rateLimitOnce["a.go"] = true
 	srv.hardFail["b.go"] = true
@@ -174,12 +178,42 @@ func TestReviewE2E_RecoveredAndFailedReachesJSONExit(t *testing.T) {
 
 	// Whatever the JSON says must also be readable in the run's stderr-free
 	// stdout stream as a single document.
+	var stdout struct {
+		RetryReport map[string]any `json:"retry_report"`
+	}
 	dec := json.NewDecoder(strings.NewReader(out))
-	if e := dec.Decode(new(jsonOutput)); e != nil {
+	dec.UseNumber()
+	if e := dec.Decode(&stdout); e != nil {
 		t.Fatalf("decode: %v", e)
 	}
 	if dec.More() {
 		t.Error("stdout must carry exactly one JSON document")
+	}
+
+	sessionPath, err := session.SessionFilePath(repoDir, got.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.TrimSuffix(data, []byte("\n"))
+	lastLine := data[bytes.LastIndexByte(data, '\n')+1:]
+	var lastRecord struct {
+		Type        string         `json:"type"`
+		RetryReport map[string]any `json:"llm_retry_report"`
+	}
+	recordDecoder := json.NewDecoder(bytes.NewReader(lastLine))
+	recordDecoder.UseNumber()
+	if err := recordDecoder.Decode(&lastRecord); err != nil {
+		t.Fatalf("decode final session record: %v", err)
+	}
+	if lastRecord.Type != "session_end" {
+		t.Fatalf("final session record type = %q, want session_end", lastRecord.Type)
+	}
+	if !reflect.DeepEqual(lastRecord.RetryReport, stdout.RetryReport) {
+		t.Errorf("session_end.llm_retry_report = %v, want stdout.retry_report = %v", lastRecord.RetryReport, stdout.RetryReport)
 	}
 }
 

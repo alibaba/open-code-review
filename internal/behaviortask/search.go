@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -62,10 +63,8 @@ func (code *codeTools) searchPaths(ctx context.Context, args map[string]any, sid
 	for _, raw := range patterns {
 		pattern, _ := raw.(string)
 		pattern = strings.ReplaceAll(pattern, "\\", "/")
-		for _, component := range strings.Split(pattern, "/") {
-			if component == ".." {
-				return nil, fmt.Errorf("file_patterns must not contain ..")
-			}
+		if slices.Contains(strings.Split(pattern, "/"), "..") {
+			return nil, fmt.Errorf("file_patterns must not contain ..")
 		}
 		if pattern != "" {
 			patternBytes += len(pattern) + 1
@@ -81,7 +80,7 @@ func (code *codeTools) searchPaths(ctx context.Context, args map[string]any, sid
 	}
 	seen := map[string]bool{}
 	var paths []string
-	for _, filePath := range strings.Split(string(data), "\x00") {
+	for filePath := range strings.SplitSeq(string(data), "\x00") {
 		if !seen[filePath] && code.allowed[side][filePath] {
 			seen[filePath] = true
 			paths = append(paths, filePath)
@@ -129,7 +128,7 @@ func (code *codeTools) search(ctx context.Context, provider tool.Provider, args 
 				matches = nil
 			}
 		}
-		for _, line := range strings.Split(stripSide(content), "\n") {
+		for line := range strings.SplitSeq(stripSide(content), "\n") {
 			switch {
 			case strings.HasPrefix(line, "File: "):
 				flush()

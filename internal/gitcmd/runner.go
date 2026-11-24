@@ -270,10 +270,7 @@ func (b *boundedStderr) Write(p []byte) (int, error) {
 	n := len(p)
 	b.total += n
 	if room := boundedStderrPrefixLimit - len(b.prefix); room > 0 {
-		take := n
-		if take > room {
-			take = room
-		}
+		take := min(n, room)
 		b.prefix = append(b.prefix, p[:take]...)
 		p = p[take:]
 	}
@@ -342,17 +339,13 @@ func (r *Runner) capture(ctx context.Context, repoDir string, combined bool, std
 		stdoutBuf bytes.Buffer
 		wg        sync.WaitGroup
 	)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, _ = io.Copy(&stdoutBuf, outPipe.r)
-	}()
+	})
 	if errPipe != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, _ = io.Copy(stderrSink, errPipe.r)
-		}()
+		})
 	}
 
 	// Arm the deadline before waiting: either Wait or the copy can be the one
@@ -458,11 +451,9 @@ func (r *Runner) Stream(ctx context.Context, repoDir string, consume func(stdout
 
 	var stderrBuf bytes.Buffer
 	var stderrWG sync.WaitGroup
-	stderrWG.Add(1)
-	go func() {
-		defer stderrWG.Done()
+	stderrWG.Go(func() {
 		_, _ = io.Copy(&stderrBuf, errPipe.r)
-	}()
+	})
 
 	// consume runs in its own goroutine so that a read blocked on an inherited
 	// pipe can still be unblocked by the grace timer.

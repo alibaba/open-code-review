@@ -77,7 +77,7 @@ func TestCompressionBudgetIncludesNewSummary(test *testing.T) {
 	task.MaxContextTokens = 1000
 	task.MaxCompletionTokens = 150
 	messages := []llm.Message{msg("system", "system"), msg("user", strings.Repeat("frozen ", 100))}
-	for roundIndex := 0; roundIndex < 8; roundIndex++ {
+	for roundIndex := range 8 {
 		messages = append(messages, msg("assistant", "round_"+strconv.Itoa(roundIndex)), msg("tool", strings.Repeat("data ", 100)))
 	}
 	original := copyMessages(messages)
@@ -164,7 +164,7 @@ func TestCompressionBudgetMainLoopContinues(test *testing.T) {
 		return execute(ctx, key, call, record, thinking)
 	}
 	messages := []llm.Message{msg("system", "sys"), msg("user", strings.Repeat("prompt ", 100))}
-	for roundIndex := 0; roundIndex < 6; roundIndex++ {
+	for range 6 {
 		messages = append(messages, msg("assistant", "read"), msg("tool", strings.Repeat("data ", 100)))
 	}
 	mainRequests := 0
@@ -249,7 +249,7 @@ func TestCompressionBudgetIgnoresNonShrinkingSummary(test *testing.T) {
 	client := &fakeLLMClient{response: &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}}}}
 	runner := NewRunner(Deps{LLMClient: client, Session: session.New(test.TempDir(), "main", "fake", session.SessionOptions{})}, task)
 	messages := []llm.Message{msg("system", "sys"), msg("user", "prompt")}
-	for roundIndex := 0; roundIndex < 2; roundIndex++ {
+	for range 2 {
 		messages = append(messages, msg("assistant", "read"), msg("tool", strings.Repeat("data ", 350)))
 	}
 	got, err := runner.runCompression(test.Context(), messages, "task")

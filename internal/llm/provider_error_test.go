@@ -206,7 +206,7 @@ func TestWithProviderErrorBody_IsIdempotent(t *testing.T) {
 	if once != 1 {
 		t.Fatalf("first enrichment produced %d copies, want 1", once)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		err = withProviderErrorBody(err)
 		if got := strings.Count(err.Error(), "only once please"); got != 1 {
 			t.Fatalf("after %d further enrichments the payload appears %d times, want 1", i+1, got)

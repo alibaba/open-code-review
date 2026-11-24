@@ -13,7 +13,7 @@ import {
 import type { LoadedDocContent } from './index';
 import type { DocSlug, LocalizedDocs } from './types';
 
-const LANGUAGES = ['en', 'zh', 'ja', 'ko', 'ru'] as const;
+const LANGUAGES = ['en', 'zh', 'ja', 'ko', 'ru', 'tr'] as const;
 
 /* The order the previous synchronous search iterated (the historical enDocs
  * key order). Result ordering must stay identical after the lazy-loading
