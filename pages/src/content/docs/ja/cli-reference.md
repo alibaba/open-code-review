@@ -533,7 +533,8 @@ CI ジョブで確認を省略するには `--yes`（`-y`）を渡してくだ�
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git repository root (default: current dir)
+  --repo <path>    確認対象のプロジェクトディレクトリ（既定値: 現在のディレクトリ）。
+                   Git ワークツリー内では、そのルートからルールを読み込みます。
   --rule <path>    Path to a custom rule JSON file
 ```
 

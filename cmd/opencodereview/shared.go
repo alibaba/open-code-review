@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -151,22 +152,26 @@ func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxG
 // true, returns an error if the directory is not a git repo. When false,
 // returns IsGitRepo=false instead of erroring (scan path uses this).
 func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
-	if input == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", false, fmt.Errorf("get working directory: %w", err)
-		}
-		input = wd
-	}
-	absPath, err := filepath.Abs(input)
+	absPath, err := absInputDir(input)
 	if err != nil {
-		return "", false, fmt.Errorf("resolve absolute path: %w", err)
+		return "", false, err
 	}
-	if _, statErr := os.Stat(absPath); statErr != nil {
-		return "", false, fmt.Errorf("stat %s: %w", absPath, statErr)
+	isGit, probeErr := probeGitDir(absPath)
+	if probeErr != nil {
+		// A failed probe is not "no repository": the directory may sit
+		// inside a repository git refuses to read. Review cannot work
+		// without git either way, so it gets the real reason instead of
+		// the misleading "is not a git repository".
+		if requireGit {
+			return "", false, probeErr
+		}
+		// Scan and session keep their old tolerance: once the probe reports
+		// no usable repository they never run git themselves, so an
+		// unusable git degrades them to their non-git mode. `ocr rules
+		// check` resolves the probe itself (resolveRepoDir) so it can fail
+		// loudly instead of silently changing the rule root.
 	}
-	out, err := runGitCmd(absPath, "rev-parse", "--git-dir")
-	isGit := err == nil && len(out) > 0
+
 	if !isGit && requireGit {
 		return "", false, fmt.Errorf("%s is not a git repository", absPath)
 	}
@@ -200,6 +205,67 @@ func anchorToGitTopLevel(absPath string) (string, error) {
 		return "", fmt.Errorf("%s is a git repository without a work tree (bare repo?); cannot resolve its top level", absPath)
 	}
 	return t, nil
+}
+
+// absInputDir resolves a --repo flag value (empty means the current working
+// directory) to an absolute path and checks that it exists on disk.
+func absInputDir(input string) (string, error) {
+	if input == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("get working directory: %w", err)
+		}
+		input = wd
+	}
+	absPath, err := filepath.Abs(input)
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute path: %w", err)
+	}
+	if _, statErr := os.Stat(absPath); statErr != nil {
+		return "", fmt.Errorf("stat %s: %w", absPath, statErr)
+	}
+	return absPath, nil
+}
+
+// probeGitDir reports whether git sees a repository at or above absPath. A
+// failed probe is a different answer from "no repository": git may instead be
+// refusing to read one that is there (dubious ownership, an unsafe repository,
+// a broken .git, a missing git binary), which probeGitDir reports as an error
+// so callers that derive meaning from "not a repository" can surface the
+// refusal instead of silently downgrading.
+func probeGitDir(absPath string) (bool, error) {
+	cmd := exec.Command("git", "-C", absPath, "rev-parse", "--git-dir")
+	// Discovery failures are classified by Git's English diagnostics.
+	cmd.Env = append(cmd.Environ(), "LC_ALL=C")
+	out, err := cmd.CombinedOutput()
+	if isNoGitRepoProbe(out, err) {
+		return false, nil
+	}
+	if err != nil {
+		reason := strings.TrimSpace(string(out))
+		if reason == "" {
+			reason = err.Error()
+		}
+		return false, fmt.Errorf("cannot determine whether %s is inside a git repository: %s", absPath, reason)
+	}
+	return len(out) > 0, nil
+}
+
+// Git uses exit 128 for both discovery misses and repository access errors.
+func isNoGitRepoProbe(out []byte, err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 128 {
+		return false
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if !strings.HasPrefix(line, "fatal: ") {
+			continue
+		}
+		return line == "fatal: not a git repository (or any of the parent directories): .git" ||
+			strings.HasPrefix(line, "fatal: not a git repository (or any parent up to mount point ")
+	}
+	return false
 }
 
 // llmRuntime bundles the LLM-side state both subcommands need once they've

@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -175,6 +176,103 @@ func TestResolveRepoDir_BareRepoFailsLoudly(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "without a work tree") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestProbeGitDir_PlainDir(t *testing.T) {
+	isGit, err := probeGitDir(t.TempDir())
+	if err != nil {
+		t.Fatalf("plain dir must classify as no-repository, not error: %v", err)
+	}
+	if isGit {
+		t.Error("plain dir must not report a repository")
+	}
+}
+
+func TestIsNoGitRepoProbe(t *testing.T) {
+	cmd := exec.Command("git", "-C", t.TempDir(), "rev-parse", "--git-dir")
+	_, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 128 {
+		t.Fatalf("expected git to exit with status 128, got %v", err)
+	}
+
+	for _, tt := range []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{"no repository", "fatal: not a git repository (or any of the parent directories): .git\n", true},
+		{"mount boundary", "fatal: not a git repository (or any parent up to mount point /dev)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n", true},
+		{"dubious ownership", "fatal: detected dubious ownership in repository at '/worktree'\n", false},
+		{"invalid git directory", "fatal: not a git repository: /worktree/.git\n", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isNoGitRepoProbe([]byte(tt.output), err); got != tt.want {
+				t.Errorf("isNoGitRepoProbe() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProbeGitDir_GitRepo(t *testing.T) {
+	isGit, err := probeGitDir(initTestGitRepo(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !isGit {
+		t.Error("git repo must report a repository")
+	}
+}
+
+// TestProbeGitDir_MissingGitBinary pins the other half of the classification:
+// with no git to ask, "is this inside a repository" has no answer, so the
+// probe must report that instead of guessing a plain directory.
+func TestProbeGitDir_MissingGitBinary(t *testing.T) {
+	t.Setenv("PATH", "")
+	_, err := probeGitDir(t.TempDir())
+	if err == nil {
+		t.Fatal("expected an error when git cannot be executed")
+	}
+	if !strings.Contains(err.Error(), "cannot determine") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestResolveRepoDir_GitProbeFailureFailsLoudly verifies that when git
+// refuses to read the repository (dubious ownership in a worktree
+// subdirectory is the case that bit), `ocr rules check` must fail loudly
+// instead of silently treating the subdirectory as a plain project root,
+// which would print a global or built-in rule for the wrong directory. The
+// repo is initialized before t.Setenv: under GIT_TEST_ASSUME_DIFFERENT_OWNER
+// even `git add` is refused, so initTestGitRepo would fail.
+func TestResolveRepoDir_GitProbeFailureFailsLoudly(t *testing.T) {
+	repo := initTestGitRepo(t)
+	sub := filepath.Join(repo, "subproject1", "src")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make git distrust the repo it just created, as if it were owned by
+	// someone else. Neutralized global/system configs keep a machine's
+	// safe.directory exception from silencing the refusal.
+	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+	if out, err := runGitCmd(sub, "rev-parse", "--git-dir"); err == nil {
+		t.Skip("installed git does not honor GIT_TEST_ASSUME_DIFFERENT_OWNER")
+	} else if !strings.Contains(string(out), "dubious ownership") {
+		t.Fatalf("expected git ownership refusal, got %v: %s", err, out)
+	}
+
+	prevRepoDir := rulesCheckRepoDir
+	rulesCheckRepoDir = sub
+	t.Cleanup(func() { rulesCheckRepoDir = prevRepoDir })
+	if err := runRulesCheck("src/Example.java"); err == nil {
+		t.Fatal("rules check must fail when git refuses to read the repository")
+	} else if !strings.Contains(err.Error(), "dubious ownership") {
+		t.Errorf("rules check should surface git's refusal, got: %v", err)
 	}
 }
 

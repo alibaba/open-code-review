@@ -37,7 +37,8 @@ var rulesCheckCmd = &cobra.Command{
 }
 
 func init() {
-	addRepoFlag(rulesCheckCmd, &rulesCheckRepoDir)
+	rulesCheckCmd.Flags().StringVar(&rulesCheckRepoDir, "repo", "",
+		"Project directory to inspect (default: current directory). Inside a Git worktree, rules are loaded from the worktree root.")
 	rulesCheckCmd.Flags().StringVar(&rulesCheckRulePath, "rule", "", "path to a custom rule JSON file")
 	rulesCmd.AddCommand(rulesCheckCmd)
 }
