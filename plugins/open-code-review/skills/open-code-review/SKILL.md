@@ -35,7 +35,11 @@ Analyze the review target (commits, branch, or changes) to extract concise busin
 
 ### Step 2: Run Code Review
 
-**Run `ocr review` directly.** Do not probe with `command -v ocr` or `ocr --version` first; that adds an unnecessary tool call on the normal path.
+**GitHub PR mode:** A bare positive number (e.g. `42`) selects a PR in the GitHub CLI's default repository for this checkout, which can be upstream of a fork. The `pr` prefix is optional. For a PR number or GitHub PR URL, run `python3 "$SKILL_DIR/scripts/review_pr.py" <id-or-url>` once, resolving `SKILL_DIR` from this installed skill. Forward an explicit `--repo OWNER/REPO` or `--background`. Read the printed `run.json` and its result file; report the resolved PR URL, reviewed revisions, freshness, and artifact path with Step 3. On failure report the failed step, not a fallback branch review. Only PR mode needs Python 3 and authenticated `gh`.
+
+PR mode uses built-in and user review rules, not rules from the PR. It stops if MCP servers are configured or the PR changes Git filtering metadata; do not bypass a policy stop.
+
+**Otherwise run `ocr review` directly.** Do not probe with `command -v ocr` or `ocr --version` first; that adds an unnecessary tool call on the normal path.
 
 For a workspace review, omit revision flags and `--analysis`. **Pass business context via `--background`** when available:
 
@@ -60,7 +64,7 @@ ocr review --audience agent --background "business context here"
 | User says | Command to run |
 |-----------|---------------|
 | "review my changes" / "review the working copy" | `ocr review --audience agent -b "context"` |
-| "review this PR" / "review feature branch" | `ocr review --audience agent -b "context" --from <base> --to <branch> --analysis --format json` |
+| "review feature branch" | `ocr review --audience agent -b "context" --from <base> --to <branch> --analysis --format json` |
 | "review the current branch against main" | `ocr review --audience agent -b "context" --from main --analysis --format json` |
 | "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123 --analysis --format json` |
 | "what would be reviewed?" (dry-run) | `ocr review --preview` |
@@ -78,14 +82,22 @@ Omit `--analysis` for workspace reviews, `--preview`, `--resume`, or `--format s
 
 **On failure:** If `ocr review` exits non-zero (e.g. an LLM connection error), do not retry blindly — consult the Troubleshooting section below for the matching fix before re-running.
 
-### Step 3: Report
+### Step 3: Verify and Report
 
-OCR output includes structured `severity` (critical / high / medium / low) and `category` (bug / security / performance / maintainability / test / style / documentation / other) on each comment. Present results grouped by severity, discarding `low` severity items that are likely false positives or nitpicks.
+Treat every OCR Review comment, including low-severity ones, as a claim for the host agent to check against the reviewed workspace or exact revisions. Trace the stated trigger to the claimed effect. For ordinary functional bugs, try the smallest safe, non-destructive check that exercises that path; compare with the base when the claim is a regression. In PR mode, inspect blobs at the recorded SHAs in the retained `worktree` from `run.json`, not the current branch. Do not run PR-supplied code, tests, or builds, bypass a policy stop, or try to exploit a suspected vulnerability.
 
-For combined runs, report Review and Analysis separately. Use these fields in `ocr.review-with-analysis/v2` JSON; if the caller requested text, use the Review summary and appended Analysis Report instead:
+After reporting the PR result and finishing any requested fixes, give the snapshot path and ask whether to discard it, including uncommitted edits and local-only commits. No answer means keep it. Cleanup preserves the report, manifest, and changes already pushed to the PR.
 
-- **Review:** report findings from `comments` and coverage from `review_status` and `manifest.coverage` when available. A zero exit code or empty `comments` does not prove all selected files were reviewed.
-- **Analysis:** summarize the before/after behavior, affected workflows, and any decisions supported by `analysis`. Distinguish `analysis_meta.execution_status` from `analysis_meta.declared_completion` (the model's assessment). For example, `completed` with declared `partial` means the investigation ran but left questions open. If analysis was skipped or failed, say why when known and retain the Review findings; do not infer that behavior is unchanged. If the combined schema or analysis metadata is missing, report analysis as unverified.
+Only after explicit consent, run `python3 "$SKILL_DIR/scripts/review_pr.py" --cleanup <run.json>` for that run. If the user requested a push, first verify the intended commit is on the PR's remote head branch, for example by comparing it with `gh pr view <pr-url> --json headRefOid`. If the push fails or cannot be verified, keep the snapshot and explain why. Report any cleanup warning or refusal; do not bypass it.
+
+For text and JSON alike, report findings in two groups, keeping OCR order within each. Keep OCR's claim, severity, category, location, and any suggestion distinct from the host's evidence:
+
+- **Reproduced:** give the trigger, the check performed, and the observed result. A source observation can establish a directly inspectable fact; it is not a reproduction of predicted runtime behavior.
+- **Uncertain:** say what was checked, why it did not settle the claim, and what evidence or maintainer decision would settle it. Include claims that could not be checked safely or within the available time. A passing unrelated test or a single unsuccessful attempt does not refute a claim.
+
+Omit a claim from the default findings list only when specific evidence contradicts it. Keep the raw OCR result unchanged and provide its path when saved. If the user asks for the full OCR report, include the original comments separately, without internal fields such as `thinking`. Report Review coverage and gaps from `review_status` and `manifest.coverage` when available, even if neither group contains findings.
+
+**Analysis (combined runs):** render the `analysis` Markdown directly, not `analysis_raw` or a paraphrase. Preserve headings, all table rows, lists, and caveats. Keep Analysis and PR snapshot details separate from host verification. Distinguish `analysis_meta.execution_status` from `analysis_meta.declared_completion`; report skipped, failed, or unverified Analysis without discarding Review. If the report cannot fit, identify what was omitted and give the full artifact path.
 
 ### Step 4: Fix
 
@@ -97,48 +109,9 @@ Before applying fixes, check whether the user requested automatic fixes:
 When fixing issues and suggestions:
 
 - Focus on critical, high, and medium severity items
-- Apply fixes directly to the code when safe and well-defined
+- Apply fixes only for verified issues when safe and well-defined; flag uncertain items for a decision instead
 - For complex fixes requiring manual intervention, clearly describe what needs to be done
 - Always verify fixes with the user before committing
-
-## Output Format
-
-Each comment in OCR's output contains:
-
-- `path`: File path
-- `content`: Review comment text
-- `start_line` / `end_line`: Line range (both 0 means positioning failed)
-- `category`: Issue category (bug, security, performance, maintainability, test, style, documentation, other)
-- `severity`: Issue severity (critical, high, medium, low)
-- `suggestion_code`: Optional fix suggestion
-- `existing_code`: Optional original code snippet
-- `thinking`: Optional LLM reasoning process
-
-Present results grouped by severity using this template:
-
-```markdown
-## Code Review Results
-
-**Files reviewed**: N
-**Issues found**: X critical, Y high, Z medium
-
-### Critical
-
-- **`path/to/file.java:42`** [bug] — Brief description
-  > Recommendation: How to fix
-
-### High
-
-- **`path/to/file.java:26`** [bug] — Brief description
-  > Recommendation: How to fix
-
-### Medium
-
-- **`path/to/file.ts:88`** [performance] — Brief description
-  > Recommendation: How to fix (if applicable)
-```
-
-Only use "Review complete — no critical, high, or medium issues found in N files" when Review coverage supports it. Otherwise state the known coverage and gaps. For combined runs, also report the Analysis outcome separately.
 
 **Handling mispositioned comments:**
 
