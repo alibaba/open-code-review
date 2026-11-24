@@ -69,7 +69,10 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
-2026 年 12 月 2 日起，GitHub 将默认拦截公开仓库中的 `pull_request_target` 事件。要继续使用 PR 自动评审，请在仓库的 **Settings → Actions → Policies** 中[为 `.github/workflows/ocr-review.yml` 放行 `pull_request_target`](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
+2026 年 12 月 2 日起，GitHub 将默认拦截公开仓库中的 `pull_request_target` 事件。如果你需要让 OCR 在 PR 打开或更新时继续自动运行，请在仓库的 **Settings → Actions → Policies** 中[添加如下策略](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)：
+
+- 在 **Target workflows** 下点击 **Add target**，指定 `.github/workflows/ocr-review.yml`。
+- 勾选 **Restrict events**，把 `pull_request_target` 加入允许的事件列表。
 
 ### 必需 secret
 

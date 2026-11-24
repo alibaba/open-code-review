@@ -84,7 +84,10 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
-С 2 декабря 2026 года GitHub по умолчанию блокирует событие `pull_request_target` в публичных репозиториях. Чтобы сохранить автоматическое ревью PR, откройте **Settings → Actions → Policies** в своём репозитории и [разрешите событие `pull_request_target` для `.github/workflows/ocr-review.yml`](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+С 2 декабря 2026 года GitHub по умолчанию блокирует событие `pull_request_target` в публичных репозиториях. Чтобы OCR по-прежнему запускался автоматически при открытии или обновлении PR, откройте **Settings → Actions → Policies** в своём репозитории и [добавьте политику](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+
+- В разделе **Target workflows** нажмите **Add target** и укажите `.github/workflows/ocr-review.yml`.
+- Установите флажок **Restrict events** и добавьте `pull_request_target` в список разрешённых событий.
 
 ### Необходимые секреты
 

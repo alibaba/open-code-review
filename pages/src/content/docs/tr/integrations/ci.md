@@ -50,7 +50,10 @@ curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
 
-2 Aralık 2026'dan itibaren GitHub, herkese açık depolarda `pull_request_target` olayını varsayılan olarak engeller. Otomatik PR incelemelerinin devam etmesi için deponuzda **Settings → Actions → Policies** altında [`.github/workflows/ocr-review.yml` için `pull_request_target` olayına izin verin](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+2 Aralık 2026'dan itibaren GitHub, herkese açık depolarda `pull_request_target` olayını varsayılan olarak engelleyecek. PR açıldığında veya güncellendiğinde OCR'ın otomatik olarak çalışmaya devam etmesi için deponuzda **Settings → Actions → Policies** bölümünü açın ve [bir politika ekleyin](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+
+- **Target workflows** altında **Add target** düğmesine tıklayın ve `.github/workflows/ocr-review.yml` dosyasını belirtin.
+- **Restrict events** seçeneğini işaretleyin ve izin verilen olaylar listesine `pull_request_target` olayını ekleyin.
 
 ### Gerekli sırlar {#required-secrets}
 
