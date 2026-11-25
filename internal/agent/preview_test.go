@@ -223,6 +223,27 @@ func TestWhyExcluded_DefaultPathFilter(t *testing.T) {
 			},
 			expected: ExcludeDefaultPath,
 		},
+		{
+			name: "cpp gtest file excluded by default path",
+			diff: model.Diff{
+				NewPath: "absl/strings/str_cat_test.cc",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "c file in tests directory excluded by default path",
+			diff: model.Diff{
+				NewPath: "tests/unit/test_list.c",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "cpp contest source kept",
+			diff: model.Diff{
+				NewPath: "src/contest.cc",
+			},
+			expected: ExcludeNone,
+		},
 	}
 
 	for _, tt := range tests {
