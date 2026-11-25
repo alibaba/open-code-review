@@ -5,6 +5,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,25 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
+
+func TestMatchFileNamesAuthorizesOnlyCandidates(t *testing.T) {
+	files := []string{"irrelevant.go", "service.go", "service/main.go"}
+	allow := func(name string) bool {
+		if name == "irrelevant.go" {
+			t.Fatal("authorized a non-match")
+		}
+		return name == "service/main.go"
+	}
+	got, err := MatchFileNames(t.Context(), files, "service", false, 1, allow)
+	if err != nil || len(got) != 1 || got[0] != "service/main.go" {
+		t.Fatalf("%v: %v", got, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := MatchFileNames(ctx, files, "service", false, 1, allow); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
 
 // TestFileFind_NonGitDirectoryFallback verifies file_find works in a plain
 // (non-git) directory by falling back to a filesystem walk instead of
@@ -118,6 +138,10 @@ func setupFileFindRepo(t *testing.T) string {
 	write("Makefile", "all:\n")
 	write("Dockerfile", "FROM scratch\n")
 	write("LICENSE", "MIT\n")
+	write("BUILD", "filegroup(name = \"root\")\n")
+	write("pkg/BUILD", "filegroup(name = \"pkg\")\n")
+	write("WORKSPACE", "workspace(name = \"root\")\n")
+	write("legacy/WORKSPACE", "workspace(name = \"legacy\")\n")
 	write("data_binary", "binary\n")
 
 	run("git", "add", ".")
@@ -156,6 +180,39 @@ func TestFileFind_GitRepo_CommitMode(t *testing.T) {
 	}
 	if !strings.Contains(got, "main.go") {
 		t.Errorf("expected main.go in commit mode, got: %s", got)
+	}
+}
+
+func TestFileFind_GitRepo_StarlarkBuildFiles(t *testing.T) {
+	dir := setupFileFindRepo(t)
+	for _, tc := range []struct {
+		name string
+		mode ReviewMode
+		ref  string
+	}{
+		{name: "workspace", mode: ModeWorkspace},
+		{name: "commit", mode: ModeCommit, ref: "HEAD"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewFileFind(&FileReader{RepoDir: dir, Mode: tc.mode, Ref: tc.ref})
+			for _, query := range []struct {
+				name string
+				want string
+			}{
+				{name: "BUILD", want: "BUILD\npkg/BUILD"},
+				{name: "WORKSPACE", want: "WORKSPACE\nlegacy/WORKSPACE"},
+			} {
+				t.Run(query.name, func(t *testing.T) {
+					got, err := p.Execute(context.Background(), map[string]any{"query_name": query.name})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got != query.want {
+						t.Errorf("Execute(%q) = %q, want %q", query.name, got, query.want)
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -287,6 +344,10 @@ func TestShouldSkipFile(t *testing.T) {
 		{"LICENSE", false},
 		{"Vagrantfile", false},
 		{"Containerfile", false},
+		{"BUILD", false},
+		{"pkg/BUILD", false},
+		{"WORKSPACE", false},
+		{"legacy/WORKSPACE", false},
 		{"some_binary", true},
 		{"dir/unknown_file", true},
 	}
@@ -295,6 +356,33 @@ func TestShouldSkipFile(t *testing.T) {
 			got := shouldSkipFile(tt.path)
 			if got != tt.want {
 				t.Errorf("shouldSkipFile(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFileFind_NonASCIIPath verifies that file_find reports non-ASCII paths
+// literally instead of as quoted octal escapes under git's default
+// core.quotepath=true configuration in both workspace and commit modes.
+func TestFileFind_NonASCIIPath(t *testing.T) {
+	dir, commit := setupNonASCIIPathRepo(t)
+	for _, tc := range []struct {
+		name string
+		mode ReviewMode
+		ref  string
+	}{
+		{name: "workspace", mode: ModeWorkspace},
+		{name: "commit", mode: ModeCommit, ref: commit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewFileFind(&FileReader{RepoDir: dir, Mode: tc.mode, Ref: tc.ref})
+			got, err := p.Execute(context.Background(), map[string]any{"query_name": "文件"}) // allow-non-english: fixture exercises non-ASCII query
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantBase := filepath.Base(nonASCIIPath)
+			if !strings.Contains(got, wantBase) {
+				t.Errorf("expected to find %q, but got: %q", wantBase, got)
 			}
 		})
 	}

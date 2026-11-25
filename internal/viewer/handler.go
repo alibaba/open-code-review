@@ -5,8 +5,10 @@ package viewer
 
 import (
 	"fmt"
+	"html/template"
 	"net/http"
 	"path/filepath"
+	"slices"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -59,27 +61,42 @@ func handleSessions(w http.ResponseWriter, r *http.Request, root, repo string) {
 }
 
 type sessionPageData struct {
+	Analysis    *analysisPage
 	EncodedRepo string
 	RepoName    string
 	Session     *ViewSession
+
+	// Static marks a render destined for a standalone file rather than the
+	// live server. It inlines the two /static/ assets below and turns the
+	// site-absolute breadcrumb links, which are dead over file://, into plain
+	// text. The zero value is what the HTTP handler renders, so the served
+	// page is byte-identical to what it was before export existed.
+	Static    bool
+	InlineCSS template.CSS
+	InlineJS  template.JS
+}
+
+func sessionRepoName(cwd, encodedRepo string) string {
+	if name := filepath.Base(cwd); name != "." && name != "" {
+		return name
+	}
+	return encodedRepo
 }
 
 func handleSession(w http.ResponseWriter, r *http.Request, root, repo, sessionID string) {
+	if r.URL.Query().Get("tab") == "analysis" {
+		handleAnalysis(w, r, root, repo, sessionID)
+		return
+	}
 	vs, err := LoadSession(root, repo, sessionID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusNotFound)
 		return
 	}
 
-	// Derive a display name
-	name := filepath.Base(vs.Summary.CWD)
-	if name == "." || name == "" {
-		name = repo
-	}
-
 	renderTemplate(w, "session.html", sessionPageData{
 		EncodedRepo: repo,
-		RepoName:    name,
+		RepoName:    sessionRepoName(vs.Summary.CWD, repo),
 		Session:     vs,
 	})
 }
@@ -158,11 +175,9 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 	// ServeMux never inspects query values, so these ids need the same
 	// rejection newMux gives the path segments: both end up in filepath.Join
 	// inside LoadSession.
-	for _, id := range []string{before, after} {
-		if unsafeSegment(id) {
-			http.Error(w, "invalid session id", http.StatusBadRequest)
-			return
-		}
+	if slices.ContainsFunc([]string{before, after}, unsafeSegment) {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
+		return
 	}
 
 	bv, err := LoadSession(root, repo, before)
@@ -182,16 +197,20 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 	// repositories is meaningless, so it is an error here exactly as it is in
 	// the CLI (cmd/opencodereview/session_cmd.go, runSessionCompare) - unlike a
 	// differing review mode, which only warns.
-	if bv.Summary.CWD != av.Summary.CWD {
+	// Same helper as the CLI, for the same reason: the recorded spellings may
+	// differ (`C:\repo` and `C:/repo` are one directory) even though the pair is
+	// comparable.
+	if !session.SameRepoPath(bv.Summary.CWD, av.Summary.CWD) {
 		http.Error(w, "sessions belong to different repositories", http.StatusBadRequest)
 		return
 	}
 
-	// Same call shape as the CLI: one reviewed-path set, from the after side.
+	// Same call shape as the CLI: the after manifest supplies reviewed paths and
+	// old-to-new mappings for renamed files.
 	result := session.Compare(
 		toLlmComments(bv.Comments),
 		toLlmComments(av.Comments),
-		session.ReviewedPaths(av.Summary.RunManifest),
+		av.Summary.RunManifest,
 	)
 
 	name := filepath.Base(av.Summary.CWD)

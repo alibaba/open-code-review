@@ -12,6 +12,11 @@ export const ko: TranslationKeys = {
   'navbar.blog': '블로그',
   'navbar.getStarted': '시작하기',
 
+  'providers.title': '주요 모델 제공업체 기본 지원',
+  'providers.description': 'API 키만 설정하면 리뷰를 시작할 수 있습니다. 주요 프로토콜과 호환되는 프라이빗 모델 서비스도 연결할 수 있습니다.',
+  'providers.listLabel': '지원하는 모델 브랜드',
+  'providers.explore': '지원하는 제공업체 보기',
+
   // Hero
   'hero.title': 'AI 코드 리뷰\n수백만 건의 실제 작업으로 검증되었습니다',
   'hero.description': 'Open Code Review는 Alibaba에서 실전 검증된 코드 리뷰 Agent를 그대로 워크플로에 옮겨 놓습니다. 원하는 LLM을 연결하고, 데이터는 외부로 나가지 않으며, 개발자가 실제로 반영하는 리뷰 코멘트를 받습니다.',
@@ -22,7 +27,6 @@ export const ko: TranslationKeys = {
   'hero.copyFailed': '복사 실패',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
-  'hero.installMacPorts': 'MacPorts',
   'hero.installMacOS': 'MacOS',
   'hero.installLinux': 'Linux',
   'hero.installWindows': 'Windows',
@@ -45,7 +49,7 @@ export const ko: TranslationKeys = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'NPM 다운로드',
   'highlights.stat2Caption': '실제 npm 다운로드 수 · 최근 30일',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': '실제 작업',
   'highlights.stat3Caption': '지금까지 수행한 코드 리뷰 작업',
   'highlights.stat4Value': '1/9',
@@ -118,6 +122,7 @@ export const ko: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': '문의하기',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
 
   // Docs Page
@@ -195,7 +200,7 @@ export const ko: TranslationKeys = {
   'docs.reviewFlag10Desc': '파일당 최대 도구 호출 라운드 수. 템플릿 기본값보다 클 때만 적용됩니다',
   'docs.reviewFlag10Default': '내장',
   'docs.reviewFlag11Desc': '최대 동시 git 서브프로세스 수',
-  'docs.reviewNote': '참고: <code>--from/--to</code>와 <code>--commit</code>은 함께 사용할 수 없습니다. <code>--from</code>을 지정하면 <code>--to</code>도 반드시 지정해야 합니다.',
+  'docs.reviewNote': '참고: <code>--from/--to</code>와 <code>--commit</code>은 함께 사용할 수 없습니다. <code>--from</code>만 지정하면 비교 대상은 <code>HEAD</code>입니다.',
   'docs.scanTitle': 'ocr scan',
   'docs.scanDesc': '<code>ocr scan</code>은 diff가 아니라 파일 전체를 리뷰합니다. Git 히스토리나 의미 있는 diff가 없어도 됩니다. 익숙하지 않은 코드베이스를 감사하거나, 마이그레이션 전에 특정 디렉터리를 훑어보거나, 비교할 대상이 없는 프로젝트를 리뷰할 때 사용하세요.',
   'docs.scanVsTitle': 'ocr scan과 ocr review의 차이',
@@ -249,8 +254,6 @@ export const ko: TranslationKeys = {
   'docs.scanFlag14Default': '내장',
   'docs.scanFlag15Desc': '최대 동시 git 서브프로세스 수',
   'docs.scanFlag16Desc': '커스텀 JSON 리뷰 규칙 파일 경로',
-  'docs.scanFlag17Desc': '커스텀 JSON 도구 설정 파일 경로',
-  'docs.scanFlag17Default': '내장',
   'docs.scanFlag18Desc': '스캔할 저장소 또는 디렉터리 루트',
   'docs.scanFlag18Default': '현재 디렉터리',
   'docs.scanNote': '참고: <code>--max-tools</code>는 스캔 템플릿의 파일당 도구 호출 예산을 올릴 때만 효과가 있습니다. 템플릿 기본값보다 낮게 설정하면 아무 영향이 없습니다.',
@@ -288,6 +291,7 @@ export const ko: TranslationKeys = {
   'docs.sidebar.configuration': '설정',
   'docs.sidebar.cliReference': 'CLI 레퍼런스',
   'docs.sidebar.reviewRules': '리뷰 규칙',
+  'docs.sidebar.reviewingRequirements': '요구사항에 따른 리뷰',
   'docs.sidebar.architecture': '아키텍처',
   'docs.sidebar.tools': '도구',
   'docs.sidebar.mcp': 'MCP 서버',
@@ -298,13 +302,21 @@ export const ko: TranslationKeys = {
   'docs.sidebar.claudeCode': 'Command (Claude Code)',
   'docs.sidebar.delegate': '위임 모드',
   'docs.sidebar.cicd': 'CI/CD',
+  'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': '기여하기',
   'docs.sidebar.faq': 'FAQ',
+  'docs.sidebar.chatgptPreview': 'ChatGPT 로그인 미리보기',
   'docs.search.placeholder': '검색...',
   'docs.search.noResults': '검색 결과가 없습니다',
   'docs.search.hint.select': '선택',
   'docs.search.hint.open': '열기',
   'docs.search.hint.close': '닫기',
+  'docs.content.loading': '문서를 불러오는 중...',
+  'docs.content.loadError': '문서 콘텐츠를 불러오지 못했습니다.',
+  'docs.content.retry': '다시 시도',
+  'docs.search.loading': '검색 중...',
+  'docs.search.loadError': '검색 콘텐츠를 불러오지 못했습니다.',
 
   // Blog
   'blog.title': '블로그',

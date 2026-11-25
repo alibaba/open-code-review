@@ -43,11 +43,20 @@ Output review spec for host-agent delegation (no LLM required).`,
 	Example: `  # Preview which files will be reviewed
   ocr delegate preview --from main --to feature
 
+  # Preview committed changes on the current branch against main
+  ocr delegate preview --from main
+
   # Preview workspace changes
   ocr delegate preview
 
   # Get rules for multiple files (grouped by content)
-  ocr delegate rule internal/agent/agent.go internal/llm/client.go`,
+  ocr delegate rule internal/agent/agent.go internal/llm/client.go
+
+  # Get rules at HEAD for the same range
+  ocr delegate rule --from main internal/agent/agent.go
+
+  # Get rules with review background from a file
+  ocr delegate rule --background-file ./docs/requirements.md internal/agent/agent.go`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()

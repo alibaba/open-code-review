@@ -4,10 +4,21 @@
 package viewer
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"html"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseTemplate_ReposHTML(t *testing.T) {
@@ -47,6 +58,78 @@ func TestParseTemplate_NonExistent(t *testing.T) {
 	}
 }
 
+// Execute each page independently: parsing alone misses undefined partials,
+// and parsing every page together can overwrite page-specific breadcrumbs.
+func TestParseTemplate_SharedHeader(t *testing.T) {
+	tests := []struct {
+		name       string
+		data       any
+		breadcrumb string
+	}{
+		{
+			name:       "repos.html",
+			data:       map[string]any{"Repos": []RepoInfo{{EncodedPath: "my-repo", SessionCount: 1}}},
+			breadcrumb: "",
+		},
+		{
+			name: "sessions.html",
+			data: sessionsData{
+				EncodedRepo: "my-repo",
+				RepoName:    "MyRepo",
+				Sessions:    []SessionSummary{{SessionID: "0123456789abcdef"}},
+			},
+			breadcrumb: `<span class="sep">/</span><span class="current">MyRepo</span>`,
+		},
+		{
+			name: "session.html",
+			data: sessionPageData{
+				EncodedRepo: "my-repo",
+				RepoName:    "MyRepo",
+				Session:     &ViewSession{Summary: SessionSummary{SessionID: "0123456789abcdef"}},
+			},
+			breadcrumb: `<span class="sep">/</span><a href="/r/my-repo">MyRepo</a><span class="sep">/</span><span class="current">0123456789ab…</span>`,
+		},
+		{
+			name: "compare.html",
+			data: comparePageData{
+				EncodedRepo: "my-repo",
+				RepoName:    "MyRepo",
+				Before:      SessionSummary{SessionID: "before"},
+				After:       SessionSummary{SessionID: "after"},
+			},
+			breadcrumb: `<span class="sep">/</span><a href="/r/my-repo">MyRepo</a><span class="sep">/</span><span class="current">compare</span>`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl, err := parseTemplate(tt.name)
+			if err != nil {
+				t.Fatalf("parseTemplate: %v", err)
+			}
+			if tmpl.Lookup("app-header") == nil {
+				t.Fatal("shared app-header template is missing")
+			}
+			var output strings.Builder
+			if err := tmpl.Execute(&output, tt.data); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			body := output.String()
+			for _, marker := range []string{`<nav class="breadcrumb">`, `class="nav-brand"`, `class="brand-icon"`} {
+				if count := strings.Count(body, marker); count != 1 {
+					t.Errorf("count of %q = %d, want 1", marker, count)
+				}
+			}
+			// The brand-icon inlines the logo SVG, so assert the surrounding
+			// structure plus an inline <svg> rather than an exact glyph body.
+			const head = `<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon" aria-hidden="true"><svg`
+			tail := `</span>Open Code Review Viewer</a>` + tt.breadcrumb + `</nav>`
+			if !strings.Contains(body, head) || !strings.Contains(body, tail) {
+				t.Error("expected shared home link, inline logo, wordmark and page-specific breadcrumbs")
+			}
+		})
+	}
+}
+
 func TestRenderTemplate_Success(t *testing.T) {
 	rr := httptest.NewRecorder()
 	renderTemplate(rr, "repos.html", map[string]any{
@@ -62,6 +145,11 @@ func TestRenderTemplate_Success(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "No session data found") {
 		t.Errorf("expected empty repos message in rendered output")
+	}
+	// The search input is useless without a table and repos.js only loads
+	// alongside rows, so it must stay inside the {{if .Repos}} branch.
+	if strings.Contains(rr.Body.String(), "repository-search-input") {
+		t.Error("empty repositories page should not render the search input")
 	}
 }
 
@@ -141,6 +229,276 @@ func TestRenderTemplate_Sessions(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_SessionsTableMockup(t *testing.T) {
+	const fullID = "b029c726-7b6b-46aa-b923-9fea9f012345"
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "sessions.html", sessionsData{
+		EncodedRepo: "my-repo",
+		RepoName:    "my-project",
+		Sessions: []SessionSummary{
+			{
+				SessionID:     fullID,
+				GitBranch:     "refactor/rename-runprofile",
+				ReviewMode:    "range",
+				Model:         "claude-opus-5",
+				FileCount:     8,
+				TerminalState: "complete",
+				CommentCount:  5,
+				DurationSec:   290,
+			},
+			{SessionID: "older-session"},
+		},
+	})
+	body := rr.Body.String()
+
+	// Every th carries scope="col": the session cell no longer repeats the word
+	// "Session", so the header is what tells a screen reader what the column holds.
+	const header = `<thead><tr><th scope="col">Session ID</th><th scope="col">Branch</th><th scope="col">Mode</th><th scope="col">Model</th>` +
+		`<th scope="col">Files</th><th scope="col">Status</th><th scope="col">Comments</th><th scope="col">Duration</th><th scope="col">Started At</th><th scope="col" class="col-action">Action</th></tr></thead>`
+	for _, want := range []string{
+		header,
+		`id="sessions-table"`,
+		`<div class="table-scroll" role="region" aria-label="Sessions table">`,
+		`<a class="back-link" href="/" aria-label="Back to repositories"><svg`,
+		// Session ids are random v4 UUIDs, so the first segment already separates
+		// any two of them; the remaining 27 characters cost a wide column and buy
+		// no distinguishing power. The full value stays in title= and in the href,
+		// so hovering and linking are unaffected.
+		`<td class="col-session"><a class="session-id" href="/r/my-repo/` + fullID + `" title="` + fullID + `">b029c726…</a></td>`,
+		`<td class="col-branch">refactor/rename-runprofile</td>`,
+		`<td class="col-mode">range</td>`,
+		`<td class="col-model">claude-opus-5</td>`,
+		`<td class="col-files">8</td>`,
+		`<td>complete</td>`,
+		`<td class="col-comments">5</td>`,
+		`<td class="col-duration">4m50s</td>`,
+		`<a href="/r/my-repo/compare?before=older-session&amp;after=` + fullID + `">Compare</a>`,
+		`id="sessions-pagination"`,
+		`data-page-step="-1"`,
+		`data-page-step="1"`,
+		`id="sessions-page-numbers"`,
+		`src="/static/sessions.js"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered sessions page missing %q", want)
+		}
+	}
+	if strings.Contains(body, "<code>claude-opus-5</code>") {
+		t.Error("the model column should render as plain text, as in the mockup")
+	}
+	if strings.Contains(body, "<script>") {
+		t.Error("sessions page must not carry an inline script")
+	}
+}
+
+func TestSessionsJS_PagerContract(t *testing.T) {
+	script, err := assets.ReadFile("static/sessions.js")
+	if err != nil {
+		t.Fatalf("read static/sessions.js: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "sessions.html", sessionsData{
+		EncodedRepo: "my-repo",
+		RepoName:    "my-project",
+		Sessions:    []SessionSummary{{SessionID: "s-new"}, {SessionID: "s-old"}},
+	})
+	body := rr.Body.String()
+	if !strings.Contains(body, `<nav id="sessions-pagination" class="pagination" aria-label="Session pages" hidden>`) {
+		t.Error("pager should render hidden until sessions.js enables it")
+	}
+	for _, id := range []string{"sessions-table", "sessions-pagination", "sessions-page-numbers"} {
+		if !strings.Contains(body, `id="`+id+`"`) {
+			t.Errorf("sessions.html does not render #%s", id)
+		}
+		if !strings.Contains(string(script), `"`+id+`"`) {
+			t.Errorf("sessions.js does not look up #%s", id)
+		}
+	}
+	if !strings.Contains(string(script), "ocrPager") {
+		t.Error("sessions.js should delegate pagination to the shared ocrPager")
+	}
+}
+
+func TestPagerCSS_StaysHiddenUntilScripted(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	guard := regexp.MustCompile(`\.pagination\[hidden\] \{\s*display: none;`)
+	if !guard.Match(css) {
+		t.Error("style.css lost the .pagination[hidden] { display: none } guard: " +
+			"the pager's own display: flex is an author rule, so it outranks the UA [hidden] rule " +
+			"and the control would paint before the page script reveals it, and stay up with scripting off")
+	}
+	rowGuard := regexp.MustCompile(`\.file-list li\[hidden\] \{\s*display: none;`)
+	if !rowGuard.Match(css) {
+		t.Error("style.css lost the .file-list li[hidden] { display: none } guard: " +
+			"the row's display: flex is an author rule, so it outranks the UA [hidden] rule " +
+			"and the Files Reviewed list would paint every page's rows at once")
+	}
+}
+
+func TestSurfaceCSS_LightSurfaceIsWhite(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	light := regexp.MustCompile(`--surface: #ffffff;`)
+	if !light.Match(css) {
+		t.Error("style.css lost the light-mode --surface: #ffffff token: " +
+			"cards and tables must read as white and stay delineated by --border, not a grey fill")
+	}
+	dark := regexp.MustCompile(`--surface: #0a0a0a;`)
+	if !dark.Match(css) {
+		t.Error("style.css lost the dark-mode --surface: #0a0a0a token: " +
+			"dark surfaces must keep sitting above the black page")
+	}
+}
+
+// TestTextTokens_MeetWCAGAAOnPageBackground holds the muted and secondary
+// text tokens to WCAG AA (4.5:1) against each theme's *page* background, so
+// future palette tweaks cannot quietly drop the low-emphasis labels back
+// below the line. Both tokens blend pure black (light) or pure white (dark)
+// at an alpha, which makes the blended color a gray and the luminance math
+// a single channel.
+func TestTextTokens_MeetWCAGAAOnPageBackground(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	text := string(css)
+
+	// Split the sheet at the dark media query so each side contains exactly
+	// one page background, then read whatever --bg it declares.
+	darkStart := strings.Index(text, "@media (prefers-color-scheme: dark)")
+	if darkStart == -1 {
+		t.Fatal("style.css is missing the dark @media block")
+	}
+	bgGray := func(section, theme string) float64 {
+		t.Helper()
+		ms := regexp.MustCompile(`--bg: (#[0-9a-fA-F]{6});`).FindAllStringSubmatch(section, -1)
+		if len(ms) != 1 {
+			t.Fatalf("%s section has %d --bg tokens, want exactly 1", theme, len(ms))
+		}
+		v, err := strconv.ParseInt(strings.TrimPrefix(ms[0][1], "#"), 16, 32)
+		if err != nil {
+			t.Fatalf("parse --bg %q: %v", ms[0][1], err)
+		}
+		// The token is a flat hex like #ffffff; one channel is the gray.
+		return float64(v&0xff) / 255
+	}
+	lightBG := bgGray(text[:darkStart], "light")
+	darkBG := bgGray(text[darkStart:], "dark")
+
+	luminance := func(channel float64) float64 {
+		if channel <= 0.04045 {
+			return channel / 12.92
+		}
+		return math.Pow((channel+0.055)/1.055, 2.4)
+	}
+	// ratio blends the token's alpha over its page background (black text
+	// on the light page, white text on the dark page) and returns the WCAG
+	// contrast ratio for the resulting gray.
+	ratio := func(alpha float64, whiteText bool, page float64) float64 {
+		channel := 1 - alpha
+		if whiteText {
+			channel = alpha
+		}
+		fg, bg := luminance(channel), luminance(page)
+		if fg < bg {
+			fg, bg = bg, fg
+		}
+		return (fg + 0.05) / (bg + 0.05)
+	}
+	onlyAlpha := func(pattern string) float64 {
+		t.Helper()
+		ms := regexp.MustCompile(pattern).FindAllStringSubmatch(text, -1)
+		if len(ms) != 1 {
+			t.Fatalf("style.css has %d matches for %q, want exactly 1 (a second theme reusing this channel pattern would make positional matching silently pick the wrong rule)", len(ms), pattern)
+		}
+		v, err := strconv.ParseFloat(ms[0][1], 64)
+		if err != nil {
+			t.Fatalf("parse alpha %q: %v", ms[0][1], err)
+		}
+		return v
+	}
+
+	tokens := []struct {
+		name       string
+		blackAlpha float64 // light mode: rgba(0, 0, 0, alpha)
+		whiteAlpha float64 // dark mode: rgba(255, 255, 255, alpha)
+	}{
+		{"--text-muted", onlyAlpha(`--text-muted: rgba\(0, 0, 0, ([\d.]+)\);`), onlyAlpha(`--text-muted: rgba\(255, 255, 255, ([\d.]+)\);`)},
+		{"--text-secondary", onlyAlpha(`--text-secondary: rgba\(0, 0, 0, ([\d.]+)\);`), onlyAlpha(`--text-secondary: rgba\(255, 255, 255, ([\d.]+)\);`)},
+	}
+	for _, tc := range tokens {
+		if got := ratio(tc.blackAlpha, false, lightBG); got < 4.5 {
+			t.Errorf("light %s contrasts at %.2f:1, want >= 4.5 (WCAG AA)", tc.name, got)
+		}
+		if got := ratio(tc.whiteAlpha, true, darkBG); got < 4.5 {
+			t.Errorf("dark %s contrasts at %.2f:1, want >= 4.5 (WCAG AA)", tc.name, got)
+		}
+	}
+}
+
+func TestReportTabsCSS_ForcedColorsMarksCurrentPage(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := regexp.MustCompile(`@media\s*\(forced-colors:\s*active\)\s*\{\s*\.report-tabs a\[aria-current="page"\]\s*\{[^}]*text-decoration:\s*underline;`)
+	if !current.Match(css) {
+		t.Error("the current report tab needs a visible underline in forced colors")
+	}
+}
+
+// TestFocusCSS_CoversCollapsiblesAndTableLinks holds the focus-visible rules for the
+// collapsible headers, in-table links and scrollable table regions: these
+// elements have no other visible focus indicator, so losing the rule would
+// leave keyboard users with no sign of where they are.
+func TestFocusCSS_CoversCollapsiblesAndTableLinks(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	for _, selector := range []string{
+		".file-accordion-header:focus-visible",
+		".token-breakdown-toggle:focus-visible",
+		".comment-file-header:focus-visible",
+		".tool-detail-toggle:focus-visible",
+		".error-detail-toggle:focus-visible",
+		".table a:focus-visible",
+		"nav.breadcrumb a:focus-visible",
+		".repos-page .table-scroll:focus-visible",
+		".sessions-page .table-scroll:focus-visible",
+	} {
+		if !strings.Contains(string(css), selector) {
+			t.Errorf("style.css is missing the %q focus-visible rule: "+
+				"these elements have no other visible focus indicator for keyboard users", selector)
+		}
+	}
+
+	// A rule that exists but keeps a positive offset is the bug this guards:
+	// .table-scroll computes overflow-y to auto, so a ring drawn outside the
+	// element is clipped away and keyboard users see nothing. Assert the
+	// effective offset, not merely that the selector is present.
+	for _, selector := range []string{
+		".sessions-page .session-id:focus-visible",
+		".repos-page .col-repository a:focus-visible",
+		".repos-page .repo-check:focus-visible",
+	} {
+		block := regexp.MustCompile(regexp.QuoteMeta(selector) + `\s*\{([^}]*)\}`).FindStringSubmatch(string(css))
+		if block == nil {
+			t.Errorf("style.css is missing the %q rule block", selector)
+			continue
+		}
+		if !strings.Contains(block[1], "outline-offset: -2px") {
+			t.Errorf("%s does not use outline-offset: -2px: the ring is drawn "+
+				"outside the element and .table-scroll clips it", selector)
+		}
+	}
+}
+
 func TestRenderTemplate_SessionPage(t *testing.T) {
 	rr := httptest.NewRecorder()
 	vs := &ViewSession{
@@ -184,6 +542,89 @@ func TestRenderTemplate_SessionPage(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_SessionHeaderMockup(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary: SessionSummary{
+			SessionID:     "b029c726-7b6b",
+			Model:         "claude-opus-5",
+			CWD:           "/Users/kite/Documents/code/github/open-code-review",
+			GitBranch:     "refactor/rename-runprofile",
+			ReviewMode:    "range",
+			DiffFrom:      "05af664",
+			DiffTo:        "HEAD",
+			TerminalState: "complete",
+		},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "my-repo",
+		RepoName:    "MyRepo",
+		Session:     vs,
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, required := range []string{
+		`<main class="session-page">`,
+		`aria-label="Back to sessions"><svg`,
+		`<span class="meta-truncate" title="/Users/kite/Documents/code/github/open-code-review">`,
+		`<span class="meta-truncate" title="refactor/rename-runprofile">`,
+		`<strong>From:</strong> <code>05af664</code>`,
+		`<strong>To:</strong> <code>HEAD</code>`,
+		`<span class="meta-status status-complete">complete</span>`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("rendered session header missing %q", required)
+		}
+	}
+	if strings.Contains(body, "<script>") {
+		t.Error("session page must not contain inline <script> elements (CSP)")
+	}
+}
+
+func TestRenderTemplate_SessionHeaderStatusClasses(t *testing.T) {
+	cases := []struct {
+		name      string
+		aborted   bool
+		legacy    bool
+		termState string
+		wantClass string
+	}{
+		{"complete", false, false, "complete", "status-complete"},
+		{"partial", false, false, "partial", "status-partial"},
+		{"failed", false, false, "failed", "status-failed"},
+		{"skipped", false, false, "skipped", "status-legacy"},
+		{"aborted", true, false, "complete", "status-aborted"},
+		{"legacy", false, true, "complete", "status-legacy"},
+		{"unknown state stays unclassed", false, false, "odd state", `>odd state</span>`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			renderTemplate(rr, "session.html", sessionPageData{
+				EncodedRepo: "repo",
+				RepoName:    "MyRepo",
+				Session: &ViewSession{
+					Summary: SessionSummary{
+						SessionID:     "abc",
+						CWD:           "/test",
+						Aborted:       tc.aborted,
+						Legacy:        tc.legacy,
+						TerminalState: tc.termState,
+					},
+				},
+			})
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			if !strings.Contains(rr.Body.String(), tc.wantClass) {
+				t.Errorf("expected %q in rendered status markup", tc.wantClass)
+			}
+		})
+	}
+}
+
 func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
 	rr := httptest.NewRecorder()
 	vs := &ViewSession{
@@ -218,7 +659,7 @@ func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
 	if !strings.Contains(body, `<details class="token-breakdown">`) || strings.Contains(body, `<details class="token-breakdown" open>`) {
 		t.Fatal("file token breakdown should be rendered and collapsed by default")
 	}
-	if !strings.Contains(body, `<details class="comment-file-group" open>`) {
+	if !strings.Contains(body, `<details class="comment-file-group" open hidden>`) {
 		t.Fatal("review comment groups should remain expanded")
 	}
 }
@@ -235,6 +676,51 @@ func TestRenderTemplate_HidesEmptyConversationsSection(t *testing.T) {
 
 	if strings.Contains(rr.Body.String(), `<span class="section-title">Conversations</span>`) {
 		t.Fatal("empty conversations section should not be rendered")
+	}
+}
+
+func TestRenderTemplate_RendersConversationToolCallDetails(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session: &ViewSession{
+			Summary: SessionSummary{SessionID: "abc", CWD: "/test"},
+			Files: []*FileGroup{{
+				FilePath: "internal/viewer/server.go",
+				Tasks: map[TaskType][]*TaskCard{
+					MainTask: {{
+						RequestNo:        1,
+						Model:            "model-a",
+						PromptTokens:     10,
+						CompletionTokens: 20,
+						DurationMs:       30,
+						ToolCalls: []ToolCallInfo{{
+							Name:      "code_search",
+							Arguments: `{"query":"viewer"}`,
+							Result:    "matched server.go",
+							Ok:        true,
+						}},
+					}},
+				},
+			}},
+		},
+	})
+
+	body := rr.Body.String()
+	if strings.Contains(body, "1 files") || strings.Contains(body, "1 requests") {
+		t.Error("single-item counts should use singular labels")
+	}
+	if strings.Contains(body, "&#9881;") {
+		t.Error("tool call controls should use the shared SVG icon, not a Unicode glyph")
+	}
+	for _, want := range []string{
+		"Conversations", "1 file", "1 request", "internal/viewer/server.go", "Request #1", "model-a",
+		"Tool Calls (1)", "code_search", "Arguments", "matched server.go", "<svg",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered session page missing %q", want)
+		}
 	}
 }
 
@@ -330,5 +816,804 @@ func TestTemplateFuncTaskTypeClass(t *testing.T) {
 	})
 	if err != nil {
 		t.Errorf("template execution with all task types: %v", err)
+	}
+}
+
+func TestInlineIcon(t *testing.T) {
+	// Known icons return their embedded SVG markup.
+	for _, name := range []string{"logo", "search", "settings", "file", "chevron-left", "chevron-right", "chevron-down"} {
+		got := string(inlineIcon(name))
+		if !strings.Contains(got, "<svg") || !strings.Contains(got, "currentColor") {
+			t.Errorf("inlineIcon(%q) = %q, want inline svg using currentColor", name, got)
+		}
+	}
+	// Malformed or out-of-range names return empty markup instead of reading
+	// arbitrary files. Uppercase, slashes, dots and traversal are all rejected
+	// by the name guard; a well-formed but unknown name misses the embed.
+	for _, name := range []string{"", "Search", "foo/bar", "../style", "a.b", "chevron_left", "missing"} {
+		if got := inlineIcon(name); got != "" {
+			t.Errorf("inlineIcon(%q) = %q, want empty", name, got)
+		}
+	}
+}
+
+func TestRenderTemplate_ReposSearchIcon(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "repos.html", map[string]any{
+		"Repos": []RepoInfo{{EncodedPath: "my-project", SessionCount: 1}},
+	})
+	body := rr.Body.String()
+	if !strings.Contains(body, `<span class="search-icon" aria-hidden="true"><svg`) {
+		t.Error("repos search box should render the inline search icon")
+	}
+}
+
+func TestRenderTemplate_ToolCallIconIsInlineSVG(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session: &ViewSession{
+			Summary: SessionSummary{SessionID: "abc", CWD: "/test"},
+			Files: []*FileGroup{{
+				FilePath: "internal/viewer/server.go",
+				Tasks: map[TaskType][]*TaskCard{
+					MainTask: {{
+						RequestNo: 1,
+						Model:     "model-a",
+						ToolCalls: []ToolCallInfo{{Name: "code_search", Ok: true}},
+					}},
+				},
+			}},
+		},
+	})
+	body := rr.Body.String()
+	if strings.Contains(body, "&#9881;") || strings.Contains(body, "⚙") {
+		t.Error("tool-call icon should no longer use the unicode gear glyph")
+	}
+	if !strings.Contains(body, `<span class="tool-calls-icon" aria-hidden="true"><svg`) {
+		t.Error("tool-calls label should render the inline settings icon")
+	}
+	if strings.Contains(body, `class="tool-icon"`) {
+		t.Error("individual tool-call rows should not render a duplicate settings icon")
+	}
+}
+
+func TestRenderTemplate_FilesReviewedUseFileIcon(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session: &ViewSession{
+			Summary: SessionSummary{
+				SessionID:     "abc",
+				CWD:           "/test",
+				FilesReviewed: []string{"internal/agent/agent.go"},
+			},
+		},
+	})
+	body := rr.Body.String()
+	if !strings.Contains(body, `<span class="file-list-icon" aria-hidden="true"><svg`) {
+		t.Error("Files Reviewed rows should render the inline file icon")
+	}
+	if !strings.Contains(body, "internal/agent/agent.go") {
+		t.Error("Files Reviewed should still render the file path")
+	}
+}
+
+func TestRenderTemplate_ReposTableMockup(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "repos.html", map[string]any{
+		"Repos": []RepoInfo{{EncodedPath: "my-project", SessionCount: 3}},
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, required := range []string{
+		`<main class="repos-page">`,
+		`<div class="table-scroll" role="region" aria-label="Repositories table">`,
+		`<th scope="col" class="col-action">Action</th>`,
+		`<a class="repo-check" href="/r/my-project">Check</a>`,
+		`<td class="col-repository" data-repository-name><a href="/r/my-project">my-project</a></td>`,
+		`aria-label="Previous page"><svg`,
+		`aria-label="Next page"><svg`,
+		`<nav id="repos-pagination" class="pagination" aria-label="Repository pages" hidden>`,
+		`data-page-step="-1"`,
+		`data-page-step="1"`,
+		`id="repos-page-numbers"`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("rendered repositories page missing %q", required)
+		}
+	}
+	if strings.Contains(body, "<script>") {
+		t.Error("repositories page must not contain inline <script> elements (CSP)")
+	}
+}
+
+func TestReposJS_PagerContract(t *testing.T) {
+	html, err := os.ReadFile(filepath.Join("templates", "repos.html"))
+	if err != nil {
+		t.Fatalf("read repos.html: %v", err)
+	}
+	js, err := os.ReadFile(filepath.Join("static", "repos.js"))
+	if err != nil {
+		t.Fatalf("read repos.js: %v", err)
+	}
+	// The search box and the table live in repos.html itself; the pager nav
+	// comes from the shared pager partial, so assert it on the rendered page.
+	for _, id := range []string{"repository-search-input", "repositories-table"} {
+		if !strings.Contains(string(html), `id="`+id+`"`) {
+			t.Errorf("repos.html is missing id %q", id)
+		}
+	}
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "repos.html", map[string]any{
+		"Repos": []RepoInfo{{EncodedPath: "project-a", SessionCount: 2}},
+	})
+	body := rr.Body.String()
+	if !strings.Contains(body, `<nav id="repos-pagination" class="pagination" aria-label="Repository pages" hidden>`) {
+		t.Error("pager should render hidden until repos.js enables it")
+	}
+	for _, id := range []string{"repository-search-input", "repositories-table", "repos-pagination", "repos-page-numbers"} {
+		if !strings.Contains(body, `id="`+id+`"`) {
+			t.Errorf("repos.html does not render #%s", id)
+		}
+		if !strings.Contains(string(js), `getElementById("`+id+`")`) {
+			t.Errorf("repos.js does not look up id %q", id)
+		}
+	}
+	if !strings.Contains(string(js), "ocrPager") || !strings.Contains(string(js), "filter:") {
+		t.Error("repos.js should hand the table and its search filter to the shared ocrPager")
+	}
+	if !strings.Contains(string(js), "pagerApi.reset()") {
+		t.Error("repos.js should reset to page 1 when the search query changes")
+	}
+}
+
+func TestPagerJS_Contract(t *testing.T) {
+	script, err := assets.ReadFile("static/pager.js")
+	if err != nil {
+		t.Fatalf("read static/pager.js: %v", err)
+	}
+	for _, want := range []string{
+		// The page scripts drive the pager through this global.
+		"window.ocrPager",
+		// The pager owns every hook the markup and styles rely on.
+		"data-page-step",
+		`className = "page-number"`,
+		`className = "page-gap"`,
+		`setAttribute("aria-current", "page")`,
+		`setAttribute("aria-label", ` + "`Page ${item}`" + `)`,
+		// Progressive enhancement: the pager stays hidden while it only
+		// has one page to show.
+		"pager.hidden = total < 2",
+		// Focus returns to the current page number / an enabled step.
+		"preventScroll",
+		// refresh keeps the current page (clamped); reset starts at page 1.
+		"refresh: () => render()",
+		"reset: () => render(1)",
+		// Detail pages can hand arbitrary result elements to the same pager.
+		"data-pagination-source",
+		"data-pagination-item",
+		"paginationPageSize",
+		"nextElementSibling",
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("pager.js is missing %q", want)
+		}
+	}
+}
+
+func TestSessionTemplatePaginatesLongResultSections(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary: SessionSummary{
+			SessionID:     "s",
+			CWD:           "/p",
+			FilesReviewed: []string{"a.go"},
+		},
+		TokenUsage: TokenUsageSummary{
+			FileTokenBreakdown: []FileTokenUsage{{FilePath: "a.go"}},
+		},
+		SessionTasks: []*FileGroup{{FilePath: "__grouping__", Tasks: map[TaskType][]*TaskCard{}}},
+		Files:        []*FileGroup{{FilePath: "a.go", Tasks: map[TaskType][]*TaskCard{}}},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{EncodedRepo: "r", RepoName: "R", Session: vs})
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<table class="token-table" data-pagination-source data-pagination-page-size="20">`,
+		`id="token-breakdown-pagination"`,
+		`<ul class="file-list" data-pagination-source data-pagination-page-size="20">`,
+		`id="files-reviewed-pagination"`,
+		`<div class="conversations" data-pagination-source data-pagination-page-size="20">`,
+		`id="session-tasks-pagination"`,
+		`id="conversations-pagination"`,
+		`data-pagination-item`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("session page missing long-list pagination hook %q", want)
+		}
+	}
+}
+
+func TestSessionJS_UsesDefaultCommentPaging(t *testing.T) {
+	script, err := assets.ReadFile("static/session.js")
+	if err != nil {
+		t.Fatalf("read static/session.js: %v", err)
+	}
+	for _, want := range []string{
+		"let activeSeverity = 'all'",
+		"let activeCategory = 'all'",
+		"pageSize: 20",
+		"rows: cards",
+		"commentsPager.reset()",
+		"commentsPager.refresh()",
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("session.js is missing %q", want)
+		}
+	}
+	if strings.Contains(string(script), "Select a severity or category to view findings.") {
+		t.Error("session.js retains an unreachable empty-state branch")
+	}
+	if idx := strings.Index(string(script), "commentsPager = window.ocrPager"); idx >= 0 {
+		if strings.Contains(string(script)[idx:], "updateFilterState()") ||
+			strings.Contains(string(script)[idx:], "commentsPager.refresh()") ||
+			strings.Contains(string(script)[idx:], "commentsPager.reset()") {
+			t.Error("session.js should not re-render comments immediately after constructing the pager")
+		}
+	}
+}
+
+// jsGetSubstitution implements ECMAScript GetSubstitution for
+// String.prototype.replace when replaceValue is a string: $$, $&, $`, $' and
+// $1..$9 capture references.
+func jsGetSubstitution(matched, str string, pos int, captures []string, rep string) string {
+	var b strings.Builder
+	b.Grow(len(rep))
+	for i := 0; i < len(rep); i++ {
+		if rep[i] != '$' || i+1 >= len(rep) {
+			b.WriteByte(rep[i])
+			continue
+		}
+		i++
+		switch rep[i] {
+		case '$':
+			b.WriteByte('$')
+		case '&':
+			b.WriteString(matched)
+		case '`':
+			b.WriteString(str[:pos])
+		case '\'':
+			b.WriteString(str[pos+len(matched):])
+		default:
+			if rep[i] >= '1' && rep[i] <= '9' {
+				idx := int(rep[i] - '1')
+				if idx < len(captures) {
+					b.WriteString(captures[idx])
+					continue
+				}
+			}
+			b.WriteByte('$')
+			b.WriteByte(rep[i])
+		}
+	}
+	return b.String()
+}
+
+func jsRegexReplaceAll(s string, re *regexp.Regexp, rep string) string {
+	matches := re.FindAllStringSubmatchIndex(s, -1)
+	if len(matches) == 0 {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		b.WriteString(s[last:m[0]])
+		var captures []string
+		for j := 2; j < len(m); j += 2 {
+			if m[j] >= 0 {
+				captures = append(captures, s[m[j]:m[j+1]])
+			} else {
+				captures = append(captures, "")
+			}
+		}
+		b.WriteString(jsGetSubstitution(s[m[0]:m[1]], s, m[0], captures, rep))
+		last = m[1]
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// evalSessionResponseTextJS parses the .response-text formatting block from
+// session.js and executes its exact regex/string replacement pipeline in Go so
+// Linux CI (which runs in a Go-only container without Node.js) still exercises
+// the behavioral regression suite instead of skipping it.
+func evalSessionResponseTextJS(t *testing.T, script string, inputs []string) []string {
+	t.Helper()
+
+	blockRE := regexp.MustCompile(`(?s)document\.querySelectorAll\('\.response-text'\)\.forEach\(function\(el\) \{(.*?)\n\}\);`)
+	blockMatch := blockRE.FindStringSubmatch(script)
+	if blockMatch == nil {
+		t.Fatal("session.js is missing the .response-text formatter block")
+	}
+	block := blockMatch[1]
+
+	escBlockRE := regexp.MustCompile(`(?s)const esc = function\(s\) \{(.*?)\};`)
+	escMatch := escBlockRE.FindStringSubmatch(block)
+	if escMatch == nil {
+		t.Fatal("session.js is missing the esc() helper")
+	}
+	replacePairRE := regexp.MustCompile(`\.replace\(/((?:\\/|[^/])+)/([gm]*),\s*'([^']*)'\)`)
+	compileJSRegex := func(pattern, flags string) *regexp.Regexp {
+		t.Helper()
+		if strings.Contains(flags, "m") {
+			pattern = "(?m)" + pattern
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			t.Fatalf("compile JS regex /%s/%s: %v", pattern, flags, err)
+		}
+		return re
+	}
+
+	type regexStep struct {
+		re  *regexp.Regexp
+		rep string
+	}
+	var escSteps []regexStep
+	for _, m := range replacePairRE.FindAllStringSubmatch(escMatch[1], -1) {
+		escSteps = append(escSteps, regexStep{re: compileJSRegex(m[1], m[2]), rep: m[3]})
+	}
+	if len(escSteps) != 5 {
+		t.Fatalf("esc() replacement step count = %d, want 5", len(escSteps))
+	}
+
+	mdRegionStart := strings.Index(block, "return '%%CODEBLOCK_' + (codeBlocks.length - 1) + '%%';")
+	mdRegionEnd := strings.Index(block, "codeBlocks.forEach")
+	if mdRegionStart == -1 || mdRegionEnd == -1 || mdRegionEnd <= mdRegionStart {
+		t.Fatal("session.js is missing the markdown or codeBlocks restoration region")
+	}
+	var mdSteps []regexStep
+	for _, m := range replacePairRE.FindAllStringSubmatch(block[mdRegionStart:mdRegionEnd], -1) {
+		mdSteps = append(mdSteps, regexStep{re: compileJSRegex(m[1], m[2]), rep: m[3]})
+	}
+	if len(mdSteps) != 8 {
+		t.Fatalf("markdown replacement step count = %d, want 8", len(mdSteps))
+	}
+
+	restoreRE := regexp.MustCompile(`(?s)codeBlocks\.forEach\(function\(code,\s*i\)\s*\{\s*html\s*=\s*html\.replace\('%%CODEBLOCK_'\s*\+\s*i\s*\+\s*'%%',(.*?)\);\s*\}\);`)
+	restoreMatch := restoreRE.FindStringSubmatch(block[mdRegionEnd:])
+	if restoreMatch == nil {
+		t.Fatal("session.js is missing the codeBlocks.forEach html.replace call")
+	}
+	replacerArg := strings.Join(strings.Fields(restoreMatch[1]), " ")
+	var useFunctionReplacer bool
+	switch replacerArg {
+	case `function() { return '<pre class="code-block"><code>' + code + '</code></pre>'; }`:
+		useFunctionReplacer = true
+	case `'<pre class="code-block"><code>' + code + '</code></pre>'`:
+		useFunctionReplacer = false
+	default:
+		t.Fatalf("unexpected code-block replacer argument in session.js: %s", replacerArg)
+	}
+
+	fenceRE := regexp.MustCompile("```(\\w*)\\n([\\s\\S]*?)```")
+	trimNewlineRE := regexp.MustCompile(`^\n|\n$`)
+
+	out := make([]string, len(inputs))
+	for idx, text := range inputs {
+		htmlStr := text
+		for _, step := range escSteps {
+			htmlStr = jsRegexReplaceAll(htmlStr, step.re, step.rep)
+		}
+		var codeBlocks []string
+		fences := fenceRE.FindAllStringSubmatchIndex(htmlStr, -1)
+		if len(fences) > 0 {
+			var b strings.Builder
+			last := 0
+			for _, m := range fences {
+				b.WriteString(htmlStr[last:m[0]])
+				code := trimNewlineRE.ReplaceAllString(htmlStr[m[4]:m[5]], "")
+				codeBlocks = append(codeBlocks, code)
+				b.WriteString("%%CODEBLOCK_" + strconv.Itoa(len(codeBlocks)-1) + "%%")
+				last = m[1]
+			}
+			b.WriteString(htmlStr[last:])
+			htmlStr = b.String()
+		}
+		for _, step := range mdSteps {
+			htmlStr = jsRegexReplaceAll(htmlStr, step.re, step.rep)
+		}
+		for i, code := range codeBlocks {
+			placeholder := "%%CODEBLOCK_" + strconv.Itoa(i) + "%%"
+			pos := strings.Index(htmlStr, placeholder)
+			if pos == -1 {
+				continue
+			}
+			wrapped := `<pre class="code-block"><code>` + code + `</code></pre>`
+			replacement := wrapped
+			if !useFunctionReplacer {
+				replacement = jsGetSubstitution(placeholder, htmlStr, pos, nil, wrapped)
+			}
+			htmlStr = htmlStr[:pos] + replacement + htmlStr[pos+len(placeholder):]
+		}
+		out[idx] = htmlStr
+	}
+	return out
+}
+
+// String.prototype.replace interprets $&, $$, $` and $' in replacement strings.
+// Because esc() runs before fenced code extraction, a literal "$" before a
+// quote, angle bracket or ampersand turns into "$&quot;", "$&#39;", "$&lt;",
+// "$&gt;" or "$&amp;", which a replacement string expands into the internal
+// %%CODEBLOCK_i%% placeholder. Restoring code blocks through a replacement
+// function bypasses GetSubstitution in both the live viewer and HTML export.
+func TestSessionJS_PreservesCodeBlockDollarSigns(t *testing.T) {
+	script, err := assets.ReadFile("static/session.js")
+	if err != nil {
+		t.Fatalf("read static/session.js: %v", err)
+	}
+	const wantCallback = "html = html.replace('%%CODEBLOCK_' + i + '%%', function() {\n" +
+		"            return '<pre class=\"code-block\"><code>' + code + '</code></pre>';\n" +
+		"        });"
+	if !strings.Contains(string(script), wantCallback) {
+		t.Fatalf("session.js must restore code blocks with a replacement callback:\n%s", wantCallback)
+	}
+
+	// Render a session exercising all three .response-text template regions
+	// (Reasoning, Raw LLM response on a grouping task, and ResponseContent)
+	// and verify both the served template and the self-contained export.
+	mustJSON := func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	const (
+		reasoningFence = "```js\nconst currency = \"$\";\n```"
+		groupingFence  = "```json\n[{\"label\":\"dollar-$\",\"files\":[0]}]\n```"
+		responseFence  = "```sh\necho $$\n```"
+	)
+	root := sessionFixture(t,
+		fixtureStart,
+		mustJSON(map[string]any{
+			"type": "llm_request", "filePath": "__grouping__", "taskType": "grouping_task", "request_no": 1,
+			"messages": []any{map[string]any{"role": "user", "content": "[0] MODIFIED   main.go (+1/-1)\n"}},
+		}),
+		mustJSON(map[string]any{
+			"type": "llm_response", "filePath": "__grouping__", "taskType": "grouping_task",
+			"content": groupingFence,
+		}),
+		mustJSON(map[string]any{
+			"type": "llm_request", "filePath": "main.go", "taskType": "main_task", "request_no": 2,
+			"messages": []any{map[string]any{"role": "user", "content": "review"}},
+		}),
+		mustJSON(map[string]any{
+			"type": "llm_response", "filePath": "main.go", "taskType": "main_task",
+			"reasoning_content": reasoningFence,
+			"content":           responseFence,
+		}),
+		fixtureEnd,
+	)
+
+	var exported bytes.Buffer
+	if err := ExportSession(&exported, root, "repo", "sess1"); err != nil {
+		t.Fatalf("ExportSession: %v", err)
+	}
+	if !strings.Contains(exported.String(), wantCallback) {
+		t.Fatal("exported session HTML is missing the code-block replacement callback")
+	}
+
+	responseTextRE := regexp.MustCompile(`(?s)<div class="response-text">(.*?)</div>`)
+	matches := responseTextRE.FindAllStringSubmatch(exported.String(), -1)
+	if len(matches) != 3 {
+		t.Fatalf("rendered .response-text count = %d, want 3", len(matches))
+	}
+	templateTexts := make([]string, len(matches))
+	for i, m := range matches {
+		templateTexts[i] = html.UnescapeString(m[1])
+	}
+	wantTemplateTexts := []string{groupingFence, reasoningFence, responseFence}
+	for i, want := range wantTemplateTexts {
+		if templateTexts[i] != want {
+			t.Fatalf("template .response-text[%d] textContent = %q, want %q", i, templateTexts[i], want)
+		}
+	}
+
+	type testCase struct {
+		name     string
+		input    string
+		wantHTML string
+		wantCode []string
+	}
+	cases := []testCase{
+		{
+			name:     "double-quoted dollar sign",
+			input:    "```js\nconst currency = \"$\";\n```",
+			wantHTML: `<pre class="code-block"><code>const currency = &quot;$&quot;;</code></pre>`,
+			wantCode: []string{`const currency = "$";`},
+		},
+		{
+			name:     "single-quoted regex end anchor",
+			input:    "```py\npattern = 'end$'\n```",
+			wantHTML: `<pre class="code-block"><code>pattern = &#39;end$&#39;</code></pre>`,
+			wantCode: []string{`pattern = 'end$'`},
+		},
+		{
+			name:     "shell double dollar",
+			input:    "```sh\necho $$\n```",
+			wantHTML: `<pre class="code-block"><code>echo $$</code></pre>`,
+			wantCode: []string{`echo $$`},
+		},
+		{
+			name:     "replacement token dollar ampersand",
+			input:    "```js\ns.replace(/a/g, \"$&\")\n```",
+			wantHTML: `<pre class="code-block"><code>s.replace(/a/g, &quot;$&amp;&quot;)</code></pre>`,
+			wantCode: []string{`s.replace(/a/g, "$&")`},
+		},
+		{
+			name:     "dollar backtick with surrounding prose",
+			input:    "Intro text\n```js\nconst x = $` + 1;\n```\nOutro text",
+			wantHTML: "Intro text<br><pre class=\"code-block\"><code>const x = $` + 1;</code></pre><br>Outro text",
+			wantCode: []string{"const x = $` + 1;"},
+		},
+		{
+			name:     "multiple fenced code blocks in one response",
+			input:    "```js\nconst a = \"$\";\n```\nMiddle\n```sh\necho $$\n```",
+			wantHTML: `<pre class="code-block"><code>const a = &quot;$&quot;;</code></pre><br>Middle<br><pre class="code-block"><code>echo $$</code></pre>`,
+			wantCode: []string{`const a = "$";`, `echo $$`},
+		},
+		{
+			name:     "ordinary dollar variables and amounts",
+			input:    "```sh\necho $HOME $1 $100\n```",
+			wantHTML: `<pre class="code-block"><code>echo $HOME $1 $100</code></pre>`,
+			wantCode: []string{`echo $HOME $1 $100`},
+		},
+		{
+			name:     "HTML tags inside fenced code block",
+			input:    "```html\n<div data-price=\"$100\"><span>$x</span></div>\n```",
+			wantHTML: `<pre class="code-block"><code>&lt;div data-price=&quot;$100&quot;&gt;&lt;span&gt;$x&lt;/span&gt;&lt;/div&gt;</code></pre>`,
+			wantCode: []string{`<div data-price="$100"><span>$x</span></div>`},
+		},
+		{
+			name:     "ordinary markdown formatting",
+			input:    "# Heading\n\nParagraph with **bold** and `inline`.\n\n- item 1",
+			wantHTML: `<div class="md-h1">Heading</div><br><br>Paragraph with <strong>bold</strong> and <code class="inline-code">inline</code>.<br><br><div class="md-li">&bull; item 1</div>`,
+			wantCode: nil,
+		},
+		{
+			name:     "template grouping raw LLM response",
+			input:    templateTexts[0],
+			wantHTML: `<pre class="code-block"><code>[{&quot;label&quot;:&quot;dollar-$&quot;,&quot;files&quot;:[0]}]</code></pre>`,
+			wantCode: []string{`[{"label":"dollar-$","files":[0]}]`},
+		},
+		{
+			name:     "template reasoning response",
+			input:    templateTexts[1],
+			wantHTML: `<pre class="code-block"><code>const currency = &quot;$&quot;;</code></pre>`,
+			wantCode: []string{`const currency = "$";`},
+		},
+		{
+			name:     "template main response content",
+			input:    templateTexts[2],
+			wantHTML: `<pre class="code-block"><code>echo $$</code></pre>`,
+			wantCode: []string{`echo $$`},
+		},
+	}
+
+	inputs := make([]string, len(cases))
+	for i, tc := range cases {
+		inputs[i] = tc.input
+	}
+
+	// Verify that the evaluator reproduces the original corruption when given
+	// the pre-fix string-replacement form, then evaluate the actual embedded
+	// static/session.js unconditionally on every platform.
+	legacyScript := strings.Replace(
+		string(script),
+		wantCallback,
+		"html = html.replace('%%CODEBLOCK_' + i + '%%',\n            '<pre class=\"code-block\"><code>' + code + '</code></pre>');",
+		1,
+	)
+	legacyHTML := evalSessionResponseTextJS(t, legacyScript, inputs[:6])
+	for i, got := range legacyHTML {
+		if got == cases[i].wantHTML {
+			t.Fatalf("legacy string replacement unexpectedly preserved case %q: %s", cases[i].name, got)
+		}
+	}
+
+	gotHTML := evalSessionResponseTextJS(t, string(script), inputs)
+
+	if node, err := exec.LookPath("node"); err == nil {
+		payload, err := json.Marshal(struct {
+			Script string   `json:"script"`
+			Inputs []string `json:"inputs"`
+		}{
+			Script: string(script),
+			Inputs: inputs,
+		})
+		if err != nil {
+			t.Fatalf("marshal node payload: %v", err)
+		}
+
+		const runner = `
+const fs = require("fs");
+const vm = require("vm");
+const { script, inputs } = JSON.parse(fs.readFileSync(0, "utf8"));
+const elements = inputs.map((text) => ({ textContent: text, innerHTML: "" }));
+const sandbox = {
+  ocrArrowScroll: () => {},
+  window: { location: { pathname: "/r/repo/sess1" }, ocrPager: () => ({ reset() {}, refresh() {} }) },
+  localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  console,
+  document: {
+    querySelector: () => null,
+    getElementById: () => null,
+    querySelectorAll: (sel) => (sel === ".response-text" ? elements : []),
+  },
+};
+vm.runInNewContext(script, sandbox, { timeout: 15_000 });
+process.stdout.write(JSON.stringify(elements.map((el) => el.innerHTML)));
+`
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, node, "-e", runner)
+		cmd.Stdin = bytes.NewReader(payload)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			if ctx.Err() != nil {
+				t.Fatalf("execute session.js in node: %v\n%s", ctx.Err(), out)
+			}
+			t.Fatalf("execute session.js in node: %v\n%s", err, out)
+		}
+
+		var nodeHTML []string
+		if err := json.Unmarshal(out, &nodeHTML); err != nil {
+			t.Fatalf("unmarshal node output %q: %v", out, err)
+		}
+		if len(nodeHTML) != len(gotHTML) {
+			t.Fatalf("node result count = %d, want %d", len(nodeHTML), len(gotHTML))
+		}
+		for i := range gotHTML {
+			if nodeHTML[i] != gotHTML[i] {
+				t.Fatalf("case %q: node output %q != evaluated output %q", cases[i].name, nodeHTML[i], gotHTML[i])
+			}
+		}
+	}
+
+	codeBlockRE := regexp.MustCompile(`(?s)<pre class="code-block"><code>(.*?)</code></pre>`)
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := gotHTML[i]
+			if got != tc.wantHTML {
+				t.Errorf("innerHTML = %q, want %q", got, tc.wantHTML)
+			}
+			if strings.Contains(got, "%%CODEBLOCK_") {
+				t.Errorf("innerHTML leaked placeholder: %q", got)
+			}
+			codeMatches := codeBlockRE.FindAllStringSubmatch(got, -1)
+			if len(codeMatches) != len(tc.wantCode) {
+				t.Fatalf("code block count = %d, want %d in %q", len(codeMatches), len(tc.wantCode), got)
+			}
+			for j, m := range codeMatches {
+				if text := html.UnescapeString(m[1]); text != tc.wantCode[j] {
+					t.Errorf("code block[%d] text = %q, want %q", j, text, tc.wantCode[j])
+				}
+			}
+		})
+	}
+}
+
+func TestSessionTemplateLoadsPagerScript(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary:  SessionSummary{SessionID: "s", CWD: "/p"},
+		Comments: []*ReviewComment{{FilePath: "a.go", Content: "c1", Category: "bug", Severity: "high"}},
+	}
+	renderTemplate(rr, "session.html", sessionPageData{EncodedRepo: "r", RepoName: "R", Session: vs})
+	if !strings.Contains(rr.Body.String(), `<script src="/static/a11y.js"></script><script src="/static/pager.js"></script><script src="/static/session.js"></script>`) {
+		t.Error("session page should load a11y.js, pager.js, and session.js in dependency order")
+	}
+}
+
+// TestHandleSession_ServedPageKeepsStaticRefs guards the other half of the
+// export gates in session.html. sessionPageData.Static is false for every HTTP
+// render, so the served page must still link the three /static/ assets and keep
+// its breadcrumb anchors — inlining them over HTTP would defeat the browser
+// cache, and the {{else}} branches are otherwise untested.
+func TestHandleSession_ServedPageKeepsStaticRefs(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(repoDir, "srv1.jsonl"),
+		`{"type":"session_start","timestamp":"2025-06-01T10:00:00Z","cwd":"/my/proj","model":"claude"}`,
+		`{"type":"session_end","duration_seconds":30,"files_reviewed":["main.go"]}`)
+
+	req := httptest.NewRequest("GET", "/r/repo/srv1", nil)
+	rr := httptest.NewRecorder()
+	handleSession(rr, req, root, "repo", "srv1")
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`href="/static/style.css"`,
+		`src="/static/a11y.js"`,
+		`src="/static/pager.js"`,
+		`src="/static/session.js"`,
+		`<a href="/" class="nav-brand"`,
+		`<a href="/r/repo">`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("served page missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<span class="crumb">`) {
+		t.Error("served page de-linked the repo crumb; that is export-only")
+	}
+}
+
+func TestA11yJS_Contract(t *testing.T) {
+	script, err := assets.ReadFile("static/a11y.js")
+	if err != nil {
+		t.Fatalf("read static/a11y.js: %v", err)
+	}
+	for _, want := range []string{
+		// The page scripts hand the scrollable table regions to this global.
+		"window.ocrArrowScroll",
+		// Only the region itself may intercept: focus inside the table (a
+		// link, for instance) keeps its own key behavior.
+		"event.target !== region",
+		// Horizontal overflow is the point; Home/End jump to the edges.
+		"ArrowLeft",
+		"ArrowRight",
+		"Home",
+		"End",
+		"preventDefault",
+		// The region joins the tab order only while it overflows, and the
+		// keys fall through natively when there is nothing to scroll.
+		"scrolls()",
+		"region.tabIndex",
+		"addEventListener(\"resize\"",
+		"scrollWidth > region.clientWidth",
+		`addEventListener("toggle"`,
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("a11y.js is missing %q", want)
+		}
+	}
+}
+
+// TestResponsiveCSS_MetaOverrideComesAfterBase guards the cascade for the
+// narrow-screen meta overrides: the selectors are equally specific as the
+// base rules, so if the override block is ever moved above them the wraps
+// silently stop applying at narrow widths (exactly what review caught).
+func TestResponsiveCSS_MetaOverrideComesAfterBase(t *testing.T) {
+	css, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read static/style.css: %v", err)
+	}
+	text := string(css)
+	base := strings.Index(text, ".session-page .meta span {\n    white-space: nowrap;\n}")
+	normal := strings.Index(text, ".session-page .meta span {\n        white-space: normal;\n        flex-wrap: wrap;\n        overflow-wrap: anywhere;\n    }")
+	truncate := strings.Index(text, ".session-page .meta .meta-truncate {\n        max-width: 100%;\n        overflow: visible;\n        text-overflow: clip;\n    }")
+	if base == -1 || normal == -1 || truncate == -1 {
+		t.Fatal("style.css is missing the session meta rules or their 768px overrides")
+	}
+	if normal < base || truncate < base {
+		t.Error("the 768px session meta overrides must come after the base " +
+			".session-page .meta rules: equal specificity means source order decides")
+	}
+
+	narrow := regexp.MustCompile(`(?s)@media \(max-width: 768px\) \{.*?\.session-page \.meta span \{.*?white-space: normal;.*?flex-wrap: wrap;.*?overflow-wrap: anywhere;.*?\}.*?\.session-page \.meta \.meta-truncate \{.*?max-width: 100%;.*?overflow: visible;.*?text-overflow: clip;.*?\}`)
+	if !narrow.MatchString(text) {
+		t.Fatal("narrow-screen session metadata must wrap long values without clipping")
 	}
 }

@@ -1,13 +1,13 @@
 ---
 name: open-code-review
 description: >
-  Performs AI-powered code review on Git changes using the `ocr` CLI from
-  alibaba/open-code-review. Use when the user asks to review code, review
-  a pull request, review staged/unstaged changes, review a commit, or
-  compare branches for code quality issues. Produces line-level review
-  comments and can automatically apply fixes when requested. With appropriate
-  review rules, can detect various types of issues including bugs, security
-  vulnerabilities, performance problems, and code quality concerns.
+  Review workspace changes, PRs, commits, or branch comparisons with OCR's
+  native review pipeline and independently configured model provider.
+  Produces line-level findings and explains the behavior and impact of
+  committed changes by default. Fixes code only when requested. Use when
+  the user wants native mode or has an OCR provider configured. To use the
+  host agent's model without separate OCR credentials, choose
+  open-code-review-delegate instead.
 license: Apache-2.0
 compatibility: >
   Requires the `ocr` CLI installed (via `npm install -g
@@ -27,8 +27,6 @@ This Codex plugin skill intentionally mirrors the canonical skill at
 OCR agent instructions; a symlink is avoided because plugin installs may only
 materialize the plugin subtree.
 
-A skill for invoking [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`) — an open-source AI code review CLI that reads Git diffs and generates structured, line-level review comments.
-
 ## Workflow
 
 ### Step 1: Gather Business Context
@@ -37,10 +35,16 @@ Analyze the review target (commits, branch, or changes) to extract concise busin
 
 ### Step 2: Run Code Review
 
-Run the OCR command with appropriate flags. **Always pass business context via `--background`** when available:
+**GitHub PR mode:** A bare positive number (e.g. `42`) selects a PR in the GitHub CLI's default repository for this checkout, which can be upstream of a fork. The `pr` prefix is optional. For a PR number or GitHub PR URL, run `python3 "$SKILL_DIR/scripts/review_pr.py" <id-or-url>` once, resolving `SKILL_DIR` from this installed skill. Forward an explicit `--repo OWNER/REPO` or `--background`. Read the printed `run.json` and its result file; report the resolved PR URL, reviewed revisions, freshness, and artifact path with Step 3. On failure report the failed step, not a fallback branch review. Only PR mode needs Python 3 and authenticated `gh`.
+
+PR mode uses built-in and user review rules, not rules from the PR. It stops if MCP servers are configured or the PR changes Git filtering metadata; do not bypass a policy stop.
+
+**Otherwise run `ocr review` directly.** Do not probe with `command -v ocr` or `ocr --version` first; that adds an unnecessary tool call on the normal path.
+
+For a workspace review, omit revision flags and `--analysis`. **Pass business context via `--background`** when available:
 
 ```bash
-ocr review --audience agent --background "business context here" [user-args]
+ocr review --audience agent --background "business context here"
 ```
 
 **Argument handling:**
@@ -49,20 +53,27 @@ ocr review --audience agent --background "business context here" [user-args]
 - **Default** (no user arguments): reviews staged, unstaged, and untracked changes (workspace mode)
 - **Specific commit**: use `--commit` or `-c` to review a single commit against its parent
 - **Branch comparison**: use `--from <ref>` and `--to <ref>` to review diff between two refs
+- **Current branch against a base**: `--from <ref>` defaults the target to `HEAD`, equivalent to `--from <ref> --to HEAD`. This reviews committed changes from the merge-base to HEAD, excluding staged, unstaged, and untracked changes. Omit both refs to review workspace changes.
 - **Timeout**: effective timeout per review group = `--timeout` × review rounds. Default `--timeout 15` with default effort `medium` (2 rounds) gives 30 minutes; `low`/`high` give 15/45 minutes.
 - **Concurrency**: default concurrency is 8 file workers; reduce with `--concurrency <n>` if rate limits are hit
 - **Preview mode**: use `--preview` or `-p` to preview which files will be reviewed without running the LLM
-- **Output file**: use `--output <path>` to write the full result to a file instead of stdout. If the command fails with `unknown flag: --output`, do not continue the review with plain stdout. Ask the user whether to upgrade (`npm i -g @alibaba-group/open-code-review@latest`) and wait for the answer before proceeding. After the user confirms and the upgrade succeeds, rerun with `--output`.
-- **Installation**: if `ocr` command is not found, install it by running `npm i -g @alibaba-group/open-code-review`
+- **Output file**: use `--output <path>` to write the full result to a file instead of stdout.
 
 **Common invocation patterns:**
 
 | User says | Command to run |
 |-----------|---------------|
 | "review my changes" / "review the working copy" | `ocr review --audience agent -b "context"` |
-| "review this PR" / "review feature branch" | `ocr review --audience agent -b "context" --from main --to <branch>` |
-| "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123` |
+| "review feature branch" | `ocr review --audience agent -b "context" --from <base> --to <branch> --analysis --format json` |
+| "review the current branch against main" | `ocr review --audience agent -b "context" --from main --analysis --format json` |
+| "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123 --analysis --format json` |
 | "what would be reviewed?" (dry-run) | `ocr review --preview` |
+
+**Behavior and impact analysis:**
+
+For a fresh commit or range review (`--commit` or `--from`), run Review and Analysis together with `--analysis` by default. Use JSON unless the caller requests another format. Preserve the caller's repository, revisions, background, and output path.
+
+Omit `--analysis` for workspace reviews, `--preview`, `--resume`, or `--format sarif`, and when the user explicitly asks to skip analysis. If the user explicitly requests analysis in an unsupported mode, explain the conflict rather than changing the target or format.
 
 **Output mode:**
 
@@ -71,9 +82,22 @@ ocr review --audience agent --background "business context here" [user-args]
 
 **On failure:** If `ocr review` exits non-zero (e.g. an LLM connection error), do not retry blindly — consult the Troubleshooting section below for the matching fix before re-running.
 
-### Step 3: Report
+### Step 3: Verify and Report
 
-OCR output includes structured `severity` (critical / high / medium / low) and `category` (bug / security / performance / maintainability / test / style / documentation / other) on each comment. Present results grouped by severity, discarding `low` severity items that are likely false positives or nitpicks.
+Treat every OCR Review comment, including low-severity ones, as a claim for the host agent to check against the reviewed workspace or exact revisions. Trace the stated trigger to the claimed effect. For ordinary functional bugs, try the smallest safe, non-destructive check that exercises that path; compare with the base when the claim is a regression. In PR mode, inspect blobs at the recorded SHAs in the retained `worktree` from `run.json`, not the current branch. Do not run PR-supplied code, tests, or builds, bypass a policy stop, or try to exploit a suspected vulnerability.
+
+After reporting the PR result and finishing any requested fixes, give the snapshot path and ask whether to discard it, including uncommitted edits and local-only commits. No answer means keep it. Cleanup preserves the report, manifest, and changes already pushed to the PR.
+
+Only after explicit consent, run `python3 "$SKILL_DIR/scripts/review_pr.py" --cleanup <run.json>` for that run. If the user requested a push, first verify the intended commit is on the PR's remote head branch, for example by comparing it with `gh pr view <pr-url> --json headRefOid`. If the push fails or cannot be verified, keep the snapshot and explain why. Report any cleanup warning or refusal; do not bypass it.
+
+For text and JSON alike, report findings in two groups, keeping OCR order within each. Keep OCR's claim, severity, category, location, and any suggestion distinct from the host's evidence:
+
+- **Reproduced:** give the trigger, the check performed, and the observed result. A source observation can establish a directly inspectable fact; it is not a reproduction of predicted runtime behavior.
+- **Uncertain:** say what was checked, why it did not settle the claim, and what evidence or maintainer decision would settle it. Include claims that could not be checked safely or within the available time. A passing unrelated test or a single unsuccessful attempt does not refute a claim.
+
+Omit a claim from the default findings list only when specific evidence contradicts it. Keep the raw OCR result unchanged and provide its path when saved. If the user asks for the full OCR report, include the original comments separately, without internal fields such as `thinking`. Report Review coverage and gaps from `review_status` and `manifest.coverage` when available, even if neither group contains findings.
+
+**Analysis (combined runs):** render the `analysis` Markdown directly, not `analysis_raw` or a paraphrase. Preserve headings, all table rows, lists, and caveats. Keep Analysis and PR snapshot details separate from host verification. Distinguish `analysis_meta.execution_status` from `analysis_meta.declared_completion`; report skipped, failed, or unverified Analysis without discarding Review. If the report cannot fit, identify what was omitted and give the full artifact path.
 
 ### Step 4: Fix
 
@@ -85,48 +109,9 @@ Before applying fixes, check whether the user requested automatic fixes:
 When fixing issues and suggestions:
 
 - Focus on critical, high, and medium severity items
-- Apply fixes directly to the code when safe and well-defined
+- Apply fixes only for verified issues when safe and well-defined; flag uncertain items for a decision instead
 - For complex fixes requiring manual intervention, clearly describe what needs to be done
 - Always verify fixes with the user before committing
-
-## Output Format
-
-Each comment in OCR's output contains:
-
-- `path`: File path
-- `content`: Review comment text
-- `start_line` / `end_line`: Line range (both 0 means positioning failed)
-- `category`: Issue category (bug, security, performance, maintainability, test, style, documentation, other)
-- `severity`: Issue severity (critical, high, medium, low)
-- `suggestion_code`: Optional fix suggestion
-- `existing_code`: Optional original code snippet
-- `thinking`: Optional LLM reasoning process
-
-Present results grouped by severity using this template:
-
-```markdown
-## Code Review Results
-
-**Files reviewed**: N
-**Issues found**: X critical, Y high, Z medium
-
-### Critical
-
-- **`path/to/file.java:42`** [bug] — Brief description
-  > Recommendation: How to fix
-
-### High
-
-- **`path/to/file.java:26`** [bug] — Brief description
-  > Recommendation: How to fix
-
-### Medium
-
-- **`path/to/file.ts:88`** [performance] — Brief description
-  > Recommendation: How to fix (if applicable)
-```
-
-If no critical, high, or medium severity issues remain after filtering, state: "Review complete — no critical, high, or medium issues found in N files."
 
 **Handling mispositioned comments:**
 
@@ -135,7 +120,8 @@ When `start_line` and `end_line` are both `0`, the comment failed to locate the 
 1. Read the comment content to understand the issue
 2. Examine the target file mentioned in the comment
 3. Identify the relevant code section based on the comment's context
-4. Apply the fix or suggestion to the correct location
+4. Verify the location and report the finding; if the exact position stays uncertain, report it at file level
+5. Apply a fix or suggestion only when the user has authorized edits under Step 4
 
 ## Custom Review Rules
 
@@ -192,7 +178,8 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 **Budget**
 
 - `--max-tokens <n>` — per-group prompt ceiling; defaults to the configured value or the template default (`200000`).
-- `--max-tokens-budget <n>` — cap total input + output tokens for the run. Once exceeded, dispatch stops, partial results are still published, and skipped files are reported as `failed(budget)`.
+- `--max-tokens-budget <n>` — cap total input + output tokens for Review. Checked before every LLM round: a group already over budget gets one final round to submit findings, no further groups are dispatched, partial results are still published, and skipped files are reported as `failed(budget)`.
+- `--analysis-max-tokens-budget <n>` — separate soft token limit for Analysis only (default `0`, unlimited). Its usage is reported in `analysis_meta.usage`, not the Review summary.
 - `--no-filter` — keep all review comments and skip the LLM post-filtering call.
 
 ## Gotchas
@@ -204,36 +191,24 @@ Beyond the common flags above, `ocr review` exposes a few groups of controls. Ru
 - **Plan phase triggers on either of two thresholds** — a group runs an extra risk-analysis phase before main review when its largest changed file reaches `PLAN_MODE_LINE_THRESHOLD` (default `50`) **or** it holds 2+ files whose combined changed lines reach `PLAN_MODE_GROUP_LINE_THRESHOLD` (default `100`). This adds latency but improves quality.
 - **Don't pass `--audience human`** — it streams progress UI that pollutes output. Always use `--audience agent`.
 - **Comment language follows config** — the `language` config controls review comment language, defaults to `English`, and accepts any language name (for example `English` or `中文`).
-- **Avoid output truncation** — Large review runs produce verbose output. Never pipe command output to `tail` or `head` as it drops review comments from earlier sections. Use `--output <path>` and read it in full; on older CLIs, follow the **Output file** guidance above.
+- **Avoid output truncation** — Large review runs produce verbose output. Never pipe command output to `tail` or `head` as it drops review comments from earlier sections. Use `--output <path>` and read it in full.
 - **Resume an interrupted review** — a failed or interrupted range/commit review can be continued with `ocr review --resume <id>` using the same `--from`/`--to` or `--commit` target (the id is printed as `retry with: --resume <id>` on failure, or find it with `ocr session list`). Workspace resume is not supported.
 
 ## Validation
 
-After the review completes, verify success by checking:
-
-1. The command exited with code 0
-2. Comments were generated (or "No comments generated" message appears)
-3. Warnings (if any) are displayed in stderr
-
-If errors occurred, check the stderr warnings for details about which files failed and why.
+Check the exit code, output, and stderr for failures or coverage gaps. The exit code reflects Review, not Analysis: use the separate outcomes in Step 3 for combined runs.
 
 ## Troubleshooting
 
-**`ocr: command not found`**
+**CLI missing or flag not recognized**
 
-Install the CLI:
-
-```bash
-npm install -g @alibaba-group/open-code-review
-```
-
-**`unknown flag: --output`**
-
-The CLI is older than v1.10.0. Do not continue the review with plain stdout. Ask the user whether to upgrade (`npm i -g @alibaba-group/open-code-review@latest`) and wait for the answer before proceeding. After the user confirms and the upgrade succeeds, rerun with `--output`.
+- If `ocr` is not found, install the latest CLI with `npm i -g @alibaba-group/open-code-review@latest`.
+- If OCR reports `unknown flag` for an option this skill uses, offer to upgrade with the same command and wait for approval. For a user-supplied option, check the spelling and subcommand first. Do not silently drop the flag.
+- After installation or an approved upgrade succeeds, rerun the original command once. If it still fails, report the error rather than retrying or changing the request.
 
 **`ocr review` fails with LLM connection error**
 
-Prompt the user to configure an LLM provider.
+If OCR credentials are unavailable, offer `open-code-review-delegate` rather than requiring a new key. If that skill is missing, offer `npx skills add alibaba/open-code-review --skill open-code-review-delegate`. Do not switch modes without user agreement. To continue in native mode, diagnose the provider connection or configure it below; a host-agent login is not an OCR credential.
 
 Interactive setup (recommended):
 
@@ -250,7 +225,7 @@ ocr config set llm.model claude-opus-4-6
 ocr config set llm.use_anthropic true
 ```
 
-Verify connectivity with `ocr llm test`. Stop here and ask the user to provide credentials — never invent or hardcode API keys.
+Verify connectivity with `ocr llm test`. If credentials are needed for native mode, ask the user to configure them locally rather than paste secrets into the conversation. Never invent or hardcode API keys.
 
 ## References
 

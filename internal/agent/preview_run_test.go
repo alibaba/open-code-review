@@ -4,7 +4,9 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func initPreviewRepo(t *testing.T) string {
@@ -158,6 +161,89 @@ func TestPreviewOmitsUntrackedProviderDirFile(t *testing.T) {
 	}
 }
 
+// TestPreviewKeepsChangesetOrder pins issue #1236: provider-directory entries
+// sit where Git lists them rather than ahead of every other file, so the
+// preview and --format json's files array read against `git diff --name-only`.
+func TestPreviewKeepsChangesetOrder(t *testing.T) {
+	dir := initPreviewRepo(t)
+	paths := []string{"a.go", "target/mid.go", "z.go"}
+	write := func(content string) {
+		t.Helper()
+		for _, p := range paths {
+			full := filepath.Join(dir, filepath.FromSlash(p))
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatalf("create directory for %s: %v", p, err)
+			}
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", p, err)
+			}
+		}
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	write("package p\n")
+	run("add", ".")
+	run("commit", "-m", "add files")
+	write("package p\n\nconst V = 2\n")
+
+	cmd := exec.Command("git", "-C", dir, "diff", "--name-only")
+	nameOut, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git diff --name-only: %v", err)
+	}
+	want := strings.Split(strings.TrimSpace(string(nameOut)), "\n")
+	if !slices.Equal(want, paths) {
+		t.Fatalf("git changeset order = %v, fixture paths = %v", want, paths)
+	}
+
+	preview, err := Preview(context.Background(), Args{RepoDir: dir})
+	if err != nil {
+		t.Fatalf("Preview error: %v", err)
+	}
+	got := make([]string, 0, len(preview.Entries))
+	for _, e := range preview.Entries {
+		got = append(got, e.Path)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("entry order = %v, want changeset order %v", got, want)
+	}
+
+	var byPath = make(map[string]DiffPreviewEntry, len(preview.Entries))
+	for _, e := range preview.Entries {
+		byPath[e.Path] = e
+	}
+	if e := byPath["target/mid.go"]; e.ExcludeReason != ExcludeProviderDirectory || e.WillReview {
+		t.Errorf("target/mid.go = %+v, want provider_directory", e)
+	}
+
+	// Same encoding the CLI uses in outputPreviewJSON.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(preview); err != nil {
+		t.Fatalf("encode preview JSON: %v", err)
+	}
+	var decoded DiffPreview
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode preview JSON: %v\n%s", err, buf.String())
+	}
+	jsonPaths := make([]string, 0, len(decoded.Entries))
+	for _, e := range decoded.Entries {
+		jsonPaths = append(jsonPaths, e.Path)
+	}
+	if !slices.Equal(jsonPaths, want) {
+		t.Errorf("JSON files order = %v, want changeset order %v\n%s", jsonPaths, want, buf.String())
+	}
+	if len(decoded.Entries) != len(want) {
+		t.Errorf("JSON files count = %d, want %d", len(decoded.Entries), len(want))
+	}
+}
+
 // TestPreviewMarksOversizedDiffTooLarge pins that preview applies the per-file
 // diff-size ceiling the real run applies before dispatch, and reports it under
 // its own reason rather than silently listing the file as reviewable.
@@ -283,6 +369,24 @@ func TestPreviewMatchesRunSelectedCoverage(t *testing.T) {
 	slices.Sort(selected)
 	if !slices.Equal(previewed, selected) {
 		t.Errorf("preview will_review = %v but the run selected %v", previewed, selected)
+	}
+
+	// The files preview reported as excluded reach the manifest with the same
+	// reason, and they leave the selected-set outcome alone.
+	excluded := make(map[string]ExcludeReason, len(manifest.Coverage.Excluded))
+	for _, item := range manifest.Coverage.Excluded {
+		excluded[item.Path] = item.ExcludeReason
+	}
+	if len(excluded) != 3 {
+		t.Errorf("run excluded = %v, want notes.md, gone.go and huge.go", excluded)
+	}
+	for path, got := range excluded {
+		if want := byPath[path].ExcludeReason; got != want {
+			t.Errorf("%s: run exclude_reason = %q, preview = %q", path, got, want)
+		}
+	}
+	if manifest.TerminalState != session.StateComplete {
+		t.Errorf("terminal_state = %q, want complete with only excluded files left out", manifest.TerminalState)
 	}
 }
 

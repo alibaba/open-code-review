@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -63,6 +64,48 @@ func TestRunPreviewJSONFormat(t *testing.T) {
 	}
 	if got.Entries[0].ExcludeReason != model.ExcludeExtension {
 		t.Errorf("exclude_reason = %q, want %q", got.Entries[0].ExcludeReason, model.ExcludeExtension)
+	}
+}
+
+// TestRunPreviewJSON_ProviderDirectoryKeepsChangesetOrder pins issue #1236:
+// JSON files from the CLI preview path include provider-directory entries in
+// Git changeset order, not prepended.
+func TestRunPreviewJSON_ProviderDirectoryKeepsChangesetOrder(t *testing.T) {
+	freshOCRHome(t)
+	dir := initTestGitRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, "target"), 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	gitCommitFile(t, dir, "a.go", "package p\n", "add a")
+	gitCommitFile(t, dir, filepath.Join("target", "mid.go"), "package p\n", "add target")
+	gitCommitFile(t, dir, "z.go", "package p\n", "add z")
+	for _, p := range []string{"a.go", filepath.Join("target", "mid.go"), "z.go"} {
+		if err := os.WriteFile(filepath.Join(dir, p), []byte("package p\n\nconst V = 2\n"), 0o644); err != nil {
+			t.Fatalf("modify %s: %v", p, err)
+		}
+	}
+
+	cc, err := loadCommonContext(dir, "", "", 0, 0, true)
+	if err != nil {
+		t.Fatalf("loadCommonContext: %v", err)
+	}
+	out := captureStdout(t, func() {
+		if err := runPreview(cc, reviewOptions{outputFormat: "json"}, os.Stdout); err != nil {
+			t.Errorf("runPreview error: %v", err)
+		}
+	})
+	got := decodeSinglePreviewJSON(t, out)
+	want := []string{"a.go", "target/mid.go", "z.go"}
+	if len(got.Entries) != len(want) {
+		t.Fatalf("files = %d, want %d: %+v", len(got.Entries), len(want), got.Entries)
+	}
+	for i, path := range want {
+		if got.Entries[i].Path != path {
+			t.Errorf("files[%d].path = %q, want %q", i, got.Entries[i].Path, path)
+		}
+	}
+	if got.Entries[1].ExcludeReason != model.ExcludeProviderDirectory || got.Entries[1].WillReview {
+		t.Errorf("target/mid.go = %+v, want provider_directory", got.Entries[1])
 	}
 }
 
@@ -228,6 +271,7 @@ func TestRunPreviewCreatesNoSession(t *testing.T) {
 }
 
 func TestLoadReviewResumeState(t *testing.T) {
+	setTestHome(t, t.TempDir())
 	dir := initTestGitRepo(t)
 
 	t.Run("empty resume returns nil", func(t *testing.T) {
@@ -237,10 +281,14 @@ func TestLoadReviewResumeState(t *testing.T) {
 		}
 	})
 
-	t.Run("workspace resume rejected", func(t *testing.T) {
-		_, err := loadReviewResumeState(dir, reviewOptions{resume: "sess-1"})
-		if err == nil {
-			t.Fatal("expected error for workspace-mode resume")
+	t.Run("workspace resume loads session", func(t *testing.T) {
+		id := writeWorkspaceResumeSession(t, dir, "main.go")
+		state, err := loadReviewResumeState(dir, reviewOptions{resume: id})
+		if err != nil {
+			t.Fatalf("workspace resume must load, got: %v", err)
+		}
+		if state == nil || state.ReviewMode != session.ReviewModeWorkspace {
+			t.Fatalf("state = %+v, want a workspace session", state)
 		}
 	})
 

@@ -40,8 +40,8 @@ sidebar:
 
 ### 何をするか
 
-- `pull_request_target`（`opened`）**および** `issue_comment` イベント（本文が
-  `/open-code-review` または `@open-code-review` で始まるもの）でトリガーします。後者はレビュアーが PR にコメントすることで OCR をオンデマンドで再実行できるようにします。（`pull_request` ではなく `pull_request_target` を使うことで、fork から提出された PR でも secret を利用できます。OCR は diff を読むだけで、PR 内のコードは実行しません。）
+- `pull_request_target`（`opened`、`synchronize`、`reopened`）**および** `issue_comment` イベント（本文が
+  `/open-code-review` または `@open-code-review` で始まるもの）でトリガーします。後者はレビュアーが PR にコメントすることで OCR をオンデマンドで再実行できるようにします。（`pull_request` ではなく [`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target) を使うことで、fork から提出された PR でも secret を利用できます。OCR は diff を読むだけで、PR 内のコードは実行しません。）
 - `npm install -g @alibaba-group/open-code-review` で OCR をインストールし、`ocr config set` で設定を書き込み、ブランチ区間モードで中核コマンドを実行します。
 - JSON の外殻を解析し、GitHub Pull Request Review API を通じて各発見をインラインのレビューコメントとして貼り付けます。行情報を持たないコメントはサマリー本文にまとめられます。一括送信が失敗した場合は 1 件ずつの貼り付けにフォールバックし、統計をサマリーコメントに表示します。
 
@@ -54,6 +54,13 @@ mkdir -p .github/workflows
 curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
+
+[2026年12月2日](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/)から、GitHub がホストする公開リポジトリでは `pull_request_target` イベントがデフォルトでブロックされます。適用される Actions イベントポリシーで明示的に許可すると、このイベントを利用できます。PR の作成・更新・再オープン時に OCR を引き続き自動実行する必要がある場合は、リポジトリの **Settings → Actions → Policies** で[このワークフローのポリシーを作成または更新します](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy)。
+
+- ポリシーを作成する場合は、**Target workflows** の **Add target** をクリックし、`.github/workflows/ocr-review.yml` を指定します。
+- **Restrict events** を選択し、自動レビュー用に `pull_request_target`、コメントによる再レビュー用に `issue_comment` を許可します。
+- **Enforcement status** を **Active** に設定し、ポリシーを保存します。
+- 注意：既存のポリシーを更新する前に、`.github/workflows/ocr-review.yml` だけが対象になっていることを確認します。
 
 ### 必須の secret
 
@@ -79,7 +86,7 @@ curl -o .github/workflows/ocr-review.yml \
 | 入力 | デフォルト | 説明 |
 |---|---|---|
 | `effort` | `''` | `ocr review --effort` に渡すレビュー強度プリセット：`low`、`medium`、`high`（大文字小文字を区別しません）。空の場合は CLI のデフォルト（設定済みの値、なければ medium）を使います。OCR v1.10.0 以降が必要で、それより古いバージョンではアクションが明確なエラーで早期に失敗します。 |
-| `max_tokens_budget` | `''` | `ocr review --max-tokens-budget` に渡すトークン総量（入力 + 出力）の上限。空または `'0'` は無制限です。上限を超えるとディスパッチが停止し、スキップされたファイルは `failed(budget)` として報告され、部分的な結果は引き続き公開され、レビューは 0 で終了します。 |
+| `max_tokens_budget` | `''` | `ocr review --max-tokens-budget` に渡すトークン総量（入力 + 出力）の上限。空または `'0'` は無制限です。LLM の各ラウンドの前に確認されます: すでに上限を超えたサブタスクには発見を提出するための最終ラウンドが 1 回与えられ、以降のサブタスクはディスパッチされず、予算超過およびスキップされたファイルは `failed(budget)` として報告されます。予算だけが原因で一部の項目をレビューできた場合、終了コードは 0 です。タイムアウトやプロバイダーエラーなどの実行時エラーが発生した場合、または全項目が失敗した場合（すべて予算不足の場合を含む）、終了コードは非ゼロです。CLI は得られた結果を出力します。非ゼロ終了時、Action は設定に応じて出力をアーティファクトとしてアップロードしますが、PR コメントの投稿はスキップします。 |
 | `llm_reasoning_effort` | `''` | `reasoning_effort` リクエストフィールドを調整できるモデル（GLM-5.x、OpenAI reasoning モデルなど）の推論深度：`minimal`、`low`、`medium`、`high`、`max`（大文字小文字を区別しません）。`llm_extra_body` 経由でリクエストボディにマージされるため、公開済みのすべての CLI バージョンで動作します。`llm_extra_body` 内の明示的な `reasoning_effort` キーがこの入力より優先されます。空（デフォルト）の場合は送信しません。OpenAI 互換プロトコル専用です——Anthropic API は未知のボディフィールドを拒否するため、そのプロトコルではアクションが即座に失敗します。Anthropic の thinking 制御には `llm_extra_body` の明示的なキーを使ってください。 |
 | `stream_progress` | `'false'` | `'true'` にすると、レビューが終了するまで沈黙する代わりに、`[ocr]` の進捗行をワークフローログへライブで流します（stderr の human audience）。表示のみの切り替えで、stderr は引き続きファイルにキャプチャされ、アーティファクトとコメント投稿に使われます。 |
 
@@ -144,7 +151,7 @@ PR で制御可能な値は `${{ }}` を `run:` に直接展開するのでは�
 
 #### 並行数
 
-デフォルトは 8 つの並行サブ agent で、ファイルグループごとに 1 つです。大きな PR では、LLM プロバイダーのレート制限に抵触しないよう下げてください。
+デフォルトは 8 つの並行サブ agent で、サブタスクごとに 1 つです。大きな PR では、LLM プロバイダーのレート制限に抵触しないよう下げてください。
 
 ```yaml
 - name: Run OCR review
@@ -344,7 +351,7 @@ script:
 #### カスタムルールと並行数
 
 GitHub Actions のレシピと同じ引数です——`--rule` でプロジェクト固有のルールファイルを渡し、
-`--concurrency` で並行サブ agent を制限します（デフォルトは 8、ファイルグループごとに 1 つ）。
+`--concurrency` で並行サブ agent を制限します（デフォルトは 8、サブタスクごとに 1 つ）。
 
 ```yaml
 script:

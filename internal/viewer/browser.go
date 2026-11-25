@@ -118,7 +118,7 @@ func shouldAutoOpenEnv(mode string, stdoutTTY bool, sshConn, display, wayland, g
 func browserCandidates(goos, browserEnv, url string) [][]string {
 	var out [][]string
 	if goos != "windows" {
-		for _, entry := range strings.Split(browserEnv, ":") {
+		for entry := range strings.SplitSeq(browserEnv, ":") {
 			if argv := browserEnvArgv(entry, url); argv != nil {
 				out = append(out, argv)
 			}
