@@ -382,6 +382,16 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		calls := resp.ToolCalls()
 
 		if len(calls) == 0 {
+			// A reply with content but no tool call is just as empty as a round
+			// whose tool calls produced no usable result, so it has to feed the
+			// same guard. Without this the loop retries until the per-group
+			// deadline. See issue #2010.
+			consecutiveEmptyRounds++
+			if consecutiveEmptyRounds >= maxConsecutiveEmptyRounds {
+				fmt.Fprintf(stdout.Writer(), "[ocr] Too many empty retries for %s, stopping.\n", taskKey)
+				stop = StopEmptyRounds
+				break
+			}
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", taskKey)
 			messages = append(messages, llm.NewTextMessage("user", r.task.EmptyResponseMessage))
 			native := resp.Native()
