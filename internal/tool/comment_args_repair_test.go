@@ -262,7 +262,7 @@ func TestEscapeControl(t *testing.T) {
 		}
 	}
 	// Every escape it produces has to be one the JSON parser accepts.
-	for c := byte(0); c < 0x20; c++ {
+	for c := range byte(0x20) {
 		var target string
 		blob := `["` + escapeControl(c) + `"]`
 		if err := json.Unmarshal([]byte(blob), &[]*string{&target}); err != nil {
@@ -592,12 +592,8 @@ func TestHasSuspectTruncation(t *testing.T) {
 // TestKnownCommentFieldsCoversTheSchema stops the allow-list from drifting from
 // the shipped schema: a field the schema defines but this set omits would make
 // repairedCommentsAcceptable reject every batch that uses it.
-//
-// It covers the embedded default only. A caller pointing --tools at a custom file
-// with extra comment fields still loses the repair, accepted here because the
-// failure direction is safe — the batch falls back to the original error.
 func TestKnownCommentFieldsCoversTheSchema(t *testing.T) {
-	entries, err := toolsconfig.Load("")
+	entries, err := toolsconfig.LoadDefault()
 	if err != nil {
 		t.Fatalf("load embedded tools config: %v", err)
 	}

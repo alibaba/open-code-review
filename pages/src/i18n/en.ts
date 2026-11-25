@@ -47,7 +47,7 @@ export const en = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'NPM DOWNLOADS',
   'highlights.stat2Caption': 'Real npm downloads · last 30 days',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': 'REAL-WORLD TASKS',
   'highlights.stat3Caption': 'Code review tasks executed to date',
   'highlights.stat4Value': '1/9',
@@ -118,6 +118,7 @@ export const en = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': 'Contact us',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
 
   // Docs Page (keep existing)
@@ -195,7 +196,7 @@ export const en = {
   'docs.reviewFlag10Desc': 'Max tool call rounds per file; only takes effect when greater than template default',
   'docs.reviewFlag10Default': 'Built-in',
   'docs.reviewFlag11Desc': 'Max concurrent git subprocesses',
-  'docs.reviewNote': 'Note: <code>--from/--to</code> and <code>--commit</code> cannot be used together. When specifying <code>--from</code>, <code>--to</code> must also be specified.',
+  'docs.reviewNote': 'Note: <code>--from/--to</code> and <code>--commit</code> cannot be used together. With <code>--from</code> alone, the target defaults to <code>HEAD</code>.',
   'docs.scanTitle': 'ocr scan',
   'docs.scanDesc': '<code>ocr scan</code> reviews whole files instead of a diff - no Git history or meaningful diff required. Use it to audit an unfamiliar codebase, sweep a directory before a migration, or review any project where there is nothing to diff against.',
   'docs.scanVsTitle': 'ocr scan vs. ocr review',
@@ -249,8 +250,6 @@ export const en = {
   'docs.scanFlag14Default': 'Built-in',
   'docs.scanFlag15Desc': 'Max concurrent git subprocesses',
   'docs.scanFlag16Desc': 'Path to custom JSON review rules',
-  'docs.scanFlag17Desc': 'Path to custom JSON tools config',
-  'docs.scanFlag17Default': 'Built-in',
   'docs.scanFlag18Desc': 'Repository or directory root to scan',
   'docs.scanFlag18Default': 'Current dir',
   'docs.scanNote': 'Note: <code>--max-tools</code> only raises the scan template\'s per-file tool-call budget — it has no effect when set lower than the template default.',
@@ -288,6 +287,7 @@ export const en = {
   'docs.sidebar.configuration': 'Configuration',
   'docs.sidebar.cliReference': 'CLI Reference',
   'docs.sidebar.reviewRules': 'Review Rules',
+  'docs.sidebar.reviewingRequirements': 'Reviewing against requirements',
   'docs.sidebar.architecture': 'Architecture',
   'docs.sidebar.tools': 'Tools',
   'docs.sidebar.mcp': 'MCP Servers',
@@ -299,6 +299,7 @@ export const en = {
   'docs.sidebar.delegate': 'Delegation Mode',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': 'Contributing',
   'docs.sidebar.faq': 'FAQ',
   'docs.sidebar.chatgptPreview': 'Sign in with ChatGPT preview',
@@ -307,6 +308,11 @@ export const en = {
   'docs.search.hint.select': 'Select',
   'docs.search.hint.open': 'Open',
   'docs.search.hint.close': 'Close',
+  'docs.content.loading': 'Loading documentation...',
+  'docs.content.loadError': 'Failed to load documentation content.',
+  'docs.content.retry': 'Retry',
+  'docs.search.loading': 'Searching...',
+  'docs.search.loadError': 'Search content failed to load.',
 
   // Blog
   'blog.title': 'Blog',

@@ -49,7 +49,7 @@ export const zh: TranslationKeys = {
   'highlights.stat2Value': '150K+',
   'highlights.stat2Label': 'NPM 下载量',
   'highlights.stat2Caption': 'npm 近 30 天真实下载',
-  'highlights.stat3Value': '3M+',
+  'highlights.stat3Value': '5M+',
   'highlights.stat3Label': '真实任务',
   'highlights.stat3Caption': '已执行的代码审查任务',
   'highlights.stat4Value': '1/9',
@@ -122,6 +122,7 @@ export const zh: TranslationKeys = {
 
   // Footer
   'footer.brand': 'Open Code Review',
+  'footer.contact': '联系我们',
   'footer.copyright': '© 2026 版权所有。保留所有权利。',
 
   // Docs Page
@@ -199,7 +200,7 @@ export const zh: TranslationKeys = {
   'docs.reviewFlag10Desc': '每个文件的最大工具调用轮数；仅当大于模板默认值时生效',
   'docs.reviewFlag10Default': '内置',
   'docs.reviewFlag11Desc': '最大并发 git 子进程数',
-  'docs.reviewNote': '注意：<code>--from/--to</code> 和 <code>--commit</code> 不能同时使用。指定 <code>--from</code> 时，<code>--to</code> 也必须指定。',
+  'docs.reviewNote': '注意：<code>--from/--to</code> 和 <code>--commit</code> 不能同时使用。只指定 <code>--from</code> 时，目标默认为 <code>HEAD</code>。',
   'docs.scanTitle': 'ocr scan',
   'docs.scanDesc': '<code>ocr scan</code> 审查整个文件而非 diff —— 无需 Git 历史或有意义的差异。适用于审计不熟悉的代码库、迁移前的目录扫描，或任何没有可比对内容的项目。',
   'docs.scanVsTitle': 'ocr scan 与 ocr review 的区别',
@@ -253,8 +254,6 @@ export const zh: TranslationKeys = {
   'docs.scanFlag14Default': '内置',
   'docs.scanFlag15Desc': '最大并发 git 子进程数',
   'docs.scanFlag16Desc': '自定义 JSON 审查规则的路径',
-  'docs.scanFlag17Desc': '自定义 JSON 工具配置的路径',
-  'docs.scanFlag17Default': '内置',
   'docs.scanFlag18Desc': '要扫描的仓库或目录根路径',
   'docs.scanFlag18Default': '当前目录',
   'docs.scanNote': '注意：<code>--max-tools</code> 仅会提高扫描模板中按文件的工具调用预算 —— 当设置值低于模板默认值时不生效。',
@@ -292,6 +291,7 @@ export const zh: TranslationKeys = {
   'docs.sidebar.configuration': '配置',
   'docs.sidebar.cliReference': 'CLI 参考',
   'docs.sidebar.reviewRules': '评审规则',
+  'docs.sidebar.reviewingRequirements': '结合需求进行评审',
   'docs.sidebar.architecture': '架构',
   'docs.sidebar.tools': '工具',
   'docs.sidebar.mcp': 'MCP 服务器',
@@ -303,6 +303,7 @@ export const zh: TranslationKeys = {
   'docs.sidebar.delegate': '委托模式',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.acp': 'ACP',
+  'docs.sidebar.copilotCli': 'Copilot CLI',
   'docs.sidebar.contributing': '贡献',
   'docs.sidebar.faq': 'FAQ',
   'docs.sidebar.chatgptPreview': 'ChatGPT 登录预览版',
@@ -311,6 +312,11 @@ export const zh: TranslationKeys = {
   'docs.search.hint.select': '选择',
   'docs.search.hint.open': '打开',
   'docs.search.hint.close': '关闭',
+  'docs.content.loading': '文档加载中...',
+  'docs.content.loadError': '文档内容加载失败。',
+  'docs.content.retry': '重试',
+  'docs.search.loading': '搜索中...',
+  'docs.search.loadError': '搜索内容加载失败。',
 
   // Blog
   'blog.title': '博客',

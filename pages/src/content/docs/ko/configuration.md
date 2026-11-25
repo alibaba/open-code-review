@@ -72,6 +72,19 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 모델의 유효성은 요청을 보낼 때 프로바이더가 확인합니다. 사용자 정의 프로바이더에는
 기존 `--model` 검증 규칙이 적용됩니다.
 
+`minimax`와 `minimax-cn`의 새 모델 선택에서는 `MiniMax-M3.1-Flash`,
+`MiniMax-M3` 순으로 추천합니다. OCR은 저장된 모델과 명시적으로 지정한 이전 모델 또는
+사용자 정의 모델 ID를 계속 허용합니다. 게이트웨이는 자체 모델 ID를 사용하므로,
+MiniMax 직접 연결용 ID가 게이트웨이에서도 제공된다는 의미는 아닙니다.
+
+기본 요청은 `thinking`과 `reasoning_effort`를 생략하여
+[MiniMax API 기본값](https://platform.minimax.io/docs/api-reference/text-openai-api)을 사용합니다.
+Flash는 adaptive thinking이 필수이며 effort 기본값은 `max`입니다. `extra_body`에서
+`thinking: {"type":"adaptive"}`와 `low`, `medium`, `high`, `xhigh`, `max` 중 하나의
+`reasoning_effort`를 명시할 수 있습니다. M3는 `thinking: {"type":"disabled"}`도
+지원합니다. 저장된 `extra_body`는 유지되므로 Flash로 전환하기 전에 thinking을
+비활성화하는 설정을 제거하세요.
+
 ## ChatGPT 로그인 미리보기
 
 이 미리보기는 공개 Responses API용 내장 `chatgpt` provider를 추가합니다. API 키 환경 변수는 없습니다. 로그인, 동의 및 사용 제한은 [ChatGPT 미리보기 안내](../chatgpt-preview/)를 참조하세요.
@@ -143,13 +156,25 @@ Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습�
 
 위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
 
+Chat Completions를 구현하는 원격 OpenAI 호환 프로바이더는 `protocol openai`를 사용합니다.
+`url`에는 서비스 문서에 나온 API 루트를 지정하며, 보통 `/v1`로 끝납니다. OCR은 요청을 보낼
+때 `/chat/completions`를 뒤에 추가합니다. 다음 예시는 OpenAI의 공개 Chat Completions
+엔드포인트를 커스텀 이름으로 등록합니다.
+
 ```bash
-ocr config set provider                             my-gateway
-ocr config set custom_providers.my-gateway.url      https://gateway.internal.com/v1
-ocr config set custom_providers.my-gateway.protocol openai
-ocr config set custom_providers.my-gateway.model    llama-3-70b
-ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+ocr config set provider                                      openai-chat-gateway
+ocr config set custom_providers.openai-chat-gateway.url      https://api.openai.com/v1
+ocr config set custom_providers.openai-chat-gateway.protocol openai
+ocr config set custom_providers.openai-chat-gateway.model    gpt-4.1
+ocr config set custom_providers.openai-chat-gateway.api_key  "$OPENAI_API_KEY"
 ```
+
+다른 원격 OpenAI 호환 서비스도 같은 필드를 사용합니다. `url`은 서비스 문서의 API 루트로,
+`model`은 해당 서비스 모델 카탈로그의 정확한 ID로 바꾸세요. 선택한 모델과 엔드포인트는
+네이티브 도구 호출을 지원해야 합니다. OCR이 Chat Completions를 통해 도구를 보내기
+때문입니다. 커스텀 프로바이더는 API 키를 환경 변수에서 자동으로 가져오지 않으므로
+`api_key`를 명시적으로 설정하거나 `api_key_cmd`를 구성하세요. `ocr config set provider <name>`으로
+프로바이더를 선택하면 활성 프로바이더와 OCR이 사용하는 프로바이더 설정이 바뀝니다.
 
 프로바이더나 모델이 OpenAI Responses API(`/v1/responses`)를 요구하면 `openai-responses`를 사용합니다:
 

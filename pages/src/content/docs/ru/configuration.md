@@ -80,6 +80,19 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 проверит модель при отправке запроса. Для пользовательских провайдеров действуют
 прежние правила проверки `--model`.
 
+При выборе новой модели для `minimax` и `minimax-cn` первой предлагается
+`MiniMax-M3.1-Flash`, затем `MiniMax-M3`. OCR по-прежнему принимает сохранённые модели
+и явно заданные устаревшие или пользовательские идентификаторы. У шлюзов свои
+идентификаторы: наличие модели в прямом API MiniMax не означает её доступность через шлюз.
+
+По умолчанию запрос не содержит `thinking` и `reasoning_effort`, поэтому применяются
+[значения по умолчанию API MiniMax](https://platform.minimax.io/docs/api-reference/text-openai-api).
+Flash требует адаптивного рассуждения; значение effort по умолчанию — `max`.
+В `extra_body` можно явно задать `thinking: {"type":"adaptive"}` и `reasoning_effort`
+со значением `low`, `medium`, `high`, `xhigh` или `max`. M3 также поддерживает
+`thinking: {"type":"disabled"}`. Сохранённый `extra_body` не меняется автоматически:
+перед переходом на Flash удалите настройку, отключающую рассуждение.
+
 ## Предварительная версия входа через ChatGPT
 
 В предварительной версии добавлен встроенный провайдер `chatgpt` для публичного API Responses. Переменной окружения API-ключа нет. Условия входа, согласия и использования описаны в [руководстве по предварительной версии ChatGPT](../chatgpt-preview/).
@@ -183,13 +196,28 @@ Model:  claude-sonnet-5
 (`protocol` может принимать значения `anthropic`, `openai`,
 `openai-responses` или `anthropic-bedrock`):
 
+Удалённый OpenAI-совместимый провайдер с поддержкой Chat Completions использует
+`protocol openai`. В `url` укажите корневой адрес API из документации сервиса,
+обычно с суффиксом `/v1`; при отправке запроса OCR добавляет `/chat/completions`.
+В этом примере пользовательское имя указывает на публичную конечную точку Chat
+Completions OpenAI:
+
 ```bash
-ocr config set provider                             my-gateway
-ocr config set custom_providers.my-gateway.url      https://gateway.internal.com/v1
-ocr config set custom_providers.my-gateway.protocol openai
-ocr config set custom_providers.my-gateway.model    llama-3-70b
-ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+ocr config set provider                                      openai-chat-gateway
+ocr config set custom_providers.openai-chat-gateway.url      https://api.openai.com/v1
+ocr config set custom_providers.openai-chat-gateway.protocol openai
+ocr config set custom_providers.openai-chat-gateway.model    gpt-4.1
+ocr config set custom_providers.openai-chat-gateway.api_key  "$OPENAI_API_KEY"
 ```
+
+Для любого другого удалённого OpenAI-совместимого сервиса используйте те же поля:
+замените `url` на корневой адрес API из его документации, а `model` — на точный
+идентификатор из каталога моделей сервиса. Выбранные модель и конечная точка должны
+поддерживать встроенные вызовы инструментов, поскольку OCR передаёт инструменты через
+Chat Completions. Пользовательские провайдеры не получают API-ключ из переменной
+окружения автоматически, поэтому явно задайте `api_key` (или настройте `api_key_cmd`).
+Выбор провайдера командой `ocr config set provider <name>` меняет активного провайдера и
+конфигурацию провайдера, которую использует OCR.
 
 Используйте `openai-responses`, если провайдеру или модели требуется OpenAI
 Responses API (`/v1/responses`):

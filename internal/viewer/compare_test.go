@@ -187,6 +187,12 @@ func compareFixture(t *testing.T) string {
 	// b.go, so a.go carries no verdict.
 	writeCompareSession(t, repoDir, "partial", "commit",
 		splitCoverage([]string{"a.go", "b.go"}, []string{"b.go"}))
+	writeJSONL(t, filepath.Join(repoDir, "same-repo-alias.jsonl"),
+		`{"type":"session_start","timestamp":"2025-03-01T09:00:00Z","cwd":"/home/user/project/","model":"gpt-4","reviewMode":"commit"}`,
+		`{"type":"review_item_done","filePath":"a.go","comments":[`+kept+`]}`,
+		`{"type":"session_end","duration_seconds":1,"run_manifest":{"schema_version":"ocr.run-manifest/v1",`+
+			`"run_id":"r","operation":"review","terminal_state":"complete","repository":{},"input":{},`+
+			`"execution":{},"coverage":`+fullCoverage("a.go")+`,"elapsed_ms":1}}`)
 	// A session recorded in a different working directory. Written from literal
 	// lines because writeCompareSession hardcodes one cwd for all six of its
 	// call sites.
@@ -289,6 +295,12 @@ func TestHandleCompare(t *testing.T) {
 			name:  "interrupted after run does not resolve the files it never reached",
 			query: "before=s1&after=partial", status: http.StatusOK,
 			contains: []string{"New (0)", "Persisting (0)", "Resolved (0)", "Not reviewed (2)"},
+		},
+		{
+			name: "equivalent repository path spelling is accepted", query: "before=s1&after=same-repo-alias",
+			status:   http.StatusOK,
+			contains: []string{"New (0)", "Persisting (1)", "Resolved (1)", "Not reviewed (0)", "still broken"},
+			absent:   []string{"sessions belong to different repositories"},
 		},
 		{
 			// Reachable because encodeRepoPath collapses "/" to "-", so

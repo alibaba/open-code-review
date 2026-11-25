@@ -9,6 +9,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +67,10 @@ type SessionHistory struct {
 	// Finalize, embedded into session_end and exposed to the CLI. Nil for
 	// legacy/scan runs.
 	finalManifest *RunManifest
+	// finalRetryReport is the frozen retry report handed back by the agent before
+	// Finalize and embedded into session_end. Nil is the common case: Freeze
+	// withholds a report unless something retried, failed or was cancelled.
+	finalRetryReport *llm.RetryReport
 	// persistInitErr records a failure to create the JSONL writer. The run may
 	// still produce a manifest for CLI output, but Finalize must report that the
 	// persisted-session outlet was never available.
@@ -131,13 +136,15 @@ type ToolResultRecord struct {
 
 // SessionOptions holds optional metadata for a new session.
 type SessionOptions struct {
-	ReviewMode  string
-	DiffFrom    string
-	DiffTo      string
-	DiffCommit  string
-	ScanPaths   []string
-	ResumedFrom string
-	LLMSource   string
+	AnalysisEnabled bool
+	tracePath       string
+	ReviewMode      string
+	DiffFrom        string
+	DiffTo          string
+	DiffCommit      string
+	ScanPaths       []string
+	ResumedFrom     string
+	LLMSource       string
 
 	// Operation opts this session into a run manifest. When non-empty (e.g.
 	// "review") New creates a ManifestBuilder with this operation and the session
@@ -156,7 +163,18 @@ type ResumeInfo struct {
 
 // New creates a new SessionHistory with the given repo directory.
 func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
-	sessionID := generateUUID()
+	return newHistory(generateUUID(), repoDir, gitBranch, model, opts)
+}
+
+func NewAnalysisTrace(reportID, directory, repoDir, model string, opts SessionOptions) *SessionHistory {
+	if reportID == "" {
+		reportID = generateUUID()
+	}
+	opts.tracePath = filepath.Join(directory, "trace.jsonl")
+	return newHistory(reportID, repoDir, "", model, opts)
+}
+
+func newHistory(sessionID, repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
 	sh := &SessionHistory{
 		SessionID:    sessionID,
 		RepoDir:      repoDir,
@@ -225,6 +243,19 @@ func (sh *SessionHistory) FinalManifest() *RunManifest {
 	}
 	m := sh.finalManifest.cloned()
 	return &m
+}
+
+// SetFinalRetryReport stores the frozen retry report the agent produced, which
+// Finalize embeds into session_end. Passing nil leaves the field out, which is
+// what a run with nothing to report looks like. The report is frozen before it
+// gets here and never mutated, so it is stored by pointer rather than cloned.
+func (sh *SessionHistory) SetFinalRetryReport(r *llm.RetryReport) {
+	if sh == nil {
+		return
+	}
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	sh.finalRetryReport = r
 }
 
 // HasPersistence reports whether this session has a JSONL writer. A false value
@@ -332,6 +363,7 @@ func (sh *SessionHistory) Finalize() error {
 		p := sh.persist
 		persistInitErr := sh.persistInitErr
 		manifest := sh.finalManifest
+		retryReport := sh.finalRetryReport
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
 		if manifest != nil && manifest.SchemaVersion == ManifestSchemaVersion {
@@ -358,7 +390,7 @@ func (sh *SessionHistory) Finalize() error {
 		// result is cached in finalizeErr. sync.Once guarantees every other
 		// caller blocks until this completes, then reads the same finalizeErr.
 		if p != nil {
-			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest)
+			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest, retryReport)
 		}
 	})
 	return sh.finalizeErr

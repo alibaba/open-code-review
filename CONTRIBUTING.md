@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to OpenCodeReview! Every contribution matters — whether it's fixing a typo, reporting a bug, or implementing a new feature.
 
-[简体中文版](docs/i18n/CONTRIBUTING.zh-CN.md) | [日本語版](docs/i18n/CONTRIBUTING.ja-JP.md) | [한국어](docs/i18n/CONTRIBUTING.ko-KR.md) | [Русский](docs/i18n/CONTRIBUTING.ru-RU.md)
+[简体中文版](docs/i18n/CONTRIBUTING.zh-CN.md) | [日本語版](docs/i18n/CONTRIBUTING.ja-JP.md) | [한국어](docs/i18n/CONTRIBUTING.ko-KR.md) | [Русский](docs/i18n/CONTRIBUTING.ru-RU.md) | [Türkçe](docs/i18n/CONTRIBUTING.tr-TR.md) | [Tiếng Việt](docs/i18n/CONTRIBUTING.vi-VN.md)
 
 ## Code of Conduct
 
@@ -95,7 +95,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/) format:
 Examples:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
@@ -199,7 +199,7 @@ Documentation is a crucial part of OpenCodeReview. We welcome improvements to RE
 - Clarifying confusing explanations or adding missing context
 - Adding usage examples for commands or configuration options
 - Updating outdated content (e.g., after a feature change)
-- Translating or improving localized documentation (`docs/i18n/README.zh-CN.md`, `docs/i18n/README.ja-JP.md`, `docs/i18n/README.ko-KR.md`, `docs/i18n/README.ru-RU.md`, `docs/i18n/CONTRIBUTING.zh-CN.md`, `docs/i18n/CONTRIBUTING.ja-JP.md`, `docs/i18n/CONTRIBUTING.ko-KR.md`, `docs/i18n/CONTRIBUTING.ru-RU.md`)
+- Translating or improving the localized README files and contribution guides in `docs/i18n/`
 
 ### Documentation Workflow
 
@@ -216,11 +216,16 @@ Documentation is a crucial part of OpenCodeReview. We welcome improvements to RE
 | `docs/i18n/README.ja-JP.md`       | Japanese translation                 |
 | `docs/i18n/README.ko-KR.md`       | Korean translation                   |
 | `docs/i18n/README.ru-RU.md`       | Russian translation                  |
+| `docs/i18n/README.tr-TR.md`       | Turkish translation                  |
+| `docs/i18n/README.fr-FR.md`       | French translation                   |
+| `docs/i18n/README.vi-VN.md`       | Vietnamese translation               |
 | `CONTRIBUTING.md`                 | Contribution guide (English)         |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | Contribution guide (Chinese)         |
 | `docs/i18n/CONTRIBUTING.ja-JP.md` | Contribution guide (Japanese)        |
 | `docs/i18n/CONTRIBUTING.ko-KR.md` | Contribution guide (Korean)          |
 | `docs/i18n/CONTRIBUTING.ru-RU.md` | Contribution guide (Russian)         |
+| `docs/i18n/CONTRIBUTING.tr-TR.md` | Contribution guide (Turkish)         |
+| `docs/i18n/CONTRIBUTING.vi-VN.md` | Contribution guide (Vietnamese)      |
 
 ## Submitting Changes
 
@@ -249,7 +254,7 @@ When reporting a bug, include:
 Use the same Conventional Commits format as commit messages:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### Review Process

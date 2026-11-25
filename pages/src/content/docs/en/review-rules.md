@@ -49,15 +49,29 @@ is always _some_ rule resolved.
 Three independent fields:
 
 - `include` — optional. Glob patterns that _bypass_ built-in default
-  exclude patterns (test-file exclusions — see below). It is not a
-  whitelist: files not matching any `include` pattern still proceed
-  through the `unsupported_ext` and `default_path` checks and may still
-  be reviewed.
+  exclude patterns (test-file exclusions — see below) **and the
+  extension allowlist**. It is not a whitelist: files not matching any
+  `include` pattern still proceed through the `unsupported_ext` and
+  `default_path` checks and may still be reviewed.
 - `exclude` — optional. Glob patterns for files OCR must _not_ review.
   Highest precedence among user-configured filters.
 - `rules` — array of `{path, rule}` entries, evaluated **in declaration
   order**. The first `path` whose glob matches the file determines the
   prompt OCR sends to the model for that file.
+
+`include` is also how an extension outside the built-in allowlist becomes
+reviewable — for example a Markdown contract that changes together with its
+code:
+
+```json
+{
+  "include": ["**/*.md"]
+}
+```
+
+A file matching the pattern skips the `unsupported_ext` gate; files outside
+it keep the normal checks. A `rules[].path` entry is not an inclusion filter
+— it only selects which rule text applies to a file.
 
 Each `rules` entry also accepts an optional third field:
 
@@ -211,6 +225,10 @@ snapshots, and generated code:
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -281,7 +299,9 @@ is reported as `default_path`. Only the second can be brought back by an
 `include` rule.
 
 To **review** a file that matches one of these patterns, add
-it to the user `include` list — that overrides the default-path gate.
+it to the user `include` list — that overrides the default-path gate (and, for
+a file whose extension is not on the built-in allowlist, the `unsupported_ext`
+gate).
 
 ## Rule resolution per file
 
@@ -293,7 +313,7 @@ text the agent should follow:
 3. Try `~/.opencodereview/rule.json` in declaration order.
 4. Fall back to the embedded system rule layer.
 
-Selected embedded `system_rules.json` patterns are shown below in relative
+Every pattern in the embedded `system_rules.json` is listed below in relative
 matching order:
 
 | Pattern                                         | Rule doc                                                                                              |
@@ -304,6 +324,8 @@ matching order:
 | `**/build.gradle`                               | `build_gradle.md` — Gradle dependencies.                                                              |
 | `**/package.json`                               | `package_json.md` — NPM dependencies / scripts.                                                       |
 | `**/Cargo.toml`                                 | `cargo_toml.md` — Rust manifest.                                                                      |
+| `**/Move.toml` | `move_toml.md` — Move package manifest. |
+| `**/*.move` | `move.md` — Move source. |
 | `**/composer.json`                              | `composer_json.md` — Composer dependencies, autoloading, scripts, plugins, and package configuration. |
 | `**/*.{json,json5,jsonc}`                       | `json.md` — generic JSON (also matches `.json5` and `.jsonc`). |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md` — GitHub Actions workflow YAML.                                                 |
@@ -314,21 +336,24 @@ matching order:
 | `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling).                                  |
 | `**/*.{hbs,mustache}`                           | `handlebars_mustache.md` — Handlebars and Mustache templates.                                         |
 | `**/*.{jinja2,j2}`                              | `jinja.md` — Jinja templates                                                                          |
+| `**/*.pug`                          | `pug.md` — Pug templates.                                                                             |
 | `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md` — EJS, Liquid and Nunjucks templates (SSTI / XSS / escaping). |
 | `**/*.{haml,slim}`                              | `haml_slim.md` — HAML and Slim templates (SSTI / XSS / escaping / indentation semantics). |
 | `**/*.erb`                                      | `erb.md` — ERB templates (SSTI / XSS / escaping / whitespace and output structure). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                       |
 | `**/*.astro`                                    | `astro.md` — Astro components and islands.                                                            |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                                    |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                                                    |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                           |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# implementation, signature, and script files.                                         |
 | `**/*.cs`                                       | `csharp.md` — C# source files. |
 | `**/*.rs`                                       | `rust.md`                                                                                             |
-| `**/*.R`                                        | `r.md`                                                                                                |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                              |
 | `**/*.c`                                        | `c.md`                                                                                                |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md` — CUDA kernels and headers.                                                             |
+| `**/*.hip`                                      | `cuda_hip.md` — HIP (AMD ROCm) kernels.                                                               |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — Python source.                                                                          |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md` — Ruby source, Rake tasks, gemspecs, Gemfile, and Rakefile. |
 | `**/*.{php,phtml}`                              | `php.md` — PHP source and PHP templates.                                                              |
 | `**/*.proto`                                    | `protobuf.md` — Protocol Buffers wire compatibility.                                                  |
 | `**/*.po`                                       | `po.md` — gettext translation source catalogs.                                                        |
@@ -336,15 +361,23 @@ matching order:
 | `**/*.{graphql,gql}`                            | `graphql.md` — GraphQL schema and operations.                                                         |
 | `**/*.prisma`                                   | `prisma.md` — Prisma schema.                                                                          |
 | `**/*.jl`                                       | `julia.md` — Julia source.                                                                            |
+| `**/*.R`                                        | `r.md`                                                                                                |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                     |
 | `**/*.bicep`                                    | `bicep.md` — Bicep (Azure) templates.                                                                 |
+| `**/*.dhall` | `dhall.md` — Dhall configuration language. |
+| `**/*.nix`                          | `nix.md` — Nix expressions and flakes.                                                                |
+| `**/*.{hs,lhs}`                     | `haskell.md` — Haskell source.                                                                        |
+| `**/*.{nim,nims,nimble}`            | `nim.md` — Nim source and package manifests.                                                          |
+| `**/*.swift`                        | `swift.md` — Swift source.                                                                            |
 | `**/*.nu`                                       | `nushell.md` — Nushell scripts.                                                                       |
 | `**/*.elm`                                      | `elm.md` - Elm source.                                                                                |
 | `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md` — Jsonnet configuration templates and libraries.                                         |
+| `**/*.zig`                          | `zig.md` — Zig source.                                                                                |
 | `**/*.thrift`                                   | `thrift.md` — Apache Thrift IDL wire compatibility.                                                   |
 | `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md` — Starlark and Bazel build, macro, and rule design.                                     |
 | `**/*.capnp`                                    | `capnp.md` — Cap'n Proto schema wire compatibility.                                                   |
-| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                    |
+| `**/*.{ml,mli}`                     | `ocaml.md` — OCaml source.                                                                            |
+| `**/*.{re,rei}`                     | `ocaml.md` — ReasonML source.                                                                         |
 | `**/*.{v,sv,vh}`                                | `verilog.md` — Verilog and SystemVerilog RTL.                                                         |
 | `**/*.{vhd,vhdl}`                               | `vhdl.md` — VHDL RTL.                                                                                 |
 | `**/*.m`                                        | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files))                      |
@@ -352,7 +385,10 @@ matching order:
 | `**/*.sol`                                      | `solidity.md` — Solidity smart contracts.                                                             |
 | `**/*.vy`                                       | `vyper.md` — Vyper smart contracts.                                                                   |
 | `**/*.rego`                                     | `rego.md` — Rego policy (OPA).                                                                        |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL, and Metal shaders.                                                    |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell scripts, modules, and data/manifest files.                               |
+| `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — Clojure / ClojureScript source and EDN data. |
+| `**/*.sql`                                      | `sql.md` — SQL migrations and queries. |
 | _(fallback)_                                    | `default.md`                                                                                          |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

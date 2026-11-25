@@ -10,6 +10,8 @@
   ".jsx",
   ".ts",
   ".tsx",
+  ".mts",
+  ".cts",
   ".mjs",
   ".cjs",
   ".c",
@@ -19,6 +21,9 @@
   ".cxx",
   ".hpp",
   ".hxx",
+  ".cu",
+  ".cuh",
+  ".hip",
   ".cs",
   ".vb",
   ".fs",
@@ -131,5 +136,11 @@
   ".metal",
   ".ejs",
   ".liquid",
-  ".njk"
+  ".njk",
+  ".clj",
+  ".cljs",
+  ".cljc",
+  ".edn",
+  ".move",
+  ".dhall"
 ]

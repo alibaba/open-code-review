@@ -12,6 +12,7 @@ import { zh } from '../i18n/zh';
 import { ja } from '../i18n/ja';
 import { ko } from '../i18n/ko';
 import { ru } from '../i18n/ru';
+import { vi } from '../i18n/vi';
 import ProvidersSection from './ProvidersSection';
 
 function renderProviders() {
@@ -76,7 +77,7 @@ describe('ProvidersSection', () => {
     expect(screen.getByRole('link')).toHaveFocus();
   });
 
-  it.each(Object.entries({ en, zh, ja, ko, ru }))('renders translated copy for %s', (language, translations) => {
+  it.each(Object.entries({ en, zh, ja, ko, ru, vi }))('renders translated copy for %s', (language, translations) => {
     localStorage.setItem('ocr-lang', language);
     renderProviders();
 

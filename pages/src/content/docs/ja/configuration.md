@@ -74,6 +74,19 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 指定すると、OCR は stderr に警告を出します。モデルはリクエスト送信時に provider が
 検証します。カスタム provider には従来の `--model` 検証ルールが適用されます。
 
+`minimax` と `minimax-cn` の新規モデル選択では、`MiniMax-M3.1-Flash`、
+`MiniMax-M3` の順に候補を表示します。保存済みモデルや明示的な旧モデル・カスタムモデルの
+ID は引き続き OCR で受け付けます。ゲートウェイには固有のモデル ID があり、
+MiniMax の直接接続用 ID が使えるとは限りません。
+
+既定のリクエストは `thinking` と `reasoning_effort` を省略し、
+[MiniMax API の既定値](https://platform.minimax.io/docs/api-reference/text-openai-api)を使います。
+Flash は adaptive thinking が必須で、effort の既定値は `max` です。
+`extra_body` では `thinking: {"type":"adaptive"}` と、`low`、`medium`、`high`、
+`xhigh`、`max` のいずれかの `reasoning_effort` を指定できます。M3 は
+`thinking: {"type":"disabled"}` にも対応します。保存済みの `extra_body` は保持されるため、
+Flash に切り替える前に thinking を無効にする設定を削除してください。
+
 ## ChatGPT サインインのプレビュー
 
 このプレビューでは公開 Responses API 用の組み込み `chatgpt` provider が追加されます。API key 環境変数はありません。 サインイン、同意、利用制限は[ChatGPT プレビューガイド](../chatgpt-preview/)を参照してください。
@@ -171,13 +184,26 @@ Model:  claude-sonnet-5
 `protocol` を指定する必要があります（`protocol` は `anthropic`、`openai`、
 `openai-responses`、または `anthropic-bedrock`）。
 
+Chat Completions を実装するリモートの OpenAI 互換 provider では、`protocol openai` を
+使用します。`url` にはサービスのドキュメントに記載された API ルート（通常は `/v1`
+で終わる URL）を指定します。OCR はリクエスト送信時に `/chat/completions` を追加します。
+次の例では、OpenAI の公開 Chat Completions エンドポイントをカスタム名で登録します。
+
 ```bash
-ocr config set provider                             my-gateway
-ocr config set custom_providers.my-gateway.url      https://gateway.internal.com/v1
-ocr config set custom_providers.my-gateway.protocol openai
-ocr config set custom_providers.my-gateway.model    llama-3-70b
-ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+ocr config set provider                                      openai-chat-gateway
+ocr config set custom_providers.openai-chat-gateway.url      https://api.openai.com/v1
+ocr config set custom_providers.openai-chat-gateway.protocol openai
+ocr config set custom_providers.openai-chat-gateway.model    gpt-4.1
+ocr config set custom_providers.openai-chat-gateway.api_key  "$OPENAI_API_KEY"
 ```
+
+他のリモート OpenAI 互換サービスでも同じフィールドを使います。`url` をサービスの
+ドキュメントにある API ルートに、`model` をそのモデルカタログにある正確な ID に置き換えて
+ください。選択したモデルとエンドポイントはネイティブなツール呼び出しに対応している
+必要があります。OCR は Chat Completions を通じてツールを送信するためです。カスタム
+provider では API key の環境変数フォールバックはないため、`api_key` を明示的に設定するか、
+`api_key_cmd` を設定してください。`ocr config set provider <name>` で provider を選択すると、
+アクティブな provider と OCR が使う provider 設定が変わります。
 
 provider またはモデルが OpenAI Responses API（`/v1/responses`）を必要とする場合は、
 `openai-responses` プロトコルを使用します。
