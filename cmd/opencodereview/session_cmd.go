@@ -156,15 +156,12 @@ func completeSessionIDsAnywhere(cmd *cobra.Command, args []string, toComplete st
 	if repo, _ := cmd.Flags().GetString("repo"); strings.TrimSpace(repo) != "" {
 		return completeSessionIDs(cmd, args, toComplete)
 	}
-	locations, err := session.ListAllSessionIDs()
+	locations, err := session.ListSessionIDs(toComplete)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	completions := make([]string, 0, len(locations))
 	for _, loc := range locations {
-		if !strings.HasPrefix(loc.SessionID, toComplete) {
-			continue
-		}
 		repo := loc.RepoDir
 		if repo == "" {
 			repo = "(repository not recorded)"
