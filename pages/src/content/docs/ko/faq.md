@@ -117,6 +117,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `provider_directory` | 조치할 필요가 없습니다. `vendor/`, `node_modules/` 같은 provider 디렉터리는 `include`와 일치해도 검토 대상이 될 수 없습니다. |
 | `deleted` | 할 일이 없습니다. 리뷰할 새 내용이 없습니다. |
 | `too_large` | diff만으로 `max_tokens`의 80%를 넘습니다. `--max-tokens`(또는 저장된 `max_tokens`)를 올리거나 변경을 더 작은 커밋으로 나누세요. |
+| `unchanged` | 할 일이 없습니다. 파일 이름 변경, 모드 변경 또는 빈 파일 추가뿐이라 리뷰할 변경 줄이 없습니다. |
 
 ### 제가 만든 규칙이 안 걸립니다 {#my-custom-rule-isn-t-firing}
 

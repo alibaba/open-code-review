@@ -607,6 +607,43 @@ func TestWorkspaceUntrackedBinaryFileIsFlaggedNotReviewed(t *testing.T) {
 	}
 }
 
+// An empty untracked file must look the way git writes an empty new file:
+// a new-file header and no hunk, so selection does not treat it as content.
+func TestWorkspaceUntrackedEmptyFileHasNoHunk(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write base.txt: %v", err)
+	}
+	runGitTest(t, repo, "add", "base.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "initial commit")
+
+	if err := os.WriteFile(filepath.Join(repo, "empty.go"), nil, 0o644); err != nil {
+		t.Fatalf("write empty.go: %v", err)
+	}
+
+	set, err := NewWorkspaceProvider(repo, nil).GetDiffSet(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiffSet: %v", err)
+	}
+	for _, d := range set.Included {
+		if d.NewPath != "empty.go" {
+			continue
+		}
+		if !d.IsNew {
+			t.Errorf("empty.go: IsNew = false, want true")
+		}
+		if strings.Contains(d.Diff, "@@") || d.Insertions != 0 {
+			t.Errorf("empty.go: want a header-only diff, got insertions=%d diff=%q", d.Insertions, d.Diff)
+		}
+		return
+	}
+	t.Errorf("empty.go missing from the diff set: %+v", set.Included)
+}
+
 func TestWorkspaceUntrackedSymlinkDoesNotReadExternalTarget(t *testing.T) {
 	repo := t.TempDir()
 	runGitTest(t, repo, "init", "-q")

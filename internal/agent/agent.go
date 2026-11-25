@@ -342,16 +342,18 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	a.diffs = kept
 
 	// One run-level skip signal, keyed on the selected set rather than on what
-	// the run keeps: deletions are retained for prompt context but never
-	// reviewed, so a deletion-only changeset is skipped too. The cause goes in an
-	// attribute because no event name is accurate on its own — a size-gated skip
-	// can coexist with statically filtered files — and the reasons are ordered
-	// most-actionable first.
+	// the run keeps: deletions and unchanged files are retained for prompt
+	// context but never reviewed, so a changeset of only those is skipped too.
+	// The cause goes in an attribute because no event name is accurate on its
+	// own — a size-gated skip can coexist with statically filtered files — and
+	// the reasons are ordered most-actionable first.
 	if counts.Selected == 0 {
 		skipReason := "no_supported_files"
 		switch {
 		case counts.TooLarge > 0:
 			skipReason = "too_large"
+		case counts.Unchanged > 0:
+			skipReason = "unchanged"
 		case len(kept) > 0:
 			skipReason = "deleted"
 		}
@@ -665,10 +667,10 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 	toDispatch := a.applyResume(a.diffs)
 
-	// Filter out deleted files before grouping.
+	// Filter out deleted and unchanged files before grouping.
 	var nonDeleted []model.Diff
 	for _, d := range toDispatch {
-		if !d.IsDeleted {
+		if dispatchable(d) {
 			nonDeleted = append(nonDeleted, d)
 		}
 	}
@@ -899,7 +901,7 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 	toDispatch := make([]model.Diff, 0, len(diffs))
 	var reused int64
 	for _, d := range diffs {
-		if d.IsDeleted {
+		if !dispatchable(d) {
 			toDispatch = append(toDispatch, d)
 			continue
 		}
@@ -935,7 +937,7 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 func countDispatchable(diffs []model.Diff) int64 {
 	var n int64
 	for _, d := range diffs {
-		if !d.IsDeleted {
+		if dispatchable(d) {
 			n++
 		}
 	}
@@ -1272,19 +1274,19 @@ type subtaskStop struct {
 }
 
 // registerCoverage freezes the coverage denominator before any reuse or
-// concurrent dispatch: it registers every non-deleted diff as a selected item
-// and seals the set. Deleted files are excluded — they are never dispatched, so
-// a registered item that never received a Mark* would be swept to a bogus
-// failure at Finalize. Nil-safe (no-op without a builder). It returns the first
-// registration or seal error so the caller can flag the denominator as
-// untrustworthy.
+// concurrent dispatch: it registers every dispatchable diff as a selected item
+// and seals the set. Deleted and unchanged files are excluded — they are never
+// dispatched, so a registered item that never received a Mark* would be swept
+// to a bogus failure at Finalize. Nil-safe (no-op without a builder). It
+// returns the first registration or seal error so the caller can flag the
+// denominator as untrustworthy.
 func (a *Agent) registerCoverage(diffs []model.Diff) error {
 	b := a.session.Manifest()
 	if b == nil {
 		return nil
 	}
 	for _, d := range diffs {
-		if d.IsDeleted {
+		if !dispatchable(d) {
 			continue
 		}
 		if err := b.RegisterSelected(a.coverageItem(d)); err != nil {
@@ -2091,6 +2093,10 @@ func (a *Agent) logExclusions(decisions []fileDecision) {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — matches a built-in secret path\n", effectivePath(dec.Diff))
 		case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath:
 			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", effectivePath(dec.Diff))
+		case ExcludeUnchanged:
+			// Not a path/extension filter, so it stays out of that rollup.
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — no content changes to review\n", effectivePath(dec.Diff))
+			continue
 		default:
 			continue
 		}

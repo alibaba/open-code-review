@@ -128,6 +128,8 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 6 つのゲートをすべて通過したファイルだけが LLM に送られます。ただし diff だけで `max_tokens` の 80% を超える場合は例外で、`selectFiles` がゲートのあとにその上限を適用し、そのファイルを `too_large` として除外します。同じく、新しいパスが `/dev/null` であるファイルは `deleted` と記されます。レビューすべき新しい内容がありません。`ocr review --preview` を使えば、token を消費せずにこのフィルタリング結果を出力できます。
 
+diff にハンクが 1 つもないファイル（名前の変更のみ、モードの変更のみ、空ファイルの追加）は `unchanged` と記されます。削除されたファイルと同じく、ほかのファイルをレビューするときの変更ファイル一覧には残りますが、そのファイル自体は LLM に送られません。
+
 ### 組み込みのシークレットパス {#built-in-secret-paths}
 
 組み込みのシークレットパスはレビューされません（

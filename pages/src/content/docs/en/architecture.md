@@ -88,6 +88,12 @@ order:
    `**/vendor/**`, `**/target/**`, `**/__pycache__/**`, …). Every pattern
    is rooted with a `**/` prefix.
 
+After the gates `selectFiles` also applies `unchanged`: a kept file whose
+diff has no hunk (a pure rename, a mode-only change, or an empty new file) has
+no changed line to review. Like `deleted` files, `unchanged` files stay in the
+change list the prompts show but are never dispatched, estimated, or
+registered as coverage.
+
 The same noisy directories are also filtered earlier, at the diff-provider
 level, via the `providerDirIgnoreDirs` list in `internal/diff/git.go`. That
 list matches by path prefix, so it catches only a directory at the

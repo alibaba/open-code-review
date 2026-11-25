@@ -49,11 +49,12 @@ type Estimate struct {
 // single diff (PLAN + MAIN_TASK rounds). It mirrors scan.estimateFileTokens
 // but counts tokens of the diff text (d.Diff) rather than whole-file content,
 // since the diff path reviews patches, not full files. Returns 0 for deleted
-// files (they are skipped before dispatch and must not trip the gate). Used
-// both by the aggregate estimate (estimateDiffCost) and by the per-group budget
-// look-ahead in dispatchSubtasks, which sums this over a group's diffs.
+// and unchanged files (they are skipped before dispatch and must not trip the
+// gate). Used both by the aggregate estimate (estimateDiffCost) and by the
+// per-group budget look-ahead in dispatchSubtasks, which sums this over a
+// group's diffs.
 func estimateDiffFileTokens(d model.Diff) int64 {
-	if d.IsDeleted || d.Diff == "" {
+	if !dispatchable(d) || d.Diff == "" {
 		return 0
 	}
 	diffTokens := int64(llm.CountTokens(d.Diff))
@@ -73,7 +74,7 @@ func estimateDiffFileTokens(d model.Diff) int64 {
 func estimateDiffCost(diffs []model.Diff) Estimate {
 	var est Estimate
 	for _, d := range diffs {
-		if d.IsDeleted || d.Diff == "" {
+		if !dispatchable(d) || d.Diff == "" {
 			continue
 		}
 		est.Files++

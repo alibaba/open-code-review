@@ -143,7 +143,7 @@ review.run
 | `llm.request` | `llm.model`, `llm.duration_ms`, `llm.total_tokens`, `llm.status` |
 | `tool.execute.<tool-name>` | `tool.name`, `tool.duration_ms`, `tool.status` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
-| `event.review.skipped` | `reason`(`too_large` / `deleted` / `no_supported_files`), `file.count`, `too_large.count` |
+| `event.review.skipped` | `reason`(`too_large` / `unchanged` / `deleted` / `no_supported_files`), `file.count`, `too_large.count` |
 | `event.grouping.skipped` | `strategy`, `file.count`, `lines.changed`, `threshold.files`, `threshold.lines` |
 | `event.plan.skipped` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file`, `threshold`, `threshold.group` |
 | `event.plan.failed` | `group.label`, `message` |
@@ -175,7 +175,7 @@ OCR은 OTel 미터로 수치 메트릭을 기록합니다. 컬렉터가 뒷단�
 |---|---|
 | `review.started` | diff를 다 읽어 리뷰할 파일이 몇 개인지 알게 됐습니다. |
 | `no.files.changed` | diff를 풀어 보니 파일이 하나도 없었습니다. |
-| `review.skipped` | 선택 결과 리뷰할 파일이 남지 않았습니다. `reason`은 `too_large`, `deleted`, `no_supported_files` 중 하나입니다. |
+| `review.skipped` | 선택 결과 리뷰할 파일이 남지 않았습니다. `reason`은 `too_large`, `unchanged`, `deleted`, `no_supported_files` 중 하나입니다. |
 | `grouping.skipped` | 변경 집합의 파일 수가 `GROUPING_MIN_FILES`보다 적어 그룹화 호출을 건너뛰었습니다. `strategy`는 `bundle_all`(변경량이 `GROUPING_BUNDLE_LINE_THRESHOLD`보다 적어 전체 파일을 한 그룹으로) 또는 `per_file`(그 값 이상이라 파일당 그룹 하나)입니다. 파일이 하나뿐인 변경 집합은 임계값과 무관하게 나눌 것이 없으므로 항상 `per_file`이며, 여기에만 기록되고 터미널에는 출력되지 않습니다. |
 | `plan.skipped` | 그룹이 plan 임계값 둘 다에 못 미쳤습니다. 가장 큰 파일의 변경이 `PLAN_MODE_LINE_THRESHOLD`보다 적고, (파일이 2개 이상인 그룹이라면) 합계도 `PLAN_MODE_GROUP_LINE_THRESHOLD`보다 적은 경우입니다. |
 | `plan.failed` | plan 단계에서 오류가 나 main 루프가 계획 없이 돌았습니다. |

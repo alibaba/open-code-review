@@ -167,6 +167,10 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 표시합니다. 리뷰할 새 내용이 없다는 뜻입니다. 토큰을 쓰지 않고 이 필터의 결과만
 보려면 `ocr review --preview`를 쓰세요.
 
+diff에 hunk가 하나도 없는 파일(이름 변경만, 모드 변경만, 빈 파일 추가)은
+`unchanged`로 표시됩니다. 삭제된 파일처럼 다른 파일을 리뷰할 때 보이는 변경
+파일 목록에는 남지만, 그 파일 자체는 LLM에 보내지 않습니다.
+
 ### 내장 시크릿 경로 {#built-in-secret-paths}
 
 내장 시크릿 경로는 리뷰되지 않습니다

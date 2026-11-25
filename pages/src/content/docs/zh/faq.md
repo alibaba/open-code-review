@@ -107,6 +107,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `provider_directory` | 无需操作——`vendor/`、`node_modules/` 等 provider 目录永远不可评审，即使被 `include` 匹配也是如此。 |
 | `deleted` | 无需处理——没有新内容可评审。 |
 | `too_large` | 仅 diff 本身就超过 `max_tokens` 的 80%。调高 `--max-tokens`（或已保存的 `max_tokens`），或把改动拆成更小的 commit。 |
+| `unchanged` | 无需处理——该文件只是重命名、修改了权限模式或以空文件新增，没有可评审的改动行。 |
 
 ### 我的自定义规则没触发
 

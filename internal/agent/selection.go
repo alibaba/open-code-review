@@ -4,6 +4,8 @@
 package agent
 
 import (
+	"strings"
+
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
@@ -24,10 +26,32 @@ type fileDecision struct {
 func (d fileDecision) selected() bool { return d.Reason == ExcludeNone }
 
 // retained reports whether the file stays in the agent's working diff set.
-// Deletions are retained although they are never dispatched: they carry no new
-// content to review but still belong to the change-file list the prompts show.
+// Deletions and unchanged files are retained although they are never
+// dispatched: they carry no new content to review but still belong to the
+// change-file list the prompts show, so a reviewer of another file still sees
+// that this one moved or went away.
 func (d fileDecision) retained() bool {
-	return d.Reason == ExcludeNone || d.Reason == ExcludeDeleted
+	return d.Reason == ExcludeNone || d.Reason == ExcludeDeleted || d.Reason == ExcludeUnchanged
+}
+
+// dispatchable reports whether a retained diff has new content to review.
+// Every step after selection that sends files to the model or counts them as
+// reviewed uses this, so a deleted or unchanged file can stay in the prompt
+// context without being dispatched, registered for coverage or resumed.
+func dispatchable(d model.Diff) bool {
+	return !d.IsDeleted && !hasNoHunk(d)
+}
+
+// hasNoHunk reports whether a git diff section consists of headers only: git
+// writes no "@@" hunk for a pure rename, a mode-only change or an empty new
+// file. Only text that starts with the "diff --git" line the parser keeps is
+// judged; anything else says nothing about hunks and is not treated as
+// unchanged.
+func hasNoHunk(d model.Diff) bool {
+	if !strings.HasPrefix(d.Diff, "diff --git ") {
+		return false
+	}
+	return !strings.Contains(d.Diff, "\n@@")
 }
 
 // selectFiles is the review's one deterministic pre-dispatch selection: for
@@ -49,6 +73,8 @@ func (a *Agent) selectFiles(diffs []model.Diff) []fileDecision {
 		case dec.Reason != ExcludeNone:
 		case d.IsDeleted:
 			dec.Reason = ExcludeDeleted
+		case hasNoHunk(d):
+			dec.Reason = ExcludeUnchanged
 		case limit > 0:
 			// Counted only when a limit is configured, so the tokenizer pass is
 			// skipped entirely for max_tokens=0.
@@ -103,8 +129,9 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 
 // selectionCounts is the run-level rollup of one selection pass.
 type selectionCounts struct {
-	Selected int // files that enter the selected set
-	TooLarge int // files dropped by the per-file diff-size ceiling
+	Selected  int // files that enter the selected set
+	TooLarge  int // files dropped by the per-file diff-size ceiling
+	Unchanged int // renamed or mode-changed files with no hunk to review
 }
 
 // summarizeSelection returns the diffs the run keeps working with, plus the
@@ -121,6 +148,8 @@ func summarizeSelection(decisions []fileDecision) ([]model.Diff, selectionCounts
 			counts.Selected++
 		case dec.Reason == ExcludeTooLarge:
 			counts.TooLarge++
+		case dec.Reason == ExcludeUnchanged:
+			counts.Unchanged++
 		}
 	}
 	return kept, counts

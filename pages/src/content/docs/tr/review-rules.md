@@ -114,6 +114,8 @@ Filtre, [`internal/agent/selection.go`](https://github.com/alibaba/open-code-rev
 
 Altı aşamayı geçen dosyalar LLM'e gönderilir; ancak farkın kendisi `max_tokens` değerinin %80'ini aşıyorsa `selectFiles`, dosyayı `too_large` olarak dışlar. Yeni yolu `/dev/null` olan dosyalar da incelenecek yeni içerik olmadığından `deleted` olarak işaretlenir. Token harcamadan filtre sonucunu görmek için `ocr review --preview` kullanın.
 
+Farkında hiç hunk bulunmayan bir dosya (yalnızca yeniden adlandırma, yalnızca mod değişikliği ya da boş yeni dosya) `unchanged` olarak işaretlenir. Silinen dosyalar gibi, diğer dosyalar incelenirken gösterilen değişen dosyalar listesinde kalır ama kendisi LLM'e gönderilmez.
+
 ### Yerleşik gizli dosya yolları {#built-in-secret-paths}
 
 Yerleşik gizli dosya yolları incelenmez ([`internal/config/allowlist/default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json)):

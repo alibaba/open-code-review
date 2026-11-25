@@ -23,6 +23,10 @@ const (
 	ExcludeDeleted           ExcludeReason = "deleted"
 	ExcludeBinary            ExcludeReason = "binary"
 	ExcludeTooLarge          ExcludeReason = "too_large"
+	// ExcludeUnchanged is a diff without a single hunk: a pure rename, a
+	// mode-only change or an empty new file. Like deleted, it carries no new
+	// content to review.
+	ExcludeUnchanged ExcludeReason = "unchanged"
 )
 
 // IsExclusion reports whether r is one of the defined exclusion reasons.
@@ -30,7 +34,8 @@ const (
 func (r ExcludeReason) IsExclusion() bool {
 	switch r {
 	case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath, ExcludeSecret,
-		ExcludeProviderDirectory, ExcludeDeleted, ExcludeBinary, ExcludeTooLarge:
+		ExcludeProviderDirectory, ExcludeDeleted, ExcludeBinary, ExcludeTooLarge,
+		ExcludeUnchanged:
 		return true
 	default:
 		return false
