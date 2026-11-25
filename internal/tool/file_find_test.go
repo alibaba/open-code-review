@@ -52,7 +52,9 @@ func TestFileFind_NonGitDirectoryFallback(t *testing.T) {
 	write("server.go", "package main\n")
 	write("internal/handler.go", "package internal\n")
 	write("node_modules/lib/index.js", "x\n") // excluded by blocklist
-	write(".gitignore", "*\n!*/\n!*.go\nignored.go\n")
+	write(".gitignore", "*\n!*/\n!*.go\nignored.go\nkeep.go\n!logs/keep.go\n")
+	write("logs/keep.go", "package logs\n")
+	write("sub/logs/keep.go", "package logs\n")
 	write("ignored.go", "package x\n") // excluded by root .gitignore
 
 	p := NewFileFind(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
@@ -67,6 +69,9 @@ func TestFileFind_NonGitDirectoryFallback(t *testing.T) {
 	}
 	if strings.Contains(out, "node_modules") {
 		t.Errorf("node_modules should be excluded, got:\n%s", out)
+	}
+	if !strings.Contains(out, "logs/keep.go") || strings.Contains(out, "sub/logs/keep.go") {
+		t.Errorf("only the root-relative exception should match, got:\n%s", out)
 	}
 	if strings.Contains(out, "ignored.go") {
 		t.Errorf("ignored.go should be excluded by .gitignore, got:\n%s", out)

@@ -503,10 +503,7 @@ func TestMatchGitignorePattern(t *testing.T) {
 		{"escaped braces stay literal", "pkg/{a}/b.go", `**/\{a\}/`, true},
 		{"braces in character class", "pkg/}/b.go", "**/[{}]/", true},
 		{"negation pattern", "important.log", "!important.log", false},
-		{"path suffix match", "src/generated/api.go", "generated/api.go", true},
-		// The suffix has to begin on a path component. "othersrc" ends in
-		// "src", which would complete the pattern on a plain string suffix
-		// check and exclude a directory git never matched.
+		{"literal path is root relative", "src/generated/api.go", "generated/api.go", false},
 		{"path suffix respects component boundary", "othersrc/main.go", "src/main.go", false},
 		{"path suffix at root is not a suffix match", "src/main.go", "rc/main.go", false},
 	}

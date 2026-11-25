@@ -98,7 +98,7 @@ func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileS
 // Enumerate returns one ScanItem per reviewable file. Binaries are emitted
 // with empty Content + IsBinary=true so previews can show them as excluded.
 func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
-	files, tracked, err := p.listFiles(ctx)
+	files, ignored, err := p.listFiles(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -110,10 +110,6 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		}
 	}
 
-	var patterns diff.GitignorePatterns
-	if tracked != nil {
-		patterns = diff.LoadGitignorePatterns(p.repoDir)
-	}
 	var out []model.ScanItem
 	for _, rel := range files {
 		// Per-iteration cancellation check: a large repo with thousands of
@@ -125,7 +121,7 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		if rel == "" {
 			continue
 		}
-		if diff.ProviderDirPrefix(rel) != "" || tracked[rel] && patterns.Matches(rel) {
+		if diff.ProviderDirPrefix(rel) != "" || ignored[rel] {
 			continue
 		}
 		full := filepath.Join(p.repoDir, rel)
@@ -200,19 +196,24 @@ func (p *Provider) listFilesViaGit(ctx context.Context) ([]string, map[string]bo
 		return nil, nil, fmt.Errorf("git ls-files (untracked): %w", err)
 	}
 
-	isTracked := make(map[string]bool, len(tracked)+len(untracked))
+	ignoredPaths, err := p.gitLs(ctx, "-z", "--cached", "--ignored", "--exclude-standard")
+	if err != nil {
+		return nil, nil, fmt.Errorf("git ls-files (ignored tracked): %w", err)
+	}
+	ignored := make(map[string]bool, len(ignoredPaths))
+	for _, name := range ignoredPaths {
+		ignored[name] = true
+	}
+	seen := make(map[string]bool, len(tracked)+len(untracked))
 	all := make([]string, 0, len(tracked)+len(untracked))
-	for index, f := range append(tracked, untracked...) {
-		if f == "" {
+	for _, f := range append(tracked, untracked...) {
+		if seen[f] {
 			continue
 		}
-		if _, ok := isTracked[f]; ok {
-			continue
-		}
-		isTracked[f] = index < len(tracked)
+		seen[f] = true
 		all = append(all, f)
 	}
-	return all, isTracked, nil
+	return all, ignored, nil
 }
 
 // listFilesViaWalk recursively walks p.repoDir collecting regular files.

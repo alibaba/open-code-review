@@ -175,7 +175,9 @@ func TestProvider_Enumerate_NonGitDirectory(t *testing.T) {
 	repo := t.TempDir()
 	writeFile(t, repo, "main.go", []byte("package main\n"))
 	writeFile(t, repo, "pkg/util.go", []byte("package pkg\n"))
-	writeFile(t, repo, ".gitignore", []byte("*\n!*/\n!.gitignore\n!*.go\n!*.js\n"))
+	writeFile(t, repo, ".gitignore", []byte("*\n!*/\n!.gitignore\n!*.go\n!*.js\n!logs/keep.log\n"))
+	writeFile(t, repo, "logs/keep.log", []byte("keep\n"))
+	writeFile(t, repo, "sub/logs/keep.log", []byte("ignore\n"))
 	writeFile(t, repo, "ignored.txt", []byte("should be excluded by root .gitignore\n"))
 	writeFile(t, repo, "node_modules/lib/foo.js", []byte("module.exports = 1;\n")) // should be skipped via ExcludedDirs
 
@@ -190,7 +192,7 @@ func TestProvider_Enumerate_NonGitDirectory(t *testing.T) {
 	}
 	sort.Strings(paths)
 
-	want := []string{".gitignore", "main.go", "pkg/util.go"}
+	want := []string{".gitignore", "logs/keep.log", "main.go", "pkg/util.go"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Errorf("paths = %v, want %v (ignored.txt must be filtered by .gitignore, node_modules/* by ExcludedDirs)", paths, want)
 	}
@@ -315,27 +317,27 @@ func TestProvider_Enumerate_GitignoreAncestorExceptions(test *testing.T) {
 	}
 }
 
-func TestProvider_Enumerate_NestedUntrackedException(t *testing.T) {
+func TestProvider_Enumerate_NestedIgnoreBeforeAndAfterStaging(t *testing.T) {
 	repo := initTestRepo(t)
 	writeFile(t, repo, "tracked.log", []byte("tracked before ignore rules\n"))
+	writeFile(t, repo, "pkg/hidden.go", []byte("package fixture\n"))
 	gitCommit(t, repo, "track log")
-	writeFile(t, repo, ".gitignore", []byte("generated\n*.log\n"))
-	writeFile(t, repo, "pkg/.gitignore", []byte("!generated/\n"))
+	writeFile(t, repo, ".gitignore", []byte("generated/\n*.log\n"))
+	writeFile(t, repo, "pkg/.gitignore", []byte("!generated/\nhidden.go\n"))
 	gitCommit(t, repo, "set ignore rules")
 	for _, name := range []string{"pkg/generated/a.go", "generated/ignored.go", "vendor/blocked.go"} {
 		writeFile(t, repo, name, []byte("package fixture\n"))
 	}
-	items, err := NewProvider(repo, nil, nil, 0).Enumerate(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, item := range items {
-		got = append(got, item.Path)
-	}
-	sort.Strings(got)
 	want := []string{".gitignore", "pkg/.gitignore", "pkg/generated/a.go"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("enumerated %q, want %q", got, want)
+	check := func() {
+		t.Helper()
+		if got := enumeratePaths(t, repo, nil); !reflect.DeepEqual(got, want) {
+			t.Errorf("enumerated %q, want %q", got, want)
+		}
 	}
+	check()
+	if output, err := exec.Command("git", "-C", repo, "add", "--", "pkg/generated/a.go").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, output)
+	}
+	check()
 }

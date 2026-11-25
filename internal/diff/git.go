@@ -11,13 +11,10 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/bmatcuk/doublestar/v4"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -348,130 +345,6 @@ func (patterns GitignorePatterns) matches(relPath string, directory bool) bool {
 // one of these paths.
 func isProviderDirExcluded(relPath string) bool {
 	return ProviderDirPrefix(relPath) != ""
-}
-
-var gitignoreLiteralBraces = strings.NewReplacer(`\\`, `\\`, `\{`, `\{`, `\}`, `\}`, `{`, `\{`, `}`, `\}`)
-
-var gitignoreNamedClasses = map[string]string{
-	"alnum": "A-Za-z0-9", "alpha": "A-Za-z", "blank": " \t", "cntrl": "\x00-\x1f\x7f",
-	"digit": "0-9", "graph": `\!-~`, "lower": "a-z", "print": " -~",
-	"punct": "\\!-/:-@\\[-`{-~", "space": " \t\r\n", "upper": "A-Z", "xdigit": "A-Fa-f0-9",
-}
-
-func expandGitignoreClasses(pattern string) (string, bool) {
-	var expanded strings.Builder
-	inClass := false
-	for index := 0; index < len(pattern); index++ {
-		switch pattern[index] {
-		case '\\':
-			if index+1 < len(pattern) {
-				expanded.WriteByte(pattern[index])
-				index++
-			}
-		case '[':
-			if inClass && strings.HasPrefix(pattern[index:], "[:") {
-				name, _, found := strings.Cut(pattern[index+2:], ":]")
-				if found {
-					ranges, known := gitignoreNamedClasses[name]
-					if !known {
-						return "", false
-					}
-					expanded.WriteString(ranges)
-					index += len(name) + 3
-					continue
-				}
-			}
-			inClass = true
-		case ']':
-			inClass = false
-		}
-		expanded.WriteByte(pattern[index])
-	}
-	return expanded.String(), true
-}
-
-func matchGitignoreEntry(relPath, pattern string, directory bool) bool {
-	pattern, directoryOnly := strings.CutSuffix(pattern, "/")
-	pattern, anchored := strings.CutPrefix(pattern, "/")
-	if pattern == "" || strings.HasSuffix(pattern, "/") || directoryOnly && !directory {
-		return false
-	}
-	if !anchored && !strings.Contains(pattern, "/") {
-		relPath = path.Base(relPath)
-	}
-	if !strings.ContainsAny(pattern, `*?[\`) {
-		return relPath == pattern || (!directory && !anchored && strings.HasSuffix(relPath, "/"+pattern))
-	}
-	if strings.ContainsAny(pattern, "{}") {
-		pattern = gitignoreLiteralBraces.Replace(pattern)
-	}
-	if strings.Contains(pattern, "[:") {
-		var valid bool
-		pattern, valid = expandGitignoreClasses(pattern)
-		if !valid {
-			return false
-		}
-	}
-	return matchGitignoreGlob(pattern, relPath)
-}
-
-func cutGitignoreComponent(pattern string) (component, tail string, escapedSlash bool) {
-	firstSlash := strings.IndexByte(pattern, '/')
-	if firstSlash < 0 {
-		return pattern, "", false
-	}
-	if !strings.ContainsAny(pattern[:firstSlash], `[\`) {
-		return pattern[:firstSlash], pattern[firstSlash+1:], false
-	}
-	inClass := false
-	for index := 0; index < len(pattern); index++ {
-		switch pattern[index] {
-		case '\\':
-			if !inClass && strings.HasPrefix(pattern[index:], `\/`) {
-				return pattern[:index], pattern[index+2:], true
-			}
-			index++
-		case '[':
-			inClass = true
-		case ']':
-			inClass = false
-		case '/':
-			if !inClass {
-				return pattern[:index], pattern[index+1:], false
-			}
-		}
-	}
-	return pattern, "", false
-}
-
-// Only a whole ** component can consume separators. Matching names separately
-// also keeps a negated character class from consuming a slash.
-func matchGitignoreGlob(pattern, relPath string) bool {
-	var retryPattern, retryPath string
-	for relPath != "" {
-		component, tail, escapedSlash := cutGitignoreComponent(pattern)
-		if component == "**" {
-			if tail == "" {
-				return true
-			}
-			if escapedSlash {
-				_, relPath, _ = strings.Cut(relPath, "/")
-			}
-			pattern, retryPattern, retryPath = tail, tail, relPath
-			continue
-		}
-		name, rest, _ := strings.Cut(relPath, "/")
-		if matched, _ := doublestar.Match(component, name); matched {
-			pattern, relPath = tail, rest
-			continue
-		}
-		if retryPath == "" {
-			return false
-		}
-		_, retryPath, _ = strings.Cut(retryPath, "/")
-		pattern, relPath = retryPattern, retryPath
-	}
-	return pattern == ""
 }
 
 // partitionDiffs keeps diffs filtered by built-in directory rules available
