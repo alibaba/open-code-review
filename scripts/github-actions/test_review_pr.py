@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 alibaba/open-code-review Contributors
 
+import importlib.util
 import json
 import os
 import shutil
@@ -391,6 +392,66 @@ class Plugin(InstalledHelper):
         _, run = self.finish(self.start(URL, cwd=self.root))
         self.assertEqual(run['snapshot']['head'], self.head)
         self.assertTrue(Path(run['result']).is_file())
+
+
+class SnapshotCleanup(unittest.TestCase):
+    def test_other_permission_errors_are_preserved(self):
+        spec = importlib.util.spec_from_file_location("review_pr", ROOT / SCRIPT)
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "writable.txt"
+            path.write_bytes(b"keep")
+            error = PermissionError("unrelated permission failure")
+            with self.assertRaises(PermissionError) as raised:
+                helper.retry_readonly_unlink(os.unlink, path, (PermissionError, error, None))
+            self.assertIs(raised.exception, error)
+            self.assertEqual(path.read_bytes(), b"keep")
+
+    def test_git_objects_are_removed_and_report_is_preserved(self):
+        build = ROOT / "dist" / "pr-helper-tests"
+        build.mkdir(parents=True, exist_ok=True)
+        for script in (ROOT / SCRIPT, ROOT / "plugins/open-code-review" / SCRIPT):
+            with self.subTest(script=script), tempfile.TemporaryDirectory(dir=build) as temporary:
+                spec = importlib.util.spec_from_file_location("review_pr", script)
+                helper = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(helper)
+                helper.CACHE = Path(temporary).resolve()
+                folder = helper.CACHE / "pr-42-cleanup"
+                folder.mkdir()
+                store, tree = folder / "objects.git", folder / "worktree"
+                env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+                env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
+                           GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.com",
+                           GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.com")
+
+                def git(*args, data=None):
+                    return subprocess.check_output(
+                        ["git", f"--git-dir={store}", "-c", f"core.hooksPath={os.devnull}", *args],
+                        input=data.encode() if data is not None else None,
+                        env=env, cwd=folder).decode().strip()
+
+                git("init", "--bare", "--template=")
+                blob = git("hash-object", "-w", "--stdin", data="reviewed content\n")
+                contents = git("mktree", data=f"100644 blob {blob}\tfile.txt\n")
+                head = git("commit-tree", contents, "-m", "snapshot")
+                git("update-ref", "refs/heads/main", head)
+                git("worktree", "add", "--detach", str(tree), head)
+                if os.name == "nt":
+                    self.assertTrue(any(path.stat().st_file_attributes & 1
+                                        for path in (store / "objects").glob("??/*")))
+                manifest, report = folder / "run.json", folder / "review.json"
+                summary = {"state": "finished", "worktree": str(tree), "cleanup": "retained"}
+                helper.save(manifest, summary)
+                report.write_bytes(b'{"comments": []}\n')
+
+                helper.cleanup(manifest, env)
+
+                self.assertFalse(tree.exists())
+                self.assertFalse(store.exists())
+                self.assertEqual(json.loads(manifest.read_text()), dict(summary, cleanup="complete"))
+                self.assertEqual(report.read_bytes(), b'{"comments": []}\n')
+                helper.cleanup(manifest, env)
 
 
 if __name__ == '__main__':
