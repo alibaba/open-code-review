@@ -77,6 +77,10 @@ When an MR is reviewed, comments appear as:
 
 Comments are posted using GitLab's Discussion API with position data, so they appear directly next to the relevant code in the "Changes" tab. Each comment carries an HTML-comment id tag (invisible when rendered) that the script uses to avoid duplicate posts on retry.
 
+Multiline findings are checked against the MR diff before posting. If a finding only partially overlaps a diff hunk, the inline range is clipped to the largest intersection with a single hunk; equal-size intersections prefer the later hunk. For example, a finding at lines 21-28 is posted at lines 21-26 when the hunk ends at line 26. The comment states the original range so the complete finding remains clear.
+
+Multiline findings with no overlap, unavailable or incomplete diff coverage, or unresolved line positions are kept in the summary with their original range and an explanation. A code replacement whose range would need clipping is also kept in the summary, with its full Before/After blocks, because applying it to a shorter range would replace the wrong code.
+
 ## Supported LLM Providers
 
 OCR supports both OpenAI and Anthropic API formats:
