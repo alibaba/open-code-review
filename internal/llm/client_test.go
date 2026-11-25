@@ -2457,3 +2457,185 @@ func TestMessage_EstimatedTokens(t *testing.T) {
 		}
 	})
 }
+
+func TestOpenAIChatCompletions_FoldsToolCallsFromExtraChoices(t *testing.T) {
+	body := `{
+		"id":"chatcmpl_split",
+		"object":"chat.completion",
+		"model":"claude-opus-5.5",
+		"choices":[
+			{"index":0,"message":{"role":"assistant","content":"Reviewing the diff."},"finish_reason":"stop"},
+			{"index":1,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_comment","type":"function","function":{"name":"code_comment","arguments":"{\"line\":3}"}}]},"finish_reason":"tool_calls"},
+			{"index":2,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_done","type":"function","function":{"name":"task_done","arguments":"{}"}}]},"finish_reason":"tool_calls"}
+		]
+	}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := io.WriteString(w, body); err != nil {
+			t.Errorf("write body: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{URL: server.URL + "/v1", APIKey: "test-key", Model: "claude-opus-5.5"})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	var names []string
+	for _, tc := range resp.ToolCalls() {
+		names = append(names, tc.Function.Name)
+	}
+	if want := []string{"code_comment", "task_done"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("tool calls = %v, want %v", names, want)
+	}
+	if got := resp.Content(); got != "Reviewing the diff." {
+		t.Fatalf("content = %q, want the text from the first choice", got)
+	}
+	if len(resp.Choices) != 1 {
+		t.Fatalf("choices = %d, want the extra choices folded into the first", len(resp.Choices))
+	}
+}
+
+func TestOpenAIChatCompletions_FoldsStreamedToolCallsFromExtraChoices(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeOpenAISSE(t, w,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":0,"delta":{"role":"assistant","content":"Reviewing the diff."},"finish_reason":null}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":1,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_comment","type":"function","function":{"name":"code_comment","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":1,"delta":{},"finish_reason":"tool_calls"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:       server.URL + "/v1",
+		APIKey:    "test-key",
+		Model:     "claude-opus-5.5",
+		ExtraBody: map[string]any{"stream": true},
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	calls := resp.ToolCalls()
+	if len(calls) != 1 || calls[0].Function.Name != "code_comment" {
+		t.Fatalf("tool calls = %+v, want the one code_comment call from the second choice", calls)
+	}
+	if got := resp.Content(); got != "Reviewing the diff." {
+		t.Fatalf("content = %q, want the text from the first choice", got)
+	}
+}
+
+func TestOpenAIChatCompletions_KeepsFirstChoiceOnlyWhenMultipleRequested(t *testing.T) {
+	body := `{
+		"id":"chatcmpl_n2",
+		"object":"chat.completion",
+		"model":"claude-opus-5.5",
+		"choices":[
+			{"index":0,"message":{"role":"assistant","content":"First.","tool_calls":[{"id":"call_a","type":"function","function":{"name":"code_comment","arguments":"{\"line\":1}"}}]},"finish_reason":"tool_calls"},
+			{"index":1,"message":{"role":"assistant","content":"Second.","tool_calls":[{"id":"call_b","type":"function","function":{"name":"code_comment","arguments":"{\"line\":2}"}}]},"finish_reason":"tool_calls"}
+		]
+	}`
+	var sentN any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var sent map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		sentN = sent["n"]
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := io.WriteString(w, body); err != nil {
+			t.Errorf("write body: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:       server.URL + "/v1",
+		APIKey:    "test-key",
+		Model:     "claude-opus-5.5",
+		ExtraBody: map[string]any{"n": 2},
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if sentN != float64(2) {
+		t.Fatalf("request n = %v, want 2", sentN)
+	}
+	calls := resp.ToolCalls()
+	if len(calls) != 1 || calls[0].ID != "call_a" {
+		t.Fatalf("tool calls = %+v, want only the first candidate's call_a", calls)
+	}
+}
+
+func TestOpenAIChatCompletions_KeepsFirstStreamedChoiceOnlyWhenMultipleRequested(t *testing.T) {
+	var sentN any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var sent map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		sentN = sent["n"]
+		writeOpenAISSE(t, w,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"code_comment","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":1,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_b","type":"function","function":{"name":"code_comment","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","created":1,"model":"claude-opus-5.5","choices":[{"index":1,"delta":{},"finish_reason":"tool_calls"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:       server.URL + "/v1",
+		APIKey:    "test-key",
+		Model:     "claude-opus-5.5",
+		ExtraBody: map[string]any{"stream": true, "n": 2},
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if sentN != float64(2) {
+		t.Fatalf("request n = %v, want 2", sentN)
+	}
+	calls := resp.ToolCalls()
+	if len(calls) != 1 || calls[0].ID != "call_a" {
+		t.Fatalf("tool calls = %+v, want only the first candidate's call_a", calls)
+	}
+}
+
+func TestRequestsMultipleChoices(t *testing.T) {
+	cases := []struct {
+		name string
+		body map[string]any
+		want bool
+	}{
+		{"absent", nil, false},
+		{"one", map[string]any{"n": 1}, false},
+		{"int", map[string]any{"n": 2}, true},
+		{"int64", map[string]any{"n": int64(3)}, true},
+		{"float", map[string]any{"n": 2.0}, true},
+		{"json number", map[string]any{"n": json.Number("2")}, true},
+		{"bad json number", map[string]any{"n": json.Number("x")}, false},
+		{"string", map[string]any{"n": "2"}, false},
+	}
+	for _, tc := range cases {
+		if got := requestsMultipleChoices(tc.body); got != tc.want {
+			t.Errorf("%s: requestsMultipleChoices = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

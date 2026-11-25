@@ -766,7 +766,9 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		return nil, withProviderErrorBody(err)
 	}
 
-	return c.mapOpenAIResponse(sdkResp), nil
+	resp = c.mapOpenAIResponse(sdkResp)
+	foldExtraChoiceToolCalls(resp, c.cfg.ExtraBody)
+	return resp, nil
 }
 
 // completionsStreaming consumes an SSE completion and corrects the retry report
@@ -892,6 +894,7 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 		}
 	}
 
+	foldExtraChoiceToolCalls(resp, c.cfg.ExtraBody)
 	return resp, nil
 }
 
@@ -1157,6 +1160,38 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 		Choices: choices,
 		Usage:   usage,
 	}
+}
+
+// foldExtraChoiceToolCalls moves the tool calls of choices[1:] into the first
+// choice. Some OpenAI-compatible gateways split one assistant turn across
+// choices, with the text in the first and each tool call in a choice of its
+// own. Every reader takes Choices[0], so unless the request itself asked for
+// several completions the extra choices are parts of the same turn. When it
+// did, they are independent candidates and only the first is consumed.
+func foldExtraChoiceToolCalls(resp *ChatResponse, extraBody map[string]any) {
+	if len(resp.Choices) < 2 || requestsMultipleChoices(extraBody) {
+		return
+	}
+	first := &resp.Choices[0].Message
+	for _, extra := range resp.Choices[1:] {
+		first.ToolCalls = append(first.ToolCalls, extra.Message.ToolCalls...)
+	}
+	resp.Choices = resp.Choices[:1]
+}
+
+func requestsMultipleChoices(extraBody map[string]any) bool {
+	switch n := extraBody["n"].(type) {
+	case int:
+		return n > 1
+	case int64:
+		return n > 1
+	case float64:
+		return n > 1
+	case json.Number:
+		f, err := n.Float64()
+		return err == nil && f > 1
+	}
+	return false
 }
 
 // --- AnthropicClient ---
