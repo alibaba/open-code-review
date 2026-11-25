@@ -6,11 +6,12 @@ package session
 import (
 	"errors"
 	"fmt"
-	"github.com/alibaba/open-code-review/internal/ocrhome"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/alibaba/open-code-review/internal/ocrhome"
 )
 
 // ErrSessionNotFound reports that no persisted session matched the id.

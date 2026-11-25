@@ -25,7 +25,7 @@ export class CliService {
     const env = getShellEnv();
     // Node uses the first lexicographically sorted spelling of a Windows env key.
     const key = process.platform === 'win32'
-      ? Object.keys(env).sort().find((key) => key.toUpperCase() === 'OCR_HOME')
+      ? Object.keys(env).sort().find((name) => name.toUpperCase() === 'OCR_HOME')
       : 'OCR_HOME';
     if (key && env[key]) throw new CustomStorageError();
   }
