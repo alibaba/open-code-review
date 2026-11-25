@@ -75,10 +75,15 @@ func IsPathExcluded(repoDir, relPath string, patterns []string) bool {
 	return stub.isPathExcluded(relPath, patterns)
 }
 
+// IsDirectoryExcluded reports whether a walker can prune this directory.
+func IsDirectoryExcluded(relPath string, patterns GitignorePatterns) bool {
+	return isProviderDirExcluded(relPath) || patterns.matches(relPath, true)
+}
+
 // MatchGitignorePattern reports whether relPath matches a single
 // gitignore-style pattern, using the simplified semantics that diff.Provider
 // already implements (basename match, prefix match, directory-only suffix).
 // Useful when callers want to test a single pattern in isolation.
 func MatchGitignorePattern(relPath, pat string) bool {
-	return matchGitignorePattern(relPath, pat)
+	return GitignorePatterns{pat}.Matches(relPath)
 }

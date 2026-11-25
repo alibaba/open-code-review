@@ -175,7 +175,7 @@ func TestProvider_Enumerate_NonGitDirectory(t *testing.T) {
 	repo := t.TempDir()
 	writeFile(t, repo, "main.go", []byte("package main\n"))
 	writeFile(t, repo, "pkg/util.go", []byte("package pkg\n"))
-	writeFile(t, repo, ".gitignore", []byte("ignored.txt\n"))
+	writeFile(t, repo, ".gitignore", []byte("*\n!*/\n!.gitignore\n!*.go\n!*.js\n"))
 	writeFile(t, repo, "ignored.txt", []byte("should be excluded by root .gitignore\n"))
 	writeFile(t, repo, "node_modules/lib/foo.js", []byte("module.exports = 1;\n")) // should be skipped via ExcludedDirs
 
@@ -312,5 +312,30 @@ func TestProvider_Enumerate_GitignoreAncestorExceptions(test *testing.T) {
 				test.Errorf("paths = %v, want %v", paths, want)
 			}
 		})
+	}
+}
+
+func TestProvider_Enumerate_NestedUntrackedException(t *testing.T) {
+	repo := initTestRepo(t)
+	writeFile(t, repo, "tracked.log", []byte("tracked before ignore rules\n"))
+	gitCommit(t, repo, "track log")
+	writeFile(t, repo, ".gitignore", []byte("generated\n*.log\n"))
+	writeFile(t, repo, "pkg/.gitignore", []byte("!generated/\n"))
+	gitCommit(t, repo, "set ignore rules")
+	for _, name := range []string{"pkg/generated/a.go", "generated/ignored.go", "vendor/blocked.go"} {
+		writeFile(t, repo, name, []byte("package fixture\n"))
+	}
+	items, err := NewProvider(repo, nil, nil, 0).Enumerate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, item := range items {
+		got = append(got, item.Path)
+	}
+	sort.Strings(got)
+	want := []string{".gitignore", "pkg/.gitignore", "pkg/generated/a.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("enumerated %q, want %q", got, want)
 	}
 }

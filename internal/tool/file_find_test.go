@@ -52,7 +52,7 @@ func TestFileFind_NonGitDirectoryFallback(t *testing.T) {
 	write("server.go", "package main\n")
 	write("internal/handler.go", "package internal\n")
 	write("node_modules/lib/index.js", "x\n") // excluded by blocklist
-	write(".gitignore", "ignored.go\n")
+	write(".gitignore", "*\n!*/\n!*.go\nignored.go\n")
 	write("ignored.go", "package x\n") // excluded by root .gitignore
 
 	p := NewFileFind(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
