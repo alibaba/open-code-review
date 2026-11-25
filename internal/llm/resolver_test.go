@@ -298,6 +298,17 @@ func writeResolverConfig(t *testing.T, cfg configFile) (string, []byte) {
 	return path, data
 }
 
+// writeRawResolverConfig pins the literal JSON keys in a resolver fixture.
+// Marshaling a configFile would let a drifted struct tag pass both sides.
+func writeRawResolverConfig(t *testing.T, raw string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("write raw config: %v", err)
+	}
+	return path
+}
+
 func TestResolveEndpoint_ConfigPrecedesOCREnvironment(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
@@ -2935,5 +2946,53 @@ func TestResolveEndpointWithOptions_ConfigRequestTimeout(t *testing.T) {
 	}
 	if ep.Timeout != 60*time.Second {
 		t.Fatalf("ep.Timeout = %v, want config's 60s", ep.Timeout)
+	}
+}
+
+// TestResolveEndpointRequiresStreamingOptIn pins the public JSON key and both
+// directions of the provider-kind gate through the real config parser.
+func TestResolveEndpointRequiresStreamingOptIn(t *testing.T) {
+	const providerName = "terra-bifrost"
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{
+			name: "custom opt in",
+			raw:  `{"provider":"terra-bifrost","custom_providers":{"terra-bifrost":{"api_key":"fixture-key","url":"https://gateway.example.com/v1","protocol":"openai-responses","model":"gpt-6.1-terra","extra_body":{"stream":false,"reasoning_effort":"medium"},"requires_streaming":true}}}`,
+			want: true,
+		},
+		{
+			name: "custom opt out",
+			raw:  `{"provider":"terra-bifrost","custom_providers":{"terra-bifrost":{"api_key":"fixture-key","url":"https://gateway.example.com/v1","protocol":"openai-responses","model":"gpt-6.1-terra","extra_body":{"stream":false,"reasoning_effort":"medium"}}}}`,
+			want: false,
+		},
+		{
+			name: "extra body stream is not an opt in",
+			raw:  `{"provider":"terra-bifrost","custom_providers":{"terra-bifrost":{"api_key":"fixture-key","url":"https://gateway.example.com/v1","protocol":"openai-responses","model":"gpt-6.1-terra","extra_body":{"stream":true,"reasoning_effort":"medium"}}}}`,
+			want: false,
+		},
+		{
+			name: "preset key ignored",
+			raw:  `{"provider":"openai-responses","providers":{"openai-responses":{"api_key":"fixture-key","url":"https://gateway.example.com/v1","model":"gpt-6.1-terra","extra_body":{"stream":false},"requires_streaming":true}}}`,
+			want: false,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			clearAllEnv(t)
+			path := writeRawResolverConfig(t, testCase.raw)
+			ep, err := ResolveEndpointWithOptions(path, ResolveOptions{})
+			if err != nil {
+				t.Fatalf("ResolveEndpointWithOptions: %v", err)
+			}
+			if ep.Protocol != ProtocolOpenAIResponses {
+				t.Fatalf("ep.Protocol = %q, want %q", ep.Protocol, ProtocolOpenAIResponses)
+			}
+			if ep.RequiresStreaming != testCase.want {
+				t.Fatalf("ep.RequiresStreaming = %v, want %v", ep.RequiresStreaming, testCase.want)
+			}
+		})
 	}
 }

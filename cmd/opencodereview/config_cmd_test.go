@@ -1370,7 +1370,7 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 	}
 	want := "unknown config key: bogus.key\n" +
 		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.timeout_sec, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile, requires_streaming\n" +
 		"Protocol values: anthropic, anthropic-bedrock, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
@@ -1975,5 +1975,100 @@ func TestSetConfigValueTimeoutSecondsRejectsInvalidValues(t *testing.T) {
 		if err := setConfigValue(&Config{}, "llm.timeout_sec", value); err == nil {
 			t.Fatalf("setConfigValue() accepted timeout_sec=%q", value)
 		}
+	}
+}
+
+// TestSetConfigValueUnknownProviderFieldMessage pins the applyProviderField
+// default error list at config_cmd.go:890, the second hardcoded provider-field
+// list. Both providers and custom_providers route their field keys here.
+func TestSetConfigValueUnknownProviderFieldMessage(t *testing.T) {
+	err := applyProviderField("custom-provider", &ProviderEntry{}, "not_a_field", "custom_providers.custom-provider.not_a_field", "x")
+	if err == nil {
+		t.Fatal("expected error for unknown provider field")
+	}
+	want := `unknown provider field "not_a_field": supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile, requires_streaming`
+	if err.Error() != want {
+		t.Errorf("unknown provider field message drifted:\n got: %q\nwant: %q", err.Error(), want)
+	}
+}
+
+// TestSetConfigValueRejectsRequiresStreamingForPreset pins contract C1: the
+// opt in belongs to custom provider entries only. A preset must keep the flag
+// declared by its registry entry and the config JSON must not change.
+func TestSetConfigValueRejectsRequiresStreamingForPreset(t *testing.T) {
+	cfg := &Config{Provider: "chatgpt", Providers: map[string]ProviderEntry{"chatgpt": {}}}
+	before, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = setConfigValue(cfg, "providers.chatgpt.requires_streaming", "true")
+	if err == nil {
+		t.Fatal("expected requires_streaming under a built in preset to be rejected")
+	}
+	if !strings.Contains(err.Error(), "only supported on custom providers") {
+		t.Errorf("error = %q, want a custom-provider-only rejection", err)
+	}
+	after, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("config JSON changed:\n got: %s\nwant: %s", after, before)
+	}
+	preset, ok := llm.LookupProvider("chatgpt")
+	if !ok || !preset.RequiresStreaming {
+		t.Errorf("built in chatgpt flag changed: found=%v preset=%+v", ok, preset)
+	}
+}
+
+// TestConfigRoundTripPreservesRequiresStreaming pins the write-side field,
+// the CLI setter and the TUI clone: the opt in survives load, an unrelated
+// config write, a CLI set on a second provider, and reload.
+func TestConfigRoundTripPreservesRequiresStreaming(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	original := `{
+    "provider": "terra-bifrost",
+    "custom_providers": {
+        "terra-bifrost": {
+            "url": "https://gateway.example.com/v1",
+            "protocol": "openai-responses",
+            "model": "gpt-6.1-terra",
+            "requires_streaming": true,
+            "extra_body": {"stream": false, "reasoning_effort": "medium"}
+        }
+    }
+}`
+	if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadOrCreateConfig: %v", err)
+	}
+	entry := cfg.CustomProviders["terra-bifrost"]
+	if !entry.RequiresStreaming {
+		t.Fatal("requires_streaming = false after load, want true")
+	}
+	if clone := cloneProviderEntry(entry); !clone.RequiresStreaming {
+		t.Fatal("requires_streaming = false after TUI clone, want true")
+	}
+	if err := setConfigValue(cfg, "custom_providers.other-gateway.requires_streaming", "true"); err != nil {
+		t.Fatalf("CLI set custom_providers.other-gateway.requires_streaming: %v", err)
+	}
+	if err := setConfigValue(cfg, "language", "Chinese"); err != nil {
+		t.Fatalf("unrelated config set: %v", err)
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	reloaded, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := reloaded.CustomProviders["terra-bifrost"].RequiresStreaming; !got {
+		t.Error("custom_providers.terra-bifrost.requires_streaming lost in round-trip")
+	}
+	if got := reloaded.CustomProviders["other-gateway"].RequiresStreaming; !got {
+		t.Error("CLI-set custom_providers.other-gateway.requires_streaming lost in round-trip")
 	}
 }
