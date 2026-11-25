@@ -309,7 +309,6 @@ func (patterns GitignorePatterns) matches(relPath string, directory bool) bool {
 	if len(patterns.lines) == 0 {
 		return false
 	}
-	relPath = filepath.ToSlash(relPath)
 	for {
 		for _, pattern := range slices.Backward(patterns.lines) {
 			body, negated := strings.CutPrefix(pattern, "!")

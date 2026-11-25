@@ -122,6 +122,9 @@ func TestIsPathExcluded(t *testing.T) {
 		{"hardcoded dir prefix", ".git/config", nil, true},
 		{"node_modules dir pattern", "node_modules/foo.js", []string{"node_modules/"}, true},
 		{"gitignore pattern match", "debug.log", []string{"*.log"}, true},
+		{"Git tree path separator", "out/main.go", []string{"/out/main.go"}, true},
+		{"literal backslash in Git tree name", `out\main.go`, []string{"/out/main.go"}, false},
+		{"escaped literal backslash", `out\main.go`, []string{`/out\\main.go`}, true},
 		{"no match", "main.go", []string{"*.log"}, false},
 		{"no patterns", "main.go", nil, false},
 	}
