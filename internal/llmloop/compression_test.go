@@ -498,6 +498,37 @@ func TestFitCompressionInput_ManyLargeResults(t *testing.T) {
 	}
 }
 
+// A template that references {{context}} more than once must not over-truncate:
+// each byte removed from a field shrinks the rendered request by ctxCount bytes,
+// so the field-level cut is sized against excess/ctxCount, not the raw excess.
+func TestFitCompressionInput_MultipleContextPlaceholders(t *testing.T) {
+	// Three {{context}} references → ctxCount = 3, matching the over-truncation
+	// scenario: a 2000-byte field under a 4096-byte budget. The naive
+	// `target = largest - excess` crushes the field to ~15 bytes (a bare
+	// suffix); the correct `largest - ceil(excess/ctxCount)` keeps ~1290 bytes.
+	tmpl := []MessageTemplate{
+		{Role: "user", Content: "{{context}}\n{{context}}\n{{context}}"},
+	}
+	const budget = 4096
+	msgs := []llm.Message{
+		llm.NewToolResultMessage("call_1", strings.Repeat("z", 2000)),
+	}
+	got, err := fitCompressionInput(msgs, tmpl, budget)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	size := renderedSize(tmpl, buildMessageXML(got))
+	if size > budget {
+		t.Fatalf("rendered request = %d bytes, want <= %d", size, budget)
+	}
+	// Over-truncation would leave only the suffix (~15 bytes). The corrected
+	// arithmetic keeps the bulk of the field: assert it retained the majority
+	// of its content rather than collapsing to a bare marker.
+	if got[0].ExtractText() == truncationSuffix || len(got[0].ExtractText()) < 1000 {
+		t.Fatalf("field over-truncated to %d bytes (want ~1290): %q", len(got[0].ExtractText()), got[0].ExtractText())
+	}
+}
+
 // BenchmarkFitCompressionInput_ManyLargeResults guards the O(n^2 * L)
 // re-rendering regression: with many oversized fields, the incremental byte
 // accounting must dominate over repeated full-request rendering.

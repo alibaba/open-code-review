@@ -410,7 +410,13 @@ func TestRunMainTask_UncompressibleContextStopsWithCompression(t *testing.T) {
 		},
 	}}
 	deps := newTestDeps(client)
-	deps.Template.MaxTokens = 20
+	// 100 (not 20): the compression request must itself fit the byte budget
+	// (MaxContextTokens × 4). At 20 the ~500-byte history cannot be trimmed
+	// under an 80-byte budget, so fitCompressionInput bails before the LLM is
+	// ever asked for a summary — which is not the empty-summary path this test
+	// guards. 100 keeps the history above the 80% trigger while leaving room
+	// for the request to be built and summarized.
+	deps.Template.MaxTokens = 100
 	deps.Template.MemoryCompressionTask = template.LlmConversation{
 		Messages: []template.ChatMessage{{Role: "user", Content: "Summarize: {{context}}"}},
 	}

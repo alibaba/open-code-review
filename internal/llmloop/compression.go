@@ -296,7 +296,12 @@ func fitCompressionInput(msgs []llm.Message, templates []MessageTemplate, budget
 				errCompressionInputTooLarge, excess, budgetBytes)
 		}
 
-		target := max(0, largest-excess)
+		// Each byte removed from a field shrinks the rendered request by ctxCount
+		// bytes (every {{context}} expansion shrinks), so the field-level cut must
+		// be sized against excess/ctxCount, not the raw excess. Using the raw
+		// excess over-truncates whenever the template references {{context}} more
+		// than once, silently discarding preservable history.
+		target := max(0, largest-(excess+ctxCount-1)/ctxCount)
 		if reasoning {
 			before := len(out[idx].ReasoningContent)
 			out[idx].ReasoningContent = truncateToByteBudget(out[idx].ReasoningContent, target)
@@ -331,8 +336,11 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		return msgs, nil
 	}
 
-	// MaxContextTokens × ~4 bytes/token: the request that summarizes the history
-	// must itself fit the context window it is meant to relieve.
+	// MaxContextTokens × ~4 bytes/token bounds the request that summarizes the
+	// history, so the summarization request itself fits the window it relieves.
+	// The byte budget is a cheap ceiling; the actual token count is validated
+	// below so dense token streams (digits, CJK, code at 2.4–3.9 bytes/token)
+	// cannot still overflow the model's limit.
 	compressZone, err := fitCompressionInput(msgs[part.frozenEnd:part.compressEnd],
 		r.task.Compression.Messages, r.task.MaxContextTokens*4)
 	if err != nil {
@@ -344,6 +352,16 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	for _, m := range r.task.Compression.Messages {
 		content := strings.ReplaceAll(m.Content, "{{context}}", contextXML)
 		compressionMsgs = append(compressionMsgs, llm.NewTextMessage(m.Role, content))
+	}
+
+	// Verify the final request stays within the token budget, not just the byte
+	// budget. Dense content (digits, CJK, code) can tokenize past MaxContextTokens
+	// even when the rendered byte size is under budget, and a summarization
+	// request that exceeds the window is rejected outright — the exact failure
+	// this path exists to prevent.
+	if requestTokens := CountMessagesTokens(compressionMsgs); requestTokens > r.task.MaxContextTokens {
+		return msgs, fmt.Errorf("memory compression: %w: %d tokens over a %d-token window",
+			errCompressionInputTooLarge, requestTokens, r.task.MaxContextTokens)
 	}
 
 	// The task record is created before the request, not after it, because the
