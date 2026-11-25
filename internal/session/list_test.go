@@ -5,6 +5,7 @@ package session
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -65,6 +66,9 @@ func TestListSessions_SortsAndAggregates(t *testing.T) {
 	if !got[0].Aborted {
 		t.Errorf("newest session was interrupted; expected Aborted=true")
 	}
+	if !got[0].Running {
+		t.Errorf("newest session has recent activity; expected Running=true")
+	}
 	if got[1].Aborted {
 		t.Errorf("older session was finalized; expected Aborted=false")
 	}
@@ -76,6 +80,36 @@ func TestListSessions_SortsAndAggregates(t *testing.T) {
 	}
 	if got[0].CompletedFiles != 2 {
 		t.Errorf("newest CompletedFiles = %d, want 2", got[0].CompletedFiles)
+	}
+}
+
+func TestLoadSummary_StaleInterruptedSessionIsNotRunning(t *testing.T) {
+	tmpHome := t.TempDir()
+	setTestHome(t, tmpHome)
+	repoDir := t.TempDir()
+
+	sessionID := writeTestSession(t, repoDir, "main", "HEAD", nil, 0, 0, false)
+	summary, err := LoadSummary(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("LoadSummary fresh: %v", err)
+	}
+	if !summary.Running {
+		t.Fatal("fresh interrupted session should report Running=true")
+	}
+
+	stale := time.Now().Add(-runningActivityWindow - time.Minute)
+	if err := os.Chtimes(summary.FilePath, stale, stale); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	summary, err = LoadSummary(repoDir, sessionID)
+	if err != nil {
+		t.Fatalf("LoadSummary stale: %v", err)
+	}
+	if !summary.Aborted {
+		t.Fatal("missing session_end must keep Aborted=true")
+	}
+	if summary.Running {
+		t.Fatal("stale interrupted session should report Running=false")
 	}
 }
 
