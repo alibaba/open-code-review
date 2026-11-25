@@ -253,6 +253,24 @@ func TestCustomFormEndsAtProtocolForBedrock(t *testing.T) {
 	})
 }
 
+func TestApplyCreateCustomProvider_AnthropicInheritsPromptCaching(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	m := newProviderTUI(&Config{}, path)
+	m.activeTab = tabCustom
+	m.creatingCustom = true
+	m.cpProtocolIdx = cpProtocolIndex(llm.ProtocolAnthropic)
+	m.cpNameInput.SetValue("anthropic-custom")
+	m.cpURLInput.SetValue("https://api.example.com")
+	m.apiKeyInput.SetValue("test-key")
+	m.cpAuthInput.SetValue("authorization")
+
+	out, _ := m.applyCreateCustomProvider()
+	got := out.(providerTUIModel).existingCfg.CustomProviders["anthropic-custom"]
+	if got.PromptCaching != nil {
+		t.Fatalf("PromptCaching = %v, want nil so the global setting is inherited", got.PromptCaching)
+	}
+}
+
 // TestUpdateCustomProviderForm_ProtocolNav covers up/down protocol selection.
 func TestUpdateCustomProviderForm_ProtocolNav(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
