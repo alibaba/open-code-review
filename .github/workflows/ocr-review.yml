@@ -5,7 +5,7 @@
 # outputs, and implementation details (retry, idempotency, artifact upload, etc.).
 #
 # Triggers:
-#   - PR opened (uses pull_request_target for fork secret access)
+#   - PR opened or reopened, after passing the open-PR admission limit
 #
 # Required secrets (mapped to action inputs):
 #   OCR_LLM_URL           - LLM API endpoint (e.g., https://api.openai.com/v1/chat/completions)
@@ -17,28 +17,57 @@
 
 name: OpenCodeReview PR Review
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 on:
   # Use pull_request_target instead of pull_request so that secrets are
   # available even for PRs from forks. This is safe because OCR only reads
   # the diff and does not execute any code from the PR.
   pull_request_target:
-    types: [opened]
+    types: [opened, reopened]
 
 permissions:
   contents: read
   pull-requests: write
 
 jobs:
+  pr-admission:
+    name: PR Admission
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    concurrency:
+      group: pr-admission-${{ github.repository }}-${{ github.event.pull_request.user.id }}
+      cancel-in-progress: false
+      queue: max
+    container:
+      image: node:24.22.1
+      options: --cpus=1 --memory=1g
+    outputs:
+      allowed: ${{ steps.admission.outputs.allowed }}
+    steps:
+      - name: Check out trusted admission policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Enforce open-PR limit
+        id: admission
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 2
+          script: |
+            const { run } = require('./scripts/github-actions/check-pr-admission.js');
+            await run({ github, context, core });
+
   code-review:
+    needs: pr-admission
+    if: needs.pr-admission.outputs.allowed == 'true'
+    concurrency:
+      group: ${{ github.workflow }}-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: self-hosted
     timeout-minutes: 30
     container:
       image: node:24.22.1
-    if: github.event_name == 'pull_request_target'
     steps:
       # Materialize action.yml + scripts/ into the workspace so the local
       # `uses: ./` action below can be resolved and loaded. For

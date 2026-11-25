@@ -1,0 +1,6 @@
+{
+  "maxOpen": 10,
+  "exemptBots": [
+    { "id": 49699333, "login": "dependabot[bot]" }
+  ]
+}
