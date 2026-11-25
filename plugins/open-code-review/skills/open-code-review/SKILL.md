@@ -37,6 +37,8 @@ Analyze the review target (commits, branch, or changes) to extract concise busin
 
 **GitHub PR mode:** A bare positive number (e.g. `42`) selects a PR in the GitHub CLI's default repository for this checkout, which can be upstream of a fork. The `pr` prefix is optional. For a PR number or GitHub PR URL, run `python3 "$SKILL_DIR/scripts/review_pr.py" <id-or-url>` once, resolving `SKILL_DIR` from this installed skill. Forward an explicit `--repo OWNER/REPO` or `--background`. Read the printed `run.json` and its result file; report the resolved PR URL, reviewed revisions, freshness, and artifact path with Step 3. On failure report the failed step, not a fallback branch review. Only PR mode needs Python 3 and authenticated `gh`.
 
+The GitHub PR helper requires `OCR_HOME` to be unset or empty. For custom or mounted storage, run the native `ocr review` command directly.
+
 PR mode uses built-in and user review rules, not rules from the PR. It stops if MCP servers are configured or the PR changes Git filtering metadata; do not bypass a policy stop.
 
 **Otherwise run `ocr review` directly.** Do not probe with `command -v ocr` or `ocr --version` first; that adds an unnecessary tool call on the normal path.
