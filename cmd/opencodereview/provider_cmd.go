@@ -107,10 +107,16 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	if result.model == "" {
 		return fmt.Errorf("model is required for manual configuration")
 	}
+	// The other writer of llm.url (ocr config set) validates the same way, so
+	// the two cannot disagree about what a valid value is.
+	baseURL := strings.TrimSpace(result.url)
+	if err := validateBaseURL(baseURL); err != nil {
+		return fmt.Errorf("invalid URL for manual configuration: %w", err)
+	}
 
 	cfg.Provider = ""
 	cfg.Model = ""
-	cfg.Llm.URL = result.url
+	cfg.Llm.URL = baseURL
 	cfg.Llm.Model = result.model
 	cfg.Llm.AuthToken = result.apiKey
 	authHeader, err := llm.NormalizeAuthHeader(result.authHeader)

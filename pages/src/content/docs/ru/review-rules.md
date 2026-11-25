@@ -51,15 +51,29 @@ OCR разрешает правила через **четырёхуровнев�
 Три независимых поля:
 
 - `include` — необязательно. Glob-шаблоны, которые _обходят_ встроенные
-  стандартные шаблоны исключения (исключения тестовых файлов — см. ниже). Это
-  не белый список: файлы, не совпавшие ни с одним шаблоном `include`, всё равно
-  проходят проверки `unsupported_ext` и `default_path` и могут быть
-  отревьюены.
+  стандартные шаблоны исключения (исключения тестовых файлов — см. ниже) **и
+  список разрешённых расширений**. Это не белый список: файлы, не совпавшие
+  ни с одним шаблоном `include`, всё равно проходят проверки
+  `unsupported_ext` и `default_path` и могут быть отревьюены.
 - `exclude` — необязательно. Glob-шаблоны для файлов, которые OCR _не должен_
   ревьюить. Наивысший приоритет среди пользовательских правил фильтрации.
 - `rules` — массив записей `{path, rule}`, вычисляемых **в порядке объявления**.
   Первый `path`, чей glob совпадает с файлом, определяет промпт, который OCR
   отправляет модели для этого файла.
+
+`include` — это также способ сделать ревьюируемым расширение, которого нет во
+встроенном списке, — например, Markdown-документ с контрактом, который
+меняется вместе с кодом:
+
+```json
+{
+  "include": ["**/*.md"]
+}
+```
+
+Файл, совпавший с шаблоном, пропускает проверку `unsupported_ext`; файлы вне
+шаблона проходят обычные проверки. Запись `rules[].path` — не фильтр включения:
+она лишь выбирает, какой текст правила применяется к файлу.
 
 Каждая запись в `rules` принимает ещё одно необязательное поле:
 
@@ -209,6 +223,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -280,7 +298,8 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 
 Чтобы **отревьюить** файл, совпадающий с одним из этих шаблонов,
 добавьте его в пользовательский список `include` — это переопределяет
-этап default_path.
+этап default_path (а если расширения нет во встроенном списке — и проверку
+`unsupported_ext`).
 
 ## Разрешение правила для файла
 
@@ -321,7 +340,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.erb`                                      | `erb.md` — шаблоны ERB (SSTI / XSS / экранирование / пробелы и структура вывода). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                                  |
 | `**/*.astro`                                    | `astro.md` — компоненты и islands Astro.                                                         |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                                               |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                                               |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                                      |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — файлы реализации, сигнатур и скриптов F#.                                          |
@@ -329,7 +348,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.rs`                                       | `rust.md`                                                                                        |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                                         |
 | `**/*.c`                                        | `c.md`                                                                                           |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md` — ядра и заголовки CUDA.                                                           |
+| `**/*.hip`                                      | `cuda_hip.md` — ядра HIP (AMD ROCm).                                                             |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — исходный код Python.                                                               |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md` — исходный код Ruby, задачи Rake, gemspec, Gemfile и Rakefile. |
 | `**/*.{php,phtml}`                              | `php.md` — исходный код PHP и шаблоны PHP.                                                       |
 | `**/*.proto`                                    | `protobuf.md` — совместимость Protocol Buffers на уровне wire.                                   |
 | `**/*.po`                                       | `po.md` — исходные каталоги переводов gettext.                                                   |
@@ -340,6 +362,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.R`                                        | `r.md`                                                                                           |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                                |
 | `**/*.bicep`                                    | `bicep.md` — шаблоны Bicep (Azure).                                                              |
+| `**/*.dhall` | `dhall.md` — язык конфигурации Dhall. |
 | `**/*.nix`                          | `nix.md` — выражения Nix и flake.                                                                |
 | `**/*.{hs,lhs}`                     | `haskell.md` — исходный код Haskell.                                                             |
 | `**/*.{nim,nims,nimble}`            | `nim.md` — исходный код Nim и манифесты пакетов.                                                 |
@@ -363,6 +386,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - шейдеры GLSL, HLSL, WGSL и Metal.                                                  |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell.                          |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — исходный код Clojure / ClojureScript и данные EDN. |
+| `**/*.sql`                                      | `sql.md` — SQL-миграции и запросы. |
 | _(fallback)_                                    | `default.md`                                                                                     |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

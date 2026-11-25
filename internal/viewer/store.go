@@ -86,29 +86,30 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 
 // SessionSummary is built from session_start and session_end records.
 type SessionSummary struct {
-	SessionID      string
-	Timestamp      time.Time
-	CWD            string
-	GitBranch      string
-	Model          string
-	ReviewMode     string
-	DiffFrom       string
-	DiffTo         string
-	DiffCommit     string
-	FilesReviewed  []string
-	DurationSec    float64
-	FileCount      int
-	LLMFailures    int
-	CommentCount   int
-	Aborted        bool
-	Legacy         bool
-	TerminalState  string
-	SelectedCount  int
-	CompletedCount int
-	ReusedCount    int
-	FailedCount    int
-	WaivedCount    int
-	RunManifest    *session.RunManifest
+	AnalysisEnabled bool
+	SessionID       string
+	Timestamp       time.Time
+	CWD             string
+	GitBranch       string
+	Model           string
+	ReviewMode      string
+	DiffFrom        string
+	DiffTo          string
+	DiffCommit      string
+	FilesReviewed   []string
+	DurationSec     float64
+	FileCount       int
+	LLMFailures     int
+	CommentCount    int
+	Aborted         bool
+	Legacy          bool
+	TerminalState   string
+	SelectedCount   int
+	CompletedCount  int
+	ReusedCount     int
+	FailedCount     int
+	WaivedCount     int
+	RunManifest     *session.RunManifest
 }
 
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
@@ -160,37 +161,14 @@ func peekSession(path string) (SessionSummary, error) {
 	summary := SessionSummary{Aborted: true}
 	var lastLine []byte
 	readErr := readJSONLLines(f, func(line []byte) {
-		lastLine = append([]byte(nil), line...)
+		lastLine = line
 
 		if summary.Timestamp.IsZero() {
 			var rec map[string]any
 			if err := json.Unmarshal(line, &rec); err != nil {
 				return
 			}
-			if ts, ok := rec["timestamp"].(string); ok {
-				summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
-			}
-			if cwd, ok := rec["cwd"].(string); ok {
-				summary.CWD = cwd
-			}
-			if branch, ok := rec["gitBranch"].(string); ok {
-				summary.GitBranch = branch
-			}
-			if model, ok := rec["model"].(string); ok {
-				summary.Model = model
-			}
-			if rm, ok := rec["reviewMode"].(string); ok {
-				summary.ReviewMode = rm
-			}
-			if v, ok := rec["diffFrom"].(string); ok {
-				summary.DiffFrom = v
-			}
-			if v, ok := rec["diffTo"].(string); ok {
-				summary.DiffTo = v
-			}
-			if v, ok := rec["diffCommit"].(string); ok {
-				summary.DiffCommit = v
-			}
+			applySessionStart(&summary, rec)
 			return
 		}
 
@@ -219,6 +197,7 @@ func peekSession(path string) (SessionSummary, error) {
 // readJSONLLines visits each physical JSONL record without bufio.Scanner's
 // fixed token ceiling. session_end embeds the complete run manifest and can
 // legitimately exceed the former 10 MiB scanner limit on very large reviews.
+// Each record owns its buffer, so visit may retain it after returning.
 func readJSONLLines(r io.Reader, visit func([]byte)) error {
 	reader := bufio.NewReaderSize(r, 64*1024)
 	for {
@@ -258,6 +237,7 @@ type ReviewComment struct {
 type ViewSession struct {
 	Summary      SessionSummary
 	TokenUsage   TokenUsageSummary
+	requests     []*TaskCard
 	Files        []*FileGroup     // ordered by file path
 	SessionTasks []*FileGroup     // session-level tasks (grouping, etc.) separated from file-level
 	Comments     []*ReviewComment // review findings from review_item_done/reused records
@@ -309,6 +289,7 @@ func isSessionLevelPath(fp string) bool {
 
 // TaskCard links an LLM request with its response and tool calls.
 type TaskCard struct {
+	TaskType         TaskType
 	RequestMessages  any // preserved for display
 	RequestNo        int
 	ResponseContent  string
@@ -500,63 +481,50 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	}
 	defer f.Close()
 
+	return readSession(f, sessionID)
+}
+
+func readSession(reader io.Reader, sessionID string) (*ViewSession, error) {
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
 	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
 	markOccurrences := make(map[string]int)
 
-	readErr := readJSONLLines(f, func(line []byte) {
+	readErr := readJSONLLines(reader, func(line []byte) {
+		var header struct {
+			Type      string
+			FilePath  string
+			TaskType  TaskType
+			RequestNo int `json:"request_no"`
+		}
+		if json.Unmarshal(line, &header) != nil {
+			return
+		}
+		if header.Type == "llm_request" {
+			card := &TaskCard{TaskType: header.TaskType, RequestNo: header.RequestNo}
+			if header.TaskType == GroupingTask {
+				var request struct{ Messages any }
+				if json.Unmarshal(line, &request) == nil {
+					card.RequestMessages = request.Messages
+				}
+			}
+			group := fileIndex[header.FilePath]
+			if group == nil {
+				group = &FileGroup{FilePath: header.FilePath, Tasks: make(map[TaskType][]*TaskCard)}
+				fileIndex[header.FilePath] = group
+				vs.Files = append(vs.Files, group)
+			}
+			group.Tasks[header.TaskType] = append(group.Tasks[header.TaskType], card)
+			vs.requests = append(vs.requests, card)
+			return
+		}
 		var rec map[string]any
 		if err := json.Unmarshal(line, &rec); err != nil {
 			return // skip malformed lines
 		}
-		typ, _ := rec["type"].(string)
-
-		switch typ {
+		switch header.Type {
 		case "session_start":
-			if ts, ok := rec["timestamp"].(string); ok {
-				vs.Summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
-			}
-			if cwd, ok := rec["cwd"].(string); ok {
-				vs.Summary.CWD = cwd
-			}
-			if branch, ok := rec["gitBranch"].(string); ok {
-				vs.Summary.GitBranch = branch
-			}
-			if model, ok := rec["model"].(string); ok {
-				vs.Summary.Model = model
-			}
-			if rm, ok := rec["reviewMode"].(string); ok {
-				vs.Summary.ReviewMode = rm
-			}
-			if v, ok := rec["diffFrom"].(string); ok {
-				vs.Summary.DiffFrom = v
-			}
-			if v, ok := rec["diffTo"].(string); ok {
-				vs.Summary.DiffTo = v
-			}
-			if v, ok := rec["diffCommit"].(string); ok {
-				vs.Summary.DiffCommit = v
-			}
-
-		case "llm_request":
-			fp, _ := rec["filePath"].(string)
-			tt, _ := rec["taskType"].(string)
-			reqNo := 0
-			if n, ok := rec["request_no"].(float64); ok {
-				reqNo = int(n)
-			}
-			msgs := rec["messages"]
-
-			tc := &TaskCard{RequestMessages: msgs, RequestNo: reqNo}
-
-			fg := fileIndex[fp]
-			if fg == nil {
-				fg = &FileGroup{FilePath: fp, Tasks: make(map[TaskType][]*TaskCard)}
-				fileIndex[fp] = fg
-				vs.Files = append(vs.Files, fg)
-			}
-			fg.Tasks[TaskType(tt)] = append(fg.Tasks[TaskType(tt)], tc)
+			applySessionStart(&vs.Summary, rec)
 
 		case "llm_response":
 			fp, _ := rec["filePath"].(string)
@@ -786,6 +754,20 @@ func commentMarkID(recordUUID string, commentIndex int, rc *ReviewComment, occur
 	n := occurrences[key]
 	occurrences[key] = n + 1
 	return fmt.Sprintf("%s#%d", key, n)
+}
+
+func applySessionStart(summary *SessionSummary, rec map[string]any) {
+	ts, _ := rec["timestamp"].(string)
+	summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
+	summary.CWD, _ = rec["cwd"].(string)
+	summary.GitBranch, _ = rec["gitBranch"].(string)
+	summary.Model, _ = rec["model"].(string)
+	summary.ReviewMode, _ = rec["reviewMode"].(string)
+	summary.DiffFrom, _ = rec["diffFrom"].(string)
+	summary.DiffTo, _ = rec["diffTo"].(string)
+	summary.DiffCommit, _ = rec["diffCommit"].(string)
+	options, _ := rec["analysis"].(map[string]any)
+	summary.AnalysisEnabled, _ = options["enabled"].(bool)
 }
 
 func applySessionEnd(summary *SessionSummary, rec map[string]any) {

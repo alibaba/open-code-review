@@ -45,6 +45,13 @@ func TestDeleteSession_RemovesOnlyTheNamedSession(t *testing.T) {
 
 	target := seedAttributedSession(t, repoDir, "20250601-100000-aaaaaa")
 	keep := seedAttributedSession(t, repoDir, "20250601-110000-bbbbbb")
+	artifacts := filepath.Join(strings.TrimSuffix(target, ".jsonl"), "analysis")
+	if err := os.MkdirAll(artifacts, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifacts, "trace.jsonl"), []byte("private"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := DeleteSession(repoDir, "20250601-100000-aaaaaa"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
@@ -54,6 +61,9 @@ func TestDeleteSession_RemovesOnlyTheNamedSession(t *testing.T) {
 	}
 	if _, err := os.Stat(keep); err != nil {
 		t.Errorf("unrelated session was removed: %v", err)
+	}
+	if _, err := os.Stat(artifacts); !os.IsNotExist(err) {
+		t.Fatalf("analysis retained: %v", err)
 	}
 }
 
