@@ -96,11 +96,18 @@ MCP 서버는 사용자 설정 파일(`~/.opencodereview/config.json`)의 `mcp_s
 | `type` | 문자열 | | 로컬 하위 프로세스는 `stdio`(기본값), Streamable HTTP는 `remote`. |
 | `command` | 문자열 | `stdio`에 필수 | MCP 서버를 띄우는 실행 파일(예: `npx`, `uvx`, 절대 경로). |
 | `args` | 문자열 배열 | | `command`에 넘길 인자(`stdio` 전용). |
-| `url` | 문자열 | `remote`에 필수 | HTTP 또는 HTTPS MCP 엔드포인트. |
+| `url` | 문자열 | `remote`에 필수 | HTTPS MCP 엔드포인트. HTTP는 localhost 또는 루프백 IP에만 허용됩니다. |
 | `headers` | 객체 | | HTTP 헤더 이름과 문자열 값(`remote` 전용). 값은 연결 시점에 OCR의 환경에서 `$VAR` 또는 `${VAR}`를 펼칩니다. 빈 문자열로 펼쳐진 값은 빈 채로 보내지거나 무시되지 않고 **연결을 실패시킵니다**. 익명 접근이면 생략합니다. |
 | `tools` | 문자열 배열 | | 등록할 도구 이름의 허용 목록. 비어 있으면 서버가 제공하는 모든 도구를 등록합니다. |
 | `setup` | 문자열 | | 서버가 뜨기 전에 한 번 실행하는 셸 명령(`stdio` 전용, 예: 의존성 설치). 저장소 루트에서 5분 제한으로 돕니다. |
 | `env` | 문자열 배열 | | 하위 프로세스에 넘길 `KEY=VALUE` 형태의 추가 환경 변수(`stdio` 전용). |
+
+원격 MCP URL은 HTTPS를 사용해야 합니다. HTTP는 `localhost` 또는 `127.0.0.1`, `[::1]` 같은 루프백 IP를 사용하는 로컬 개발에서만 허용됩니다. 사설 LAN 주소나 와일드카드 수신 주소의 HTTP 엔드포인트는 거부됩니다. 리디렉션은 원래의 스킴, 호스트, 포트를 유지해야 합니다. 기존의 비루프백 HTTP 엔드포인트는 HTTPS로 이전해야 합니다.
+
+```bash
+ocr config set mcp_servers.dev.type remote
+ocr config set mcp_servers.dev.url http://127.0.0.1:8080/mcp
+```
 
 인증이 필요한 원격 서버라면 그 서버의 안내에 따라 `headers`를 설정하세요.
 `ocr config set`에 넘기는 JSON에 환경 변수 참조가 들어 있으면, OCR이 설정을

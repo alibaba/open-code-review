@@ -102,11 +102,18 @@ MCP servers live under the `mcp_servers` key in your user config file (`~/.openc
 | `type` | string | | `stdio` (default) for a local subprocess, or `remote` for Streamable HTTP. |
 | `command` | string | For `stdio` | Executable that starts the MCP server (e.g. `npx`, `uvx`, an absolute path). |
 | `args` | string array | | Arguments passed to `command` (`stdio` only). |
-| `url` | string | For `remote` | HTTP or HTTPS MCP endpoint. |
+| `url` | string | For `remote` | HTTPS MCP endpoint; HTTP only for localhost or loopback IPs. |
 | `headers` | object | | HTTP header names and string values (`remote` only). Values expand `$VAR` or `${VAR}` from OCR's environment at connection time; a value that expands to empty **fails the connection** rather than being sent empty or dropped. Omit for anonymous access. |
 | `tools` | string array | | Allowlist of tool names to register. Empty = register every tool the server offers. |
 | `setup` | string | | Shell command run once before the server starts (`stdio` only, e.g. install deps). Runs in the repo root with a 5-minute timeout. |
 | `env` | string array | | Extra subprocess environment variables in `KEY=VALUE` form (`stdio` only). |
+
+Remote MCP URLs require HTTPS. HTTP is allowed only for local development at `localhost` or a literal loopback IP such as `127.0.0.1` or `[::1]`; HTTP endpoints on private LAN addresses or wildcard listen addresses are rejected. Redirects must retain the original scheme, host and port. Existing non-loopback HTTP endpoints must be moved to HTTPS.
+
+```bash
+ocr config set mcp_servers.dev.type remote
+ocr config set mcp_servers.dev.url http://127.0.0.1:8080/mcp
+```
 
 For remote servers that require authentication, follow that server's
 instructions for `headers`. Use single quotes around JSON passed to
