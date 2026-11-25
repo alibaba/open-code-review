@@ -4,15 +4,15 @@ sidebar:
   order: 1
 ---
 
-把 OCR 注册为可调用的 skill，使 agent 框架能以正确的参数、前置检查与分级标准
+把 OCR 注册为可调用的 skill，使 agent 框架能以正确的参数和发现核验流程
 调用它——无需你在调用侧重新推导这些。
 
 ## 仓库里有什么
 
 仓库在
 [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md)
-提供 SKILL manifest。它把 OCR 声明为可调用 skill，含前置检查、调用工作流与
-评论分级标准（High/Medium/Low）。
+提供 SKILL manifest，定义如何调用 OCR、核验发现、报告不确定性以及按需修复。
+skill 目录还包含 GitHub PR 评审脚本；请安装完整目录，而不只是 SKILL.md。
 
 ## 安装
 
@@ -26,13 +26,13 @@ npx skills add alibaba/open-code-review --skill open-code-review
 
 这从
 [skills registry](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md)
-拉取 manifest 并放入项目，使任何尊重 skills 约定的编码 agent 在下次调用时加载
+安装 skill 目录并放入项目，使任何尊重 skills 约定的编码 agent 在下次调用时加载
 它。重新运行该命令以更新 skill 到最新版本。
 
-> **前置条件：** 首次运行时 skill 会自行安装 `ocr` CLI
-> （通过 `npm install -g @alibaba-group/open-code-review`），前提是二进制不在
-> `PATH` 上——见[skill 做什么](#what-the-skill-does)。你**确实**需要预先配置好
-> LLM；skill 无法替你完成，会停下来询问。见[配置](../../configuration/)。
+> **前置条件：** 原生模式需要在本地配置 OCR 模型提供商，请勿将凭证粘贴到对话中。
+> 若缺少 `ocr`，skill 的故障排查说明包含通过
+> `npm install -g @alibaba-group/open-code-review` 安装的步骤。
+> 只有 GitHub PR 模式还需要 Python 3 和已认证的 `gh`。见[配置](../../configuration/)。
 
 ### 方式 2：手动复制（系统级）
 
@@ -50,26 +50,27 @@ cp -R /path/to/open-code-review/skills/open-code-review ~/.claude/skills/
 SKILL.md 是一个 prompt：当调用方 agent 加载它时，由 agent 自身执行步骤。一次
 完整的 `/open-code-review`（或等价）请求流程如下展开：
 
-1. **前置检查。** 运行 `which ocr` 确认 CLI 在 `PATH` 上，再 `ocr llm test`
-   确认 LLM 可达。
-2. **CLI 缺失则自动安装。** 若 `which ocr` 报告 "NOT INSTALLED"，agent 运行
-   `npm install -g @alibaba-group/open-code-review` 并继续。不提示用户——这被视为
-   常规设置步骤。
-3. **无 LLM 配置则停下询问。** 若 `ocr llm test` 失败，agent *不会* 编造凭证。
-   它向用户展示两种受支持的方式（环境变量或 `ocr config set …`）并等待用户提供
-   API key。
-4. **提取业务上下文。** 检查评审目标（commit、分支、工作副本）并生成一个简短的
+1. **提取业务上下文。** 检查评审目标（commit、分支、工作副本）并生成一个简短的
    `--background` 字符串。
-5. **运行评审。** 调用
-   `ocr review --audience agent --background "…" [--commit | --from/--to]`，
-   根据用户是要评审工作副本、特定 commit 还是分支区间来选择参数。
-6. **分类与报告。** 用 SKILL.md 中的标准把 JSON 评论分为 **High** /
-   **Medium** / **Low**（bug 与安全问题为 High；吹毛求疵与疑似误报被静默丢弃），
-   再渲染 Markdown 摘要。
-7. **按需修复。** 若用户说“评审**并**修复”（或类似），对 High/Medium 项内联
-   应用安全修复；否则修改代码前先询问。
+2. **运行所请求的评审。** 本地评审直接调用
+   `ocr review --audience agent --background "…"`，已提交的变更按需添加
+   `--commit` 或 `--from`/`--to`，正常路径不先探测安装或连接状态。
+   新的 commit 或区间评审默认添加 `--analysis`，未指定其他格式时使用 JSON。
+   工作副本、预览、恢复、SARIF 输出，以及明确要求跳过分析时不添加分析。
+   调用失败后先排查，再重试。
+   GitHub PR 编号或 URL 则使用已安装的
+   `python3 "$SKILL_DIR/scripts/review_pr.py" <id-or-url>` 脚本。
+   编号使用当前检出目录的 `gh` 默认仓库，在 fork 中可能指向上游。
+   报告中列出 PR URL、评审版本、快照是否仍为最新以及产物路径。
+3. **核验与报告。** 对照评审代码检查每条发现，包括低严重程度的发现。
+   分为 **Reproduced（已复现）** 和 **Uncertain（未确定）** 两组，保留 OCR 的严重程度及组内顺序。
+   只有具体证据反驳发现时才省略，不能仅因不确定就丢弃。
+   保留原始结果，报告 Review 覆盖范围和缺口。联合运行时单独呈现 Analysis Markdown，
+   区分分析执行状态与模型对完整性的判断。
+4. **按需修复。** 仅在用户要求修改时应用安全且已核实的修复，重点处理 critical、high 和 medium 发现。
+   仅评审的请求不授权修改代码。PR 模式下保留快照，直到用户明确同意清理；清理后仍保留报告。
 
-完整 prompt——包括确切分级标准、输出模板与注意事项——位于
+完整 prompt——包括核验要求、报告方式、PR 模式限制与注意事项——位于
 [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md)。
 如想收紧上述任一项（比如把默认行为改为修复前总先询问），编辑你本地副本。
 
@@ -88,7 +89,7 @@ agent.run("Review my staged changes — focus on race conditions.")
 ```
 
 SDK 加载 SKILL.md prompt，由 agent 执行[skill 做什么](#what-the-skill-does)中
-所述工作流——包括 `npm install` 回退与无 LLM 配置时提示输入凭证的步骤。
+所述工作流——包括调用失败后的排查，以及需要凭证时请用户在本地配置。
 
 ## 其他 agent 框架
 

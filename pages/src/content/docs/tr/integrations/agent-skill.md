@@ -4,11 +4,11 @@ sidebar:
   order: 1
 ---
 
-OCR'yi çağrılabilir bir beceri olarak kaydedin. Böylece ajan çatısı, doğru seçenekler, ön koşul kontrolleri ve bulgu değerlendirme ölçütleriyle OCR'yi çağırabilir; bunları çağıran tarafta yeniden tanımlamanız gerekmez.
+OCR'yi çağrılabilir bir beceri olarak kaydedin. Böylece ajan çatısı, doğru seçenekler ve bulgu doğrulama iş akışıyla OCR'yi çağırabilir; bunları çağıran tarafta yeniden tanımlamanız gerekmez.
 
 ## Depoda neler var? {#what-ships-in-the-repo}
 
-Depo, [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md) konumunda bir SKILL bildirimi içerir. OCR'yi ön koşul kontrolleri, çağırma iş akışı ve yorum değerlendirme ölçütleri (High/Medium/Low) olan çağrılabilir bir beceri olarak tanımlar.
+Depo, [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md) konumunda bir SKILL bildirimi içerir. OCR'yi çağırma, bulguları doğrulama, belirsizliği raporlama ve istek üzerine düzeltme adımlarını tanımlar. Beceri dizini GitHub PR inceleme yardımcısını da içerir; yalnızca SKILL.md dosyasını değil, dizinin tamamını yükleyin.
 
 ## Yükleme {#install}
 
@@ -20,9 +20,9 @@ Beceriyi kullanmak istediğiniz projenin içinde çalıştırın:
 npx skills add alibaba/open-code-review --skill open-code-review
 ```
 
-Bildirim [beceri kaynağından](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md) alınarak projeye eklenir. Beceri düzenini destekleyen kodlama ajanları bir sonraki çağrıda bunu algılar. Son sürüme güncellemek için komutu yeniden çalıştırın.
+Beceri dizini [beceri kaynağından](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md) alınarak projeye eklenir. Beceri düzenini destekleyen kodlama ajanları bir sonraki çağrıda bunu algılar. Son sürüme güncellemek için komutu yeniden çalıştırın.
 
-> **Ön koşul:** İkili dosya `PATH` üzerinde yoksa beceri ilk çalıştırmada `ocr` CLI'sini kendisi yükler (`npm install -g @alibaba-group/open-code-review`). Aşağıdaki [Beceri ne yapar?](#what-the-skill-does) bölümüne bakın. LLM'yi ise **önceden yapılandırmanız gerekir**; beceri bunu sizin yerinize yapamaz ve durup sizden ister. [Yapılandırma](../../configuration/) sayfasına bakın.
+> **Ön koşullar:** Yerel mod, OCR model sağlayıcısının yerel olarak yapılandırılmasını gerektirir; kimlik bilgilerini sohbete yapıştırmayın. `ocr` eksikse sorun giderme adımları `npm install -g @alibaba-group/open-code-review` ile yüklemeyi açıklar. Yalnızca GitHub PR modu ayrıca Python 3 ve kimliği doğrulanmış `gh` gerektirir. [Yapılandırma](../../configuration/) sayfasına bakın.
 
 ### Seçenek 2: Elle kopyalama (sistem genelinde) {#option-2-manual-copy-system-wide}
 
@@ -39,15 +39,13 @@ Böylece beceri makinedeki tüm projelerde kullanılabilir.
 
 SKILL.md bir istemdir: çağıran ajan dosyayı yüklediğinde adımları kendisi yürütür. Tek bir `/open-code-review` (veya eşdeğeri) isteği şu şekilde ilerler:
 
-1. **Ön koşul kontrolü.** CLI'nin `PATH` üzerinde olduğunu doğrulamak için `which ocr`, LLM'ye erişilebildiğini doğrulamak için `ocr llm test` çalıştırılır.
-2. **Eksikse CLI'yi otomatik yükleme.** `which ocr`, “NOT INSTALLED” bildirirse ajan `npm install -g @alibaba-group/open-code-review` çalıştırıp devam eder. Bu rutin kurulum adımı için kullanıcıya soru sorulmaz.
-3. **LLM yapılandırılmamışsa durup sorma.** `ocr llm test` başarısız olursa ajan kimlik bilgisi **uydurmaz**. Desteklenen iki seçeneği (ortam değişkenleri veya `ocr config set …`) gösterir ve kullanıcının API anahtarı sağlamasını bekler.
-4. **İş bağlamını çıkarma.** İnceleme hedefini (commit'ler, dal, çalışma kopyası) inceleyip kısa bir `--background` metni oluşturur.
-5. **İncelemeyi çalıştırma.** Kullanıcının çalışma kopyasını, belirli bir commit'i veya dal aralığını inceleme isteğine göre seçenekleri belirleyerek `ocr review --audience agent --background "…" [--commit | --from/--to]` çağırır.
-6. **Sınıflandırma ve raporlama.** JSON yorumlarını SKILL.md ölçütlerine göre **High** / **Medium** / **Low** gruplarına ayırır. Hatalar ve güvenlik sorunları High düzeyindedir; küçük biçim önerileri ve olası yanlış pozitifler sessizce elenir. Ardından Markdown özeti sunulur.
-7. **İstek üzerine düzeltme.** Kullanıcı “incele **ve** düzelt” gibi bir istek verdiyse High/Medium bulgularına güvenli düzeltmeler uygulanır; aksi hâlde kod değiştirilmeden önce sorulur.
+1. **İş bağlamını çıkarma.** İnceleme hedefini (commit'ler, dal, çalışma kopyası) inceleyip kısa bir `--background` metni oluşturur.
+2. **İstenen incelemeyi çalıştırma.** Yerel incelemelerde doğrudan `ocr review --audience agent --background "…"` çağrılır; commit edilmiş değişiklikler için `--commit` veya `--from`/`--to` eklenir. Normal akışta önce yükleme ya da bağlantı kontrolü yapılmaz. Yeni commit ve aralık incelemelerine varsayılan olarak `--analysis` eklenir; başka biçim istenmediyse JSON kullanılır. Çalışma kopyası, önizleme, devam ettirme, SARIF veya analizin açıkça istenmediği durumlarda analiz eklenmez. Başarısız çağrının nedeni araştırılmadan yeniden denenmez.
+   GitHub PR numarası veya URL'si için yüklü `python3 "$SKILL_DIR/scripts/review_pr.py" <id-or-url>` yardımcısı kullanılır. Numara, mevcut çalışma kopyasının `gh` varsayılan deposunu seçer; bu, bir fork'un üst deposu olabilir. PR URL'si, incelenen revizyonlar, anlık görüntünün güncelliği ve çıktı yolu raporlanır.
+3. **Doğrulama ve raporlama.** Düşük önem derecesindekiler dâhil her bulgu incelenen kodla karşılaştırılır. **Reproduced (yeniden üretildi)** ve **Uncertain (kesinleşmedi)** grupları kullanılır; OCR'nin önem derecesi ve her grup içindeki sırası korunur. Bir bulgu yalnızca somut karşı kanıt varsa çıkarılır; belirsizlik tek başına eleme nedeni değildir. Ham sonuç korunur, Review kapsamı ve eksikleri raporlanır. Birlikte çalıştırıldığında Analysis Markdown'ı ayrı sunulur; yürütme durumu ile modelin tamamlanmışlık değerlendirmesi birbirinden ayrılır.
+4. **İstek üzerine düzeltme.** Yalnızca kullanıcı düzenleme istediğinde güvenli ve doğrulanmış düzeltmeler uygulanır; critical, high ve medium bulgularına öncelik verilir. Yalnızca inceleme isteği kod değiştirme yetkisi vermez. PR modunda anlık görüntü, kullanıcı açıkça temizlenmesini onaylayana kadar saklanır; temizlikten sonra raporlar korunur.
 
-Tam değerlendirme ölçütleri, çıktı şablonu ve dikkat edilmesi gereken noktaları içeren istem [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md) dosyasındadır. Davranışı değiştirmek için (örneğin düzeltmeden önce her zaman sormasını sağlamak üzere) yerel kopyanızı düzenleyin.
+Doğrulama gerekliliklerini, raporlamayı, PR modu sınırlamalarını ve dikkat edilmesi gereken noktaları içeren istem [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md) dosyasındadır. Davranışı değiştirmek için (örneğin düzeltmeden önce her zaman sormasını sağlamak üzere) yerel kopyanızı düzenleyin.
 
 ## Anthropic Agent SDK {#anthropic-agent-sdk}
 
@@ -63,7 +61,7 @@ agent = Agent(
 agent.run("Review my staged changes — focus on race conditions.")
 ```
 
-SDK, SKILL.md istemini yükler; ajan [Beceri ne yapar?](#what-the-skill-does) bölümündeki iş akışını yürütür. Buna gerektiğinde `npm install` ile yükleme ve LLM yapılandırılmamışsa kimlik bilgisi isteme de dâhildir.
+SDK, SKILL.md istemini yükler; ajan [Beceri ne yapar?](#what-the-skill-does) bölümündeki iş akışını yürütür. Başarısız çağrıları araştırır ve gerektiğinde kullanıcıdan kimlik bilgilerini yerel olarak yapılandırmasını ister.
 
 ## Diğer ajan çatıları {#other-agent-frameworks}
 
