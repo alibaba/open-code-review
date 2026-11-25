@@ -376,6 +376,26 @@ func TestLogExclusions_SecretPath(t *testing.T) {
 	}
 }
 
+func TestLogExclusions_Generated(t *testing.T) {
+	agent := New(Args{})
+	decisions := []fileDecision{
+		{Diff: model.Diff{NewPath: "api/zz_generated.deepcopy.go"}, Reason: ExcludeGenerated},
+	}
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	agent.logExclusions(decisions)
+	restore()
+
+	got := buf.String()
+	if !strings.Contains(got, "api/zz_generated.deepcopy.go") || !strings.Contains(got, "generated code") {
+		t.Errorf("log = %q, want the skipped path with generated-specific wording", got)
+	}
+	if !strings.Contains(got, "Filtered 1 file(s)") {
+		t.Errorf("log = %q, want the generated exclusion counted in the rollup", got)
+	}
+}
+
 func TestExtFromPath(t *testing.T) {
 	a := New(Args{})
 
