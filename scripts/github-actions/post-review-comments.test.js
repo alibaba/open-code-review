@@ -5427,13 +5427,16 @@ async function testCheckpointCarryNeverErasesExistingMarker() {
   };
   for (const [label, result] of Object.entries(nonAdvancing)) {
     const gh = makeGithub({ existingSummary: sticky() });
+    const outputs = {};
     await runPostReviewComments(
       Object.assign(
-        { github: gh, context, core: { setOutput() {} }, fs: mockFs(JSON.stringify(result), "") },
+        { github: gh, context, core: { setOutput: (k, v) => { outputs[k] = v; } }, fs: mockFs(JSON.stringify(result), "") },
         ckRunOptions({ checkpointCarry: "" })
       )
     );
     const body = lastSummaryBody(gh);
+    assert.strictEqual(gh.createReviewCalls.flatMap((call) => call.comments).length, result.comments.length, `${label}: publish the available findings`);
+    assert.strictEqual(outputs.checkpoint_after, "", `${label}: the partial run must not advance the checkpoint`);
     assert.strictEqual(body.split(CARRY).length, 2, `${label}: the existing marker must survive exactly once`);
   }
 

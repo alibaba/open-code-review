@@ -504,137 +504,164 @@ func TestManifestFlowBudgetAndSkipped(t *testing.T) {
 	})
 }
 
-// groupedBudgetPartialClient plays two roles for one grouped-review round trip:
-// the grouping call (no Tools on the request) always merges every file into one
-// group, and the main-task call (Tools present) files a comment for the first
-// round then keeps returning an unregistered tool name — a valid, non-empty
-// result that is neither task_done nor an empty round — until the round budget
-// is exhausted by the caller's MaxToolRequestTimes.
 type groupedBudgetPartialClient struct {
-	round int32 // atomic
+	rejectFinding bool
+	round         atomic.Int32
+	filterCalls   atomic.Int32
 }
 
 func (c *groupedBudgetPartialClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	prompt, _ := req.Messages[0].Content.(string)
 	if len(req.Tools) == 0 {
 		content := `[{"label":"pair","files":[0,1]}]`
+		if strings.Contains(prompt, "c.go") {
+			content = `[{"label":"pair","files":[0,1]},{"label":"completed","files":[2]}]`
+		}
 		return &llm.ChatResponse{
 			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
 			Model:   "fake",
 		}, nil
 	}
-	if atomic.AddInt32(&c.round, 1) == 1 {
-		return &llm.ChatResponse{
-			Choices: []llm.Choice{{
-				Message: llm.ResponseMessage{
-					ToolCalls: []llm.ToolCall{{
-						ID:   "1",
-						Type: "function",
-						Function: llm.FunctionCall{
-							Name:      "code_comment",
-							Arguments: `{"comments":[{"path":"a.go","content":"missing a null check here"}]}`,
-						},
-					}},
-				},
-				FinishReason: "tool_calls",
-			}},
-			Model: "fake",
-		}, nil
+	var call llm.FunctionCall
+	switch {
+	case req.Tools[0].Function.Name == "report_incorrect_comments":
+		c.filterCalls.Add(1)
+		call = llm.FunctionCall{Name: "approve_all_comments", Arguments: "{}"}
+		if c.rejectFinding {
+			call = llm.FunctionCall{Name: "report_incorrect_comments", Arguments: `{"comment_ids":["c-0"]}`}
+		}
+	case strings.Contains(prompt, "+completed"):
+		return agentTaskDoneResponse(), nil
+	case c.round.Add(1) == 1:
+		call = llm.FunctionCall{
+			Name:      "code_comment",
+			Arguments: `{"comments":[{"path":"a.go","existing_code":"addedA()","content":"missing a null check here"}]}`,
+		}
+	default:
+		call = llm.FunctionCall{Name: "keep_exploring", Arguments: "{}"}
 	}
 	return &llm.ChatResponse{
 		Choices: []llm.Choice{{
-			Message: llm.ResponseMessage{
-				ToolCalls: []llm.ToolCall{{
-					ID:       "x",
-					Type:     "function",
-					Function: llm.FunctionCall{Name: "keep_exploring", Arguments: "{}"},
-				}},
-			},
+			Message: llm.ResponseMessage{ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function", Function: call,
+			}}},
 			FinishReason: "tool_calls",
 		}},
 		Model: "fake",
 	}, nil
 }
 
-// A group that never calls task_done before exhausting its round budget must
-// classify coverage per file, not per group: a.go already has a comment from
-// round 1, so it belongs in Completed even though the shared conversation
-// stopped on StopMaxRounds; b.go never got a comment, so it stays Failed. The
-// mixed outcome must read as partial (exit 0), not failed (exit 1) — the
-// bitcoin__bitcoin regression this guards against had exactly one file with
-// output and one without in the same stuck group, and the run reported "2 of 2
-// selected item(s) failed" despite the real comment.
-func TestManifestFlowGroupBudgetStopIsPartialWhenSomeFilesHaveComments(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	repoDir := t.TempDir()
-	diffs := []model.Diff{
-		{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
-		{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
-	}
-	client := &groupedBudgetPartialClient{}
-	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
-		ReviewMode: session.ReviewModeRange,
-		DiffFrom:   "main",
-		DiffTo:     "feature",
-		Operation:  session.OperationReview,
-	})
-	// code_comment is only wired up if a CodeCommentProvider is registered in
-	// Tools — the loop looks the provider up by name (loop.go:558) before it
-	// ever reaches the code_comment-specific handling, even though it is a
-	// built-in tool name.
-	collector := tool.NewCommentCollector()
-	reg := tool.NewRegistry()
-	reg.Register(&tool.CodeCommentProvider{Collector: collector})
-	// MaxToolRequestTimes and GroupingTask must be set before New(), since
-	// reviewtask.Runner snapshots Template by value at construction time — mutating
-	// a.args.Template afterward (as other tests in this file do for MaxTokens,
-	// which executeGroupSubtask re-reads from a.args.Template directly) would
-	// not reach the runner's copy that RunMainTask actually consumes.
-	a := New(Args{
-		RepoDir:          repoDir,
-		From:             "main",
-		To:               "feature",
-		ReviewMode:       session.ReviewModeRange,
-		LLMClient:        client,
-		Model:            "fake",
-		Session:          sh,
-		CommentCollector: collector,
-		Tools:            reg,
-		Template: template.Template{
-			MaxTokens:           100000,
-			MaxToolRequestTimes: 3,
-			GroupingTask: &template.LlmConversation{
-				Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
-			},
-			MainTask: template.LlmConversation{
-				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diffs}}"}},
-			},
-		},
-		MainToolDefs: []llm.ToolDef{
-			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "finish the review"}},
-			{Type: "function", Function: llm.FunctionDef{Name: "code_comment", Description: "file a review comment"}},
-		},
-	})
-	a.diffs = diffs
-	a.currentDate = "2026-07-26 12:00"
+func TestManifestFlowGroupBudgetStopOnlyReusesCompletedGroup(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		rejectFinding bool
+	}{
+		{name: "confirmed finding and completed sibling"},
+		{name: "all findings filtered", rejectFinding: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setTestHome(t, t.TempDir())
+			repoDir := t.TempDir()
+			diffs := []model.Diff{
+				{OldPath: "a.go", NewPath: "a.go", Diff: "@@ -0,0 +1 @@\n+addedA()", Insertions: 1},
+				{OldPath: "b.go", NewPath: "b.go", Diff: "+pendingB", Insertions: 1},
+			}
+			if !tc.rejectFinding {
+				diffs = append(diffs, model.Diff{OldPath: "c.go", NewPath: "c.go", Diff: "+completed", Insertions: 1})
+			}
+			newAgent := func(client llm.LLMClient, resume *session.ResumeState) *Agent {
+				sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
+					ReviewMode: session.ReviewModeRange,
+					DiffFrom:   "main",
+					DiffTo:     "feature",
+					Operation:  session.OperationReview,
+				})
+				t.Cleanup(func() { _ = sh.Finalize() })
+				reg := tool.NewRegistry()
+				reg.Register(&tool.CodeCommentProvider{})
+				a := New(Args{
+					RepoDir:           repoDir,
+					From:              "main",
+					To:                "feature",
+					ReviewMode:        session.ReviewModeRange,
+					LLMClient:         client,
+					Model:             "fake",
+					Session:           sh,
+					Resume:            resume,
+					Tools:             reg,
+					CommentWorkerPool: NewCommentWorkerPool(1),
+					Template: template.Template{
+						MaxTokens:           100000,
+						MaxToolRequestTimes: 3,
+						GroupingTask: &template.LlmConversation{
+							Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+						},
+						MainTask: template.LlmConversation{
+							Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diffs}}"}},
+						},
+						ReviewFilterTask: &template.LlmConversation{
+							Messages: []template.ChatMessage{{Role: "user", Content: "{{comments}}"}},
+						},
+					},
+					MainToolDefs: []llm.ToolDef{
+						{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+						{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+					},
+				})
+				a.diffs = diffs
+				return a
+			}
 
-	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
-		t.Fatalf("a stuck group with partial output must not be a dispatch error: %v", err)
-	}
-	manifest := finishManifestFlow(t, a)
-	if manifest.TerminalState != session.StatePartial {
-		t.Fatalf("terminal = %q, want partial; manifest = %+v", manifest.TerminalState, manifest)
-	}
-	if manifest.RunFailure != nil {
-		t.Fatalf("run_failure = %+v, want nil for a per-item budget stop", manifest.RunFailure)
-	}
-	if len(manifest.Coverage.Completed) != 1 || manifest.Coverage.Completed[0].Path != "a.go" {
-		t.Fatalf("completed coverage = %+v, want exactly a.go", manifest.Coverage.Completed)
-	}
-	if len(manifest.Coverage.Failed) != 1 || manifest.Coverage.Failed[0].Path != "b.go" {
-		t.Fatalf("failed coverage = %+v, want exactly b.go", manifest.Coverage.Failed)
-	}
-	if manifest.Coverage.Failed[0].Classification != session.FailureBudget {
-		t.Fatalf("b.go classification = %q, want budget", manifest.Coverage.Failed[0].Classification)
+			client := &groupedBudgetPartialClient{rejectFinding: tc.rejectFinding}
+			parent := newAgent(client, nil)
+			comments, err := parent.dispatchSubtasks(t.Context())
+			if calls := client.filterCalls.Load(); calls != 1 {
+				t.Fatalf("filter requests = %d, want 1", calls)
+			}
+			manifest := finishManifestFlow(t, parent)
+			if manifest.RunFailure != nil {
+				t.Fatalf("run_failure = %+v, want nil for an item budget stop", manifest.RunFailure)
+			}
+			failed := make(map[string]session.FailureClass)
+			for _, item := range manifest.Coverage.Failed {
+				failed[item.Path] = item.Classification
+			}
+			if len(failed) != 2 || failed["a.go"] != session.FailureBudget || failed["b.go"] != session.FailureBudget {
+				t.Fatalf("failed coverage = %+v, want a.go and b.go failed by budget", manifest.Coverage.Failed)
+			}
+			if tc.rejectFinding {
+				if err == nil || len(comments) != 0 || manifest.TerminalState != session.StateFailed {
+					t.Fatalf("all findings filtered: error = %v, comments = %+v, terminal = %q", err, comments, manifest.TerminalState)
+				}
+				return
+			}
+			if err != nil || len(comments) != 1 || comments[0].Path != "a.go" || comments[0].StartLine != 1 ||
+				manifest.TerminalState != session.StatePartial {
+				t.Fatalf("confirmed finding: error = %v, comments = %+v, terminal = %q", err, comments, manifest.TerminalState)
+			}
+			if completed := manifest.Coverage.Completed; len(completed) != 1 || completed[0].Path != "c.go" {
+				t.Fatalf("completed coverage = %+v, want only c.go", completed)
+			}
+
+			resume, err := session.LoadReviewResumeState(repoDir, parent.SessionID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			spy := &promptSpy{}
+			child := newAgent(spy, resume)
+			comments, err = child.dispatchSubtasks(t.Context())
+			if err != nil || len(comments) != 0 {
+				t.Fatalf("resumed review: error = %v, comments = %+v", err, comments)
+			}
+			childManifest := finishManifestFlow(t, child)
+			if reused := childManifest.Coverage.Reused; len(reused) != 1 || reused[0].Path != "c.go" {
+				t.Fatalf("reused coverage = %+v, want only c.go", reused)
+			}
+			prompts := strings.Join(spy.prompts, "\n")
+			if !strings.Contains(prompts, "+addedA()") || !strings.Contains(prompts, "+pendingB") || strings.Contains(prompts, "+completed") {
+				t.Fatalf("resumed prompts = %q, want only a.go and b.go diff bodies", prompts)
+			}
+		})
 	}
 }
 

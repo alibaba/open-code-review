@@ -358,8 +358,9 @@ type ManifestBuilder struct {
 	input       ManifestInput
 	execution   ManifestExecution
 
-	runFailure     *RunFailure
-	pendingFailure *pendingFailureCause
+	runFailure            *RunFailure
+	pendingFailure        *pendingFailureCause
+	hasFailedItemComments bool
 
 	sealed bool
 	frozen bool
@@ -615,7 +616,7 @@ func (b *ManifestBuilder) Sealed() bool {
 // empty waive reason, a conflicting transition (a different terminal state than
 // already recorded) and any call after freeze all return an error rather than
 // silently no-op'ing. Re-applying the same terminal state is idempotent.
-func (b *ManifestBuilder) transition(itemID string, to itemState, class FailureClass, reason string) error {
+func (b *ManifestBuilder) transition(itemID string, to itemState, class FailureClass, reason string, hasComments bool) error {
 	if b == nil {
 		return errNilBuilder
 	}
@@ -664,6 +665,7 @@ func (b *ManifestBuilder) transition(itemID string, to itemState, class FailureC
 	if to == stateFailed {
 		bi.item.Classification = class
 		bi.item.Reason = sanitized
+		b.hasFailedItemComments = b.hasFailedItemComments || hasComments
 	}
 	if to == stateWaived {
 		bi.item.Reason = sanitized
@@ -748,20 +750,21 @@ func sanitizeReason(s string) string {
 // MarkCompleted records that the item's subtask completed. Whether it produced
 // comments does not affect completion.
 func (b *ManifestBuilder) MarkCompleted(itemID string) error {
-	return b.transition(itemID, stateCompleted, "", "")
+	return b.transition(itemID, stateCompleted, "", "", false)
 }
 
 // MarkReused records that the item was reused from a parent session checkpoint.
 func (b *ManifestBuilder) MarkReused(itemID string) error {
-	return b.transition(itemID, stateReused, "", "")
+	return b.transition(itemID, stateReused, "", "", false)
 }
 
 // MarkFailed records that the item failed. class must be a valid, specific
 // failure class — an empty or unknown-string class is rejected rather than
 // downgraded, so an unclassified failure is never fabricated. reason must
 // already be a redacted summary; the builder redacts again as a floor.
-func (b *ManifestBuilder) MarkFailed(itemID string, class FailureClass, reason string) error {
-	return b.transition(itemID, stateFailed, class, reason)
+// Confirmed comments count as usable output when deriving the run's terminal state.
+func (b *ManifestBuilder) MarkFailed(itemID string, class FailureClass, reason string, comments ...model.LlmComment) error {
+	return b.transition(itemID, stateFailed, class, reason, len(comments) > 0)
 }
 
 // MarkWaived records that the user explicitly waived this selected item, which
@@ -770,7 +773,7 @@ func (b *ManifestBuilder) MarkFailed(itemID string, class FailureClass, reason s
 // session is re-registered as selected in this child run and waived here; the
 // parent manifest is never modified.
 func (b *ManifestBuilder) MarkWaived(itemID, reason string) error {
-	return b.transition(itemID, stateWaived, "", reason)
+	return b.transition(itemID, stateWaived, "", reason, false)
 }
 
 // Frozen reports whether Finalize has already run.
@@ -866,7 +869,7 @@ func (b *ManifestBuilder) Finalize(elapsed time.Duration) (RunManifest, error) {
 		RunID:         b.runID,
 		ParentRunID:   b.parentRunID,
 		Operation:     b.operation,
-		TerminalState: computeTerminal(cov, b.runFailure),
+		TerminalState: computeTerminal(cov, b.runFailure, b.hasFailedItemComments),
 		Repository:    b.repository,
 		Input:         b.input,
 		Execution:     b.execution,
@@ -1002,11 +1005,8 @@ func (b *ManifestBuilder) buildCoverageLocked() Coverage {
 	return cov
 }
 
-// computeTerminal derives the terminal state from coverage plus run_failure.
-// A run_failure forces failed while leaving the recorded outcomes intact. After
-// the Finalize sweep every item is terminal, so "no failed" means all
-// completed/reused/waived.
-func computeTerminal(cov Coverage, rf *RunFailure) TerminalState {
+// A run failure takes precedence over coverage and any usable findings.
+func computeTerminal(cov Coverage, rf *RunFailure, hasFailedItemComments bool) TerminalState {
 	if rf != nil {
 		return StateFailed
 	}
@@ -1018,7 +1018,7 @@ func computeTerminal(cov Coverage, rf *RunFailure) TerminalState {
 	switch {
 	case failed == 0:
 		return StateComplete
-	case failed == selected:
+	case failed == selected && !hasFailedItemComments:
 		return StateFailed
 	default:
 		return StatePartial

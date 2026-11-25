@@ -235,6 +235,14 @@ ocr review --resume <session-id>   # 工作区（不传模式参数）
 
 被拒绝的恢复不会留下任何产物：不创建 session、不写 manifest、不调用 LLM。
 
+评审因预算耗尽而停止时，已确认的评论仍会输出，也可通过
+`ocr session comments <session-id>` 查询。未完成的文件列在 manifest 的
+`coverage.failed` 中。`--resume` 会重新评审这些文件，并采用本次评审的评论。
+如果补交轮成功完成该组评审，该组文件可以复用。
+
+旧会话仍按原记录读取。要重审之前误标为已完成的文件，可运行不带
+`--resume` 的 `ocr review`，或在 GitHub Actions 中使用 `full_review`。
+
 ### 输出
 
 #### Text（默认，`--audience human`）
@@ -345,7 +353,7 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 
 | 码 | 含义 |
 |---|---|
-| `0` | 评审完成或跳过（可能零评论或有非致命警告）。仅由已配置预算限制导致的部分评审也以 `0` 退出。 |
+| `0` | 评审完成或跳过（可能零评论或有非致命警告）。仅因已配置的预算限制而得到 `partial` 结果时，也以 `0` 退出。 |
 | `1` | 致命错误，或 timeout、provider 错误、配置错误等 per-group 操作性失败。CLI 会在返回错误前输出已有结果。 |
 
 警告会内联打印；JSON 模式下会加入 `warnings` 数组。可查看

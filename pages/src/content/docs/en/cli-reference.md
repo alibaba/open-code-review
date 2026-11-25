@@ -269,6 +269,16 @@ would review the same thing the parent did:
 
 A rejected resume writes nothing: no session, no manifest, no LLM call.
 
+When a review stops at a budget limit, confirmed findings are still included in
+the output and available through `ocr session comments <session-id>`. The
+manifest lists unfinished files under `coverage.failed`. On `--resume`, those
+files are reviewed again and use the new run's findings. A successful final
+submission completes the group's files, so they can be reused.
+
+Older sessions keep their recorded status. To review files that were previously
+marked complete in error, run `ocr review` without `--resume`, or use
+`full_review` in GitHub Actions.
+
 ### Output
 
 #### Text (default, `--audience human`)
@@ -381,7 +391,7 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 
 | Code | Meaning |
 |---|---|
-| `0` | Review completed or was skipped (possibly with zero comments or non-fatal warnings). A partial review caused only by configured budget limits also exits `0`. |
+| `0` | Review completed or was skipped (possibly with zero comments or non-fatal warnings). A `partial` result caused only by configured budget limits also exits `0`. |
 | `1` | Fatal error, or an operational per-group failure such as a timeout, provider error, or bad configuration. The CLI emits available results before returning the error. |
 
 Warnings are printed inline; in JSON mode they're added to the `warnings`

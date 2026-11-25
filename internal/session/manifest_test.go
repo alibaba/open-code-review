@@ -83,11 +83,37 @@ func TestTerminalPartial(t *testing.T) {
 }
 
 func TestTerminalFailedAll(t *testing.T) {
-	b := newBuilderWith("a", "b")
-	b.MarkFailed("a", FailureProvider, "x")
-	b.MarkFailed("b", FailureTimeout, "y")
-	if got := mustFinalize(t, b).TerminalState; got != StateFailed {
-		t.Fatalf("terminal = %q, want failed", got)
+	for _, tc := range []struct {
+		name       string
+		comments   []model.LlmComment
+		runFailure RunFailureClass
+		want       TerminalState
+	}{
+		{name: "no findings", want: StateFailed},
+		{name: "confirmed finding", comments: []model.LlmComment{{Content: "finding"}}, want: StatePartial},
+		{name: "cancelled with a finding", comments: []model.LlmComment{{Content: "finding"}}, runFailure: RunFailureCancelled, want: StateFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newBuilderWith("a", "b")
+			if err := b.MarkFailed("a", FailureBudget, "round budget exhausted", tc.comments...); err != nil {
+				t.Fatal(err)
+			}
+			if err := b.MarkFailed("b", FailureBudget, "round budget exhausted"); err != nil {
+				t.Fatal(err)
+			}
+			if tc.runFailure != "" {
+				if err := b.SetRunFailure(tc.runFailure, "review cancelled"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			m := mustFinalize(t, b)
+			if m.TerminalState != tc.want {
+				t.Fatalf("terminal = %q, want %q", m.TerminalState, tc.want)
+			}
+			if len(m.Coverage.Failed) != 2 || len(m.Coverage.Completed) != 0 {
+				t.Fatalf("coverage = %+v, want both items failed", m.Coverage)
+			}
+		})
 	}
 }
 

@@ -279,6 +279,7 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 		s.TotalComments += countCommentsRaw(rec.Comments)
 	case "review_item_failed":
 		s.FailedFiles++
+		s.TotalComments += countCommentsRaw(rec.Comments)
 	case "session_end":
 		s.Aborted = false
 		if rec.RunManifest != nil && rec.RunManifest.SchemaVersion == ManifestSchemaVersion {

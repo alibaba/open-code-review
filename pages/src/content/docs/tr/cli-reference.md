@@ -206,6 +206,17 @@ Devam ettirme bilinçli olarak katıdır. Kontrol noktaları yalnızca önceki �
 
 Reddedilen devam isteği hiçbir şey yazmaz: oturum, bildirim veya LLM çağrısı oluşturulmaz.
 
+Bütçe sınırına ulaşıldığında inceleme dursa bile doğrulanmış bulgular çıktıda
+yer alır ve `ocr session comments <session-id>` ile görülebilir. İncelemesi
+tamamlanmayan dosyalar manifestin `coverage.failed` alanında listelenir.
+`--resume` bu dosyaları yeniden inceler ve yeni çalıştırmanın bulgularını
+kullanır. Son teslim turu grubun incelemesini tamamlarsa grubun dosyaları
+yeniden kullanılabilir.
+
+Eski oturumlar kayıtlı durumlarını korur. Yanlışlıkla tamamlandı olarak
+işaretlenmiş dosyaları yeniden incelemek için `ocr review` komutunu
+`--resume` olmadan çalıştırın veya GitHub Actions'ta `full_review` kullanın.
+
 ### Çıktı {#output}
 
 #### Metin (varsayılan, `--audience human`) {#text-default-audience-human}
@@ -309,7 +320,7 @@ ocr review --format json | jq .summary   # stdout is a single JSON document
 
 | Kod | Anlamı |
 | --- | --- |
-| `0` | İnceleme tamamlandı veya atlandı; sıfır yorum ya da işlemi durdurmayan uyarılar olabilir. Yalnızca yapılandırılmış bütçe sınırından kaynaklanan kısmi inceleme de `0` döndürür. |
+| `0` | İnceleme tamamlandı veya atlandı. Yorum olmayabilir veya işlemi durdurmayan uyarılar olabilir. Yalnızca yapılandırılmış bütçe sınırından kaynaklanan `partial` sonuç da `0` döndürür. |
 | `1` | Kritik hata veya zaman aşımı, sağlayıcı hatası, yanlış yapılandırma gibi grup başına işletim hatası. CLI hatayı döndürmeden önce mevcut sonuçları yazdırır. |
 
 Uyarılar metin içinde gösterilir; JSON'da `warnings` dizisine eklenir. Etkilenen dosyalar ve hata sınıfları için `manifest.coverage.failed` alanını inceleyin.

@@ -331,8 +331,8 @@ func (sh *SessionHistory) RecordResumeLineage(l *ResumeLineage) {
 	}
 }
 
-// RecordReviewItemFailed persists an incomplete file-level checkpoint.
-func (sh *SessionHistory) RecordReviewItemFailed(filePath, oldPath, newPath, fingerprint, errorMsg string) {
+// RecordReviewItemFailed persists an incomplete file's reason and confirmed comments.
+func (sh *SessionHistory) RecordReviewItemFailed(filePath, oldPath, newPath, fingerprint, errorMsg string, comments ...model.LlmComment) {
 	if sh == nil {
 		return
 	}
@@ -343,7 +343,7 @@ func (sh *SessionHistory) RecordReviewItemFailed(filePath, oldPath, newPath, fin
 		sh.GetOrCreateFileSession(filePath)
 	}
 	if p := sh.persist; p != nil {
-		p.WriteReviewItemFailed(filePath, oldPath, newPath, fingerprint, errorMsg)
+		p.WriteReviewItemFailed(filePath, oldPath, newPath, fingerprint, errorMsg, comments)
 	}
 }
 
