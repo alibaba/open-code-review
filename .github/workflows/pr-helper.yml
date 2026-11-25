@@ -31,3 +31,12 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 scripts/github-actions/test_review_pr.py
+
+  windows-cleanup:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python scripts/github-actions/test_review_pr.py SnapshotCleanup

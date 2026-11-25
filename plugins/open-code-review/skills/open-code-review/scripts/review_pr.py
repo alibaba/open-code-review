@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -102,6 +103,16 @@ def verify_tree(folder, head, env):
         raise ValueError(f"worktree changed; retained {tree}")
 
 
+def retry_readonly_unlink(function, path, error):
+    if os.name != "nt" or function is not os.unlink or not isinstance(error, PermissionError):
+        raise error
+    info = os.stat(path, follow_symlinks=False)
+    if not stat.S_ISREG(info.st_mode) or not info.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY:
+        raise error
+    os.chmod(path, info.st_mode | stat.S_IWRITE)
+    function(path)
+
+
 def release(folder, env):
     store, tree = folder / "objects.git", folder / "worktree"
     if store.is_symlink() or tree.is_symlink():
@@ -121,7 +132,10 @@ def release(folder, env):
     elif tree in worktrees:
         print("The recorded worktree is missing. Any moved files are left in place but will lose their Git metadata.",
               file=sys.stderr)
-    shutil.rmtree(store)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(store, onexc=retry_readonly_unlink)
+    else:
+        shutil.rmtree(store, onerror=lambda function, path, error: retry_readonly_unlink(function, path, error[1]))
 
 
 def prepare_review_policy(tree, base, head, env):
