@@ -404,7 +404,7 @@ class SnapshotCleanup(unittest.TestCase):
             path.write_bytes(b"keep")
             error = PermissionError("unrelated permission failure")
             with self.assertRaises(PermissionError) as raised:
-                helper.retry_readonly_unlink(os.unlink, path, (PermissionError, error, None))
+                helper.retry_readonly_unlink(os.unlink, path, error)
             self.assertIs(raised.exception, error)
             self.assertEqual(path.read_bytes(), b"keep")
 
