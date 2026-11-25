@@ -914,7 +914,7 @@ func (a *Agent) finishRelocatedComments(ctx context.Context, relocated map[strin
 			target := slices.IndexFunc(a.diffs, func(d model.Diff) bool {
 				return d.NewPath == path || (d.NewPath == "" && d.OldPath == path)
 			})
-			if target >= 0 {
+			if target >= 0 && a.reviewFilterEnabled(ctx, path) {
 				rejected = a.reviewFilterRemovals(ctx, path, a.diffs[target:target+1], candidates)
 			}
 		}
@@ -1934,8 +1934,7 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 // comments for the group's paths are filtered (legacy full-group behavior).
 func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from map[string]int) {
 	groupKey := fileGroupKey(g.Diffs)
-	if ft := a.args.Template.ReviewFilterTask; a.args.SkipFilter || ft == nil || len(ft.Messages) == 0 {
-		a.reviewFilterRemovals(ctx, groupKey, g.Diffs, nil)
+	if !a.reviewFilterEnabled(ctx, groupKey) {
 		return
 	}
 
@@ -1967,26 +1966,34 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 	}
 }
 
+func (a *Agent) reviewFilterEnabled(ctx context.Context, groupKey string) bool {
+	ft := a.args.Template.ReviewFilterTask
+	if ft == nil || len(ft.Messages) == 0 {
+		return false
+	}
+	if !a.args.SkipFilter {
+		return true
+	}
+
+	_, span := telemetry.StartSpan(ctx, "review_filter.execute")
+	defer span.End()
+	telemetry.SetAttr(span, "group.label", groupKey)
+	telemetry.SetAttr(span, "skipped", true)
+	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for group %q (--no-filter)\n", groupKey)
+	return false
+}
+
 func (a *Agent) reviewFilterRemovals(ctx context.Context, groupKey string, diffs []model.Diff, candidates []model.LlmComment) map[int]struct{} {
 	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
 	defer span.End()
 	telemetry.SetAttr(span, "group.label", groupKey)
 
-	ft := a.args.Template.ReviewFilterTask
-	if ft == nil || len(ft.Messages) == 0 {
-		return nil
-	}
-
-	if a.args.SkipFilter {
-		telemetry.SetAttr(span, "skipped", true)
-		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for group %q (--no-filter)\n", groupKey)
-		return nil
-	}
-
 	if len(candidates) == 0 {
 		return nil
 	}
 	telemetry.SetAttr(span, "comments.before", len(candidates))
+
+	ft := a.args.Template.ReviewFilterTask
 
 	commentsJSON := buildGroupFilterCommentsJSON(candidates)
 	concatenatedDiffs := buildConcatenatedDiffs(diffs)

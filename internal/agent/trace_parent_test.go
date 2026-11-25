@@ -107,6 +107,50 @@ func TestRecordingTelemetryIgnoresOTLPEnvironment(t *testing.T) {
 	}
 }
 
+func TestGroupReviewFilterSkipTelemetry(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		task       *template.LlmConversation
+		skipFilter bool
+		wantSpan   bool
+	}{
+		{name: "missing template"},
+		{name: "empty template", task: &template.LlmConversation{}},
+		{
+			name:       "explicit skip",
+			task:       &template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "Verify comments"}}},
+			skipFilter: true,
+			wantSpan:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := setupRecordingTelemetry(t)
+			a := Agent{args: Args{
+				Template:   template.Template{ReviewFilterTask: tc.task},
+				SkipFilter: tc.skipFilter,
+			}}
+			a.executeGroupReviewFilter(context.Background(), FileGroup{}, nil)
+
+			spans := recorder.Ended()
+			if !tc.wantSpan {
+				if len(spans) != 0 {
+					t.Fatalf("got %d spans for an unavailable filter, want none", len(spans))
+				}
+				return
+			}
+			if len(spans) != 1 || spans[0].Name() != "review_filter.execute" {
+				t.Fatalf("got spans %v, want one review_filter.execute span", spans)
+			}
+			for _, attr := range spans[0].Attributes() {
+				if attr.Key == "skipped" && attr.Value.AsBool() {
+					return
+				}
+			}
+			t.Error("expected the review filter span to be marked skipped")
+		})
+	}
+}
+
 // TestRunPipelineSpansDoNotParentToDiffParse guards the trace hierarchy fix for
 // #1710: after diff.parse ends, the review pipeline (group subtasks, main loop)
 // must not parent to the already-ended parse span.
