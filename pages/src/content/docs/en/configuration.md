@@ -9,6 +9,8 @@ persistent volume, set `OCR_HOME` to its absolute mount path (for example, `/dat
 Use the same storage root for `ocr config`, `ocr review`, and `ocr viewer` so the viewer
 can read saved sessions. Custom storage is available through the CLI.
 
+Native commands such as `ocr review`, `ocr scan`, and `ocr viewer` support `OCR_HOME` for mounted storage. The GitHub PR helper requires `OCR_HOME` to be unset or empty. For custom storage, run `ocr review` directly.
+
 You have three ways to edit the config:
 
 - **Interactive TUI** — `ocr config provider` / `ocr config model`, with guided menus.

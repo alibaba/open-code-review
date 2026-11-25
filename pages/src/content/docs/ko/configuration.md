@@ -6,6 +6,8 @@ sidebar:
 
 기본 설정 파일은 `~/.opencodereview/config.json`에 있습니다. CLI에서 영구 볼륨을 사용하려면 `OCR_HOME`에 마운트 지점의 절대 경로(예: `/data/ocr`)를 지정하세요. `ocr config`, `ocr review`, `ocr viewer`가 같은 저장 디렉터리를 사용하면 뷰어에서 저장된 세션을 읽을 수 있습니다. 저장 위치 변경은 CLI에서 지원합니다.
 
+`ocr review`, `ocr scan`, `ocr viewer` 등의 기본 CLI 명령은 `OCR_HOME`으로 마운트된 저장소를 사용할 수 있습니다. GitHub PR 도우미를 사용하려면 `OCR_HOME`을 설정하지 않거나 비워 두세요. 사용자 지정 저장소가 필요하면 `ocr review`를 직접 실행하세요.
+
 설정 파일을 편집하는 방법은 세 가지입니다.
 
 - **대화형 TUI** — `ocr config provider` / `ocr config model`. 메뉴가 안내합니다.

@@ -6,6 +6,8 @@ sidebar:
 
 配置文件默认为 `~/.opencodereview/config.json`。CLI 在持久卷上运行时，可将 `OCR_HOME` 设为挂载点的绝对路径（例如 `/data/ocr`）。让 `ocr config`、`ocr review` 和 `ocr viewer` 使用同一存储目录，viewer 就能读取保存的会话。自定义存储通过 CLI 使用。
 
+`ocr review`、`ocr scan` 和 `ocr viewer` 等原生命令支持通过 `OCR_HOME` 使用挂载存储。GitHub PR 辅助脚本要求 `OCR_HOME` 未设置或为空。需要自定义存储时，请直接运行 `ocr review`。
+
 你有三种方式编辑配置：
 
 - **交互式 TUI** —— `ocr config provider` / `ocr config model`，带引导菜单。
