@@ -125,13 +125,10 @@ def release(folder, env):
 
 
 def prepare_review_policy(tree, base, head, env):
-    root = env.get("OCR_HOME")
-    if root and not Path(root).is_absolute():
-        raise ValueError("OCR_HOME must be an absolute path")
     home = env.get("USERPROFILE" if os.name == "nt" else "HOME")
-    if not root and not home:
+    if not home:
         raise ValueError("cannot determine OCR home")
-    directory = root or os.path.join(home, ".opencodereview")
+    directory = os.path.join(home, ".opencodereview")
     config = tree.parent / os.path.normpath(os.path.join(directory, "config.json"))
     try:
         settings = json.loads(config.read_bytes(), object_pairs_hook=tuple)
@@ -276,6 +273,8 @@ if __name__ == "__main__":
         except (OSError, ValueError) as error:
             sys.exit(f"Cleanup refused or incomplete: {error}")
         sys.exit(0)
+    if offline.get("OCR_HOME"):
+        parser.error("GitHub PR review requires OCR_HOME to be unset or empty. For custom storage, run ocr review directly.")
     try:
         number, repo = target(args.pr, args.repo)
     except ValueError as error:

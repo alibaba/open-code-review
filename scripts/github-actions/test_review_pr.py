@@ -141,7 +141,22 @@ class InstalledHelper(unittest.TestCase):
         return path.parent, json.loads(path.read_text())
 
 
+    def check_nonempty_ocr_home_never_starts_ocr(self):
+        marker = self.root / "ocr-started"
+        executable = self.root / "bin" / "ocr"
+        executable.write_text(f"#!{sys.executable}\nfrom pathlib import Path\nPath({str(marker)!r}).touch()\n")
+        for storage in (self.root / "custom storage", self.root / ".opencodereview"):
+            with self.subTest(storage=storage):
+                child = self.start("42", OCR_HOME=str(storage))
+                _, error = child.communicate(timeout=10)
+                self.assertNotEqual(child.returncode, 0)
+                self.assertIn("OCR_HOME", error)
+                self.assertIn("run ocr review directly", error)
+                self.assertFalse(marker.exists())
+
 class Standalone(InstalledHelper):
+    test_nonempty_ocr_home_never_starts_ocr = InstalledHelper.check_nonempty_ocr_home_never_starts_ocr
+
     script = ROOT / SCRIPT
 
     def test_pinned_range_and_checkout(self):
@@ -292,23 +307,6 @@ class Standalone(InstalledHelper):
                 self.assertFalse((folder / "calls.jsonl").exists())
                 self.assertEqual(json.loads(config.read_text()), data)
 
-    def test_selected_storage_controls_mcp_policy(self):
-        default_root = self.root / ".opencodereview"
-        selected_root = self.root / "custom storage"
-        default_root.mkdir()
-        selected_root.mkdir()
-        blocked = {"mcp_servers": {"example": {"command": "not-installed"}}}
-        for selected_blocks in (True, False):
-            with self.subTest(selected_blocks=selected_blocks):
-                (default_root / "config.json").write_text(json.dumps({} if selected_blocks else blocked))
-                (selected_root / "config.json").write_text(json.dumps(blocked if selected_blocks else {}))
-                folder, run = self.finish(self.start("42", OCR_HOME=str(selected_root / "unused" / "..")),
-                                          code=int(selected_blocks))
-                self.assertEqual((folder / "calls.jsonl").exists(), not selected_blocks)
-                if selected_blocks:
-                    self.assertEqual(run["failed_step"], "policy")
-                    self.assertIn("MCP", run["error"])
-
     def test_changed_git_policy_requires_independent_review(self):
         self.git("switch", "-q", "topic")
         for name in (".gitignore", "nested/.gitattributes", ".gitmodules"):
@@ -394,6 +392,8 @@ class Standalone(InstalledHelper):
 
 
 class Plugin(InstalledHelper):
+    test_nonempty_ocr_home_never_starts_ocr = InstalledHelper.check_nonempty_ocr_home_never_starts_ocr
+
     def setUp(self):
         marketplace = json.loads((ROOT / '.agents/plugins/marketplace.json').read_text())
         plugin = next(entry for entry in marketplace['plugins'] if entry['name'] == 'open-code-review-codex')
