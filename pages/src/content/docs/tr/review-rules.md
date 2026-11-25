@@ -213,6 +213,8 @@ Bağımlılık ve derleme çıktısı dizinleri:
 - `**/Pods/**`, `**/Carthage/**`
 - `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
 
+Bu desenler büyük/küçük harf ayrımı gözetmeden eşleşir, tek bir farkla: desenin dosya adı kısmı `*` ve ardından büyük harfle başlayan bir sözcükten oluşuyorsa (`**/*Test.java`, `**/*Tests.swift`, `**/*Spec.hs`), o sözcüğün dosya adında yeni bir sözcük olarak başlaması gerekir. `FooTest.java`, `FooTEST.java`, `foo_test.java` dışlanır; `Contest.java`, `Latest.swift`, `Aspec.hs` incelemede kalır.
+
 `**/build/**` ve `**/bin/**` özellikle dışlanmaz; projeler bu dizinlerde elle yazılmış kaynak dosyalar da bulundurur.
 
 Aynı dizinler, daha erken bir aşamada [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) içinde fark düzeyinde de filtrelenir. Bu liste yol önekiyle eşleşir, dolayısıyla yalnızca **depo kökündeki** dizinleri yakalar. `vendor/pkg/x.go`, dosya filtresine ulaşmadan `provider_directory` olarak bildirilir. `api/vendor/pkg/x.go` ise dosya filtresine ulaşır ve `default_path` olarak bildirilir. Yalnızca ikinci dosya `include` kuralıyla geri alınabilir.

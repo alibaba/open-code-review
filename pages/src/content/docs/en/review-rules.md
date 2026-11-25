@@ -287,6 +287,11 @@ snapshots, and generated code:
 - `**/Pods/**`, `**/Carthage/**`
 - `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
 
+These patterns match case-insensitively, with one refinement: when a
+pattern's file name is `*` followed by a capitalized word (`**/*Test.java`, `**/*Tests.swift`, `**/*Spec.hs`),
+that word has to start a new word of the file name. `FooTest.java`, `FooTEST.java`, `foo_test.java` are
+excluded; `Contest.java`, `Latest.swift`, `Aspec.hs` stay in review.
+
 `**/build/**` and `**/bin/**` are deliberately absent: projects keep
 hand-written sources in both.
 

@@ -270,6 +270,9 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/Pods/**`, `**/Carthage/**`
 - `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
 
+이 패턴들은 대소문자를 구분하지 않고 매칭되지만, 한 가지 예외가 있습니다. 파일 이름 부분이 `*` 뒤에 대문자로 시작하는 단어가 오는 패턴(`**/*Test.java`, `**/*Tests.swift`, `**/*Spec.hs`)은 그 단어가
+파일 이름 안에서 새 단어로 시작할 때만 매칭됩니다. `FooTest.java`, `FooTEST.java`, `foo_test.java` 는 제외되고, `Contest.java`, `Latest.swift`, `Aspec.hs` 는 리뷰 대상에 남습니다.
+
 `**/build/**` 와 `**/bin/**` 은 의도적으로 빠져 있습니다. 많은 프로젝트가 손으로
 작성한 소스를 그 안에 두기 때문입니다.
 

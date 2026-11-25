@@ -258,6 +258,8 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/Pods/**`, `**/Carthage/**`
 - `**/.next/**`, `**/.nuxt/**`, `**/.gradle/**`, `**/.terraform/**`, …
 
+这些模式匹配时不区分大小写，但有一处细化：如果模式的文件名部分是 `*` 加一个首字母大写的单词（`**/*Test.java`, `**/*Tests.swift`, `**/*Spec.hs`），这个单词必须在文件名中作为新单词开头。`FooTest.java`, `FooTEST.java`, `foo_test.java` 会被排除，`Contest.java`, `Latest.swift`, `Aspec.hs` 仍会被审查。
+
 `**/build/**` 和 `**/bin/**` 有意不在其中：很多项目会把手写源码放在这两个目录下。
 
 同样这些噪声目录在更早的 diff 层也会被过滤，位于
