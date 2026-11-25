@@ -208,7 +208,8 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 		observation.ErrorClass = "unsupported_encoding"
 		return observation, fmt.Errorf("non-UTF-8 code output is unavailable")
 	}
-	if strings.HasPrefix(content, "Error:") || strings.Contains(content, "\nError:") || strings.Contains(content, "\nWarning:") {
+	if strings.HasPrefix(content, "Error:") || strings.Contains(content, "\nError:") ||
+		(name != "code_search" && (strings.HasPrefix(content, "Warning:") || strings.Contains(content, "\nWarning:"))) {
 		observation.ErrorClass = "tool_error"
 	}
 	if name == "file_read" {
@@ -232,6 +233,14 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 			}
 			number, _ := strconv.Atoi(match[1])
 			observation.Locations = append(observation.Locations, Location{Side: side, Revision: observation.Revision, Path: filePath, StartLine: number, EndLine: number})
+		}
+	}
+	if name == "code_search" && (strings.HasPrefix(content, tool.CodeSearchIncompletePrefix) ||
+		strings.Contains(content, "\n"+tool.CodeSearchIncompletePrefix)) {
+		observation.Truncated = true
+		observation.Continuation = "Search incomplete: Git reported a read or command failure. Cite only returned matches; do not infer absence. Narrow file_patterns and retry."
+		if len(observation.Locations) == 0 {
+			observation.ErrorClass = "tool_error"
 		}
 	}
 	if name == "file_read_diff" {
