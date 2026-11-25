@@ -127,7 +127,8 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 type relocatedCommentReceiverKey struct{}
 
 // WithRelocatedCommentReceiver scopes a receiver to a main task and its comment
-// workers. Returning true takes ownership of the relocated comment.
+// workers. Workers may call receive concurrently, even after RunMainTask returns.
+// Returning true takes ownership of the relocated comment.
 func WithRelocatedCommentReceiver(ctx context.Context, receive func(model.LlmComment) bool) context.Context {
 	return context.WithValue(ctx, relocatedCommentReceiverKey{}, receive)
 }
