@@ -128,6 +128,16 @@ Yerleşik gizli dosya yolları incelenmez ([`internal/config/allowlist/default_s
 - `**/.npmrc`
 - `**/.pypirc`
 - `**/.dockercfg`
+- `**/.docker/config.json`
+- `**/.aws/credentials`
+- `**/.kube/config`
+- `**/.git-credentials`
+- `**/.pgpass`
+- `**/.cargo/credentials`
+- `**/.cargo/credentials.toml`
+- `**/.gem/credentials`
+- `**/.vault-token`
+- `**/.config/gh/hosts.yml`
 
 `.env` ve tüm `.env.*` çeşitleri de gizli dosya yolu sayılır. `.env.example`, `.env.sample` ve `.env.template` şablonları bunun dışındadır.
 

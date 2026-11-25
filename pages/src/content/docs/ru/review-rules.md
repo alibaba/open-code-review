@@ -197,6 +197,16 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/.npmrc`
 - `**/.pypirc`
 - `**/.dockercfg`
+- `**/.docker/config.json`
+- `**/.aws/credentials`
+- `**/.kube/config`
+- `**/.git-credentials`
+- `**/.pgpass`
+- `**/.cargo/credentials`
+- `**/.cargo/credentials.toml`
+- `**/.gem/credentials`
+- `**/.vault-token`
+- `**/.config/gh/hosts.yml`
 
 Кроме того, `.env` и любой вариант `.env.*` тоже считаются секретным путём; исключение — шаблоны `.env.example`, `.env.sample` и `.env.template`.
 

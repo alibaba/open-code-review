@@ -171,6 +171,16 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/.npmrc`
 - `**/.pypirc`
 - `**/.dockercfg`
+- `**/.docker/config.json`
+- `**/.aws/credentials`
+- `**/.kube/config`
+- `**/.git-credentials`
+- `**/.pgpass`
+- `**/.cargo/credentials`
+- `**/.cargo/credentials.toml`
+- `**/.gem/credentials`
+- `**/.vault-token`
+- `**/.config/gh/hosts.yml`
 
 此外，`.env` 和任何 `.env.*` 变体（`.env.example`、`.env.sample`、`.env.template` 除外）也按敏感路径处理。
 

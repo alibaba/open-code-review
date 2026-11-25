@@ -490,6 +490,24 @@ func TestWhyExcluded_SecretPath(t *testing.T) {
 			expected: ExcludeSecret,
 		},
 		{
+			// Extensionless, so the extension gate would let it through.
+			name:     "aws credential store excluded",
+			path:     "dotfiles/.aws/credentials",
+			expected: ExcludeSecret,
+		},
+		{
+			// Allowlisted .json extension, so the extension gate would let it through.
+			name:     "docker registry auth excluded",
+			path:     "dotfiles/.docker/config.json",
+			expected: ExcludeSecret,
+		},
+		{
+			name:     "include cannot override a credential store",
+			filter:   &rules.FileFilter{Include: []string{"**/.kube/**"}},
+			path:     ".kube/config",
+			expected: ExcludeSecret,
+		},
+		{
 			name:     "include cannot override a secret path",
 			filter:   &rules.FileFilter{Include: []string{"**/.env"}},
 			path:     ".env",

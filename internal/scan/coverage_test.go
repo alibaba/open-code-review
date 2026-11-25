@@ -268,6 +268,17 @@ func TestWhyExcluded_SecretPath(t *testing.T) {
 			want: model.ExcludeSecret,
 		},
 		{
+			// A scan over a home directory or dotfiles checkout reaches these directly.
+			name: "git credential store excluded",
+			path: "home/.git-credentials",
+			want: model.ExcludeSecret,
+		},
+		{
+			name: "cargo registry token excluded",
+			path: "home/.cargo/credentials.toml",
+			want: model.ExcludeSecret,
+		},
+		{
 			name:   "include cannot override a secret path",
 			path:   ".env",
 			filter: &rules.FileFilter{Include: []string{"**/.env"}},

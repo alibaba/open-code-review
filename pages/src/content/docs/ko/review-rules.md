@@ -183,6 +183,16 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/.npmrc`
 - `**/.pypirc`
 - `**/.dockercfg`
+- `**/.docker/config.json`
+- `**/.aws/credentials`
+- `**/.kube/config`
+- `**/.git-credentials`
+- `**/.pgpass`
+- `**/.cargo/credentials`
+- `**/.cargo/credentials.toml`
+- `**/.gem/credentials`
+- `**/.vault-token`
+- `**/.config/gh/hosts.yml`
 
 또한 `.env`와 `.env.*` 변형도 시크릿 경로로 처리합니다(`.env.example`, `.env.sample`, `.env.template` 제외).
 
