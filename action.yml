@@ -225,11 +225,14 @@ inputs:
     default: 'false'
   base_ref:
     description: >-
-      Override the base ref. Provide this (and head_sha) when invoking from a
-      non-PR event such as issue_comment.
+      Override the base ref. Required together with head_sha when invoking from
+      an issue_comment, workflow_run, or another event whose payload has no
+      pull_request object.
     required: false
   head_sha:
-    description: Override the head commit SHA (use with base_ref for comment triggers).
+    description: >-
+      Override the head commit SHA. Required together with base_ref when the
+      event payload has no pull_request object.
     required: false
   pr_number:
     description: >-
@@ -404,6 +407,13 @@ runs:
           echo "::error::Resolved pull request number '${PR_NUMBER}' is not a positive integer; pr_number must be the PR's number alone."
           exit 1
         fi
+        # issue_comment and workflow_run payloads do not carry github.event.pull_request.
+        # Continuing with empty refs used to become an empty or workspace review that
+        # still posted a green summary, so this boundary fails before review work starts.
+        if [ -z "$BASE_REF" ] || [ -z "$HEAD_SHA" ]; then
+          echo "::error::No review range: the '${GITHUB_EVENT_NAME:-unknown}' event payload does not provide pull_request.base.ref and pull_request.head.sha. Pass both the base_ref and head_sha inputs for issue_comment, workflow_run, or another non-PR trigger."
+          exit 1
+        fi
         echo "BASE_REF=$BASE_REF" >> "$GITHUB_ENV"
         echo "HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
         echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
@@ -433,8 +443,18 @@ runs:
     - name: Compute merge-base
       shell: bash
       run: |
-        git fetch origin "${BASE_REF}" 2>/dev/null || true
-        MERGE_BASE=$(git merge-base "origin/${BASE_REF}" "${HEAD_SHA}" 2>/dev/null || echo "${HEAD_SHA}")
+        if ! git fetch origin "${BASE_REF}"; then
+          echo "::error::Cannot fetch base ref '${BASE_REF}' from origin; refusing to guess the review range."
+          exit 1
+        fi
+        if ! git rev-parse --verify --quiet "origin/${BASE_REF}^{commit}" >/dev/null; then
+          echo "::error::Cannot resolve base 'origin/${BASE_REF}' after fetching it; refusing to review an empty range."
+          exit 1
+        fi
+        if ! MERGE_BASE=$(git merge-base "origin/${BASE_REF}" "${HEAD_SHA}"); then
+          echo "::error::No merge base between 'origin/${BASE_REF}' and '${HEAD_SHA}'; refusing to review HEAD..HEAD."
+          exit 1
+        fi
         echo "MERGE_BASE=$MERGE_BASE" >> "$GITHUB_ENV"
         echo "Reviewing ${HEAD_SHA} from merge-base ${MERGE_BASE} (base origin/${BASE_REF})"
 
