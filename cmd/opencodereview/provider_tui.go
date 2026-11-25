@@ -1329,6 +1329,10 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		AWSProfile: v.AWSProfile,
 		AWSRegion:  v.AWSRegion,
 	}
+	if v.MaxRetries != nil {
+		maxRetries := *v.MaxRetries
+		out.MaxRetries = &maxRetries
+	}
 	out.unknownJSONFields = cloneUnknownJSONFields(v.unknownJSONFields)
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))

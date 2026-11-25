@@ -259,6 +259,18 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 
 Yalnızca 4xx HTTP kodları kabul edilir. `408`, `409` ve `429` zaten SDK tarafından yeniden denenir; dosyadan okunurken bu gereksiz kodlar yok sayılır. `ocr config set` ayrıca uyarır ve bunları kaydedilen değerden çıkarır. Tüm 5xx yanıtları zaten yeniden denendiğinden `retry_codes` içine eklenemez.
 
+### Yeniden deneme sayısı {#retry-attempts}
+
+`max_retries`, SDK'nın geçici bir hatadan sonra ilk isteği kaç kez yeniden deneyebileceğini belirler. Değer negatif olmayan bir tam sayı olmalıdır. `0` yeniden denemeyi kapatır; `1` ise ilk istekle birlikte en fazla iki HTTP isteğine izin verir. Ayar belirtilmezse varsayılan değer `5` olur. ChatGPT planıyla gönderilen Responses istekleri bu ayardan bağımsız olarak yeniden denenmez.
+
+Eski LLM yapılandırması, yerleşik sağlayıcılar ve özel sağlayıcılar için örnekler:
+
+```bash
+ocr config set llm.max_retries 1
+ocr config set providers.openai.max_retries 1
+ocr config set custom_providers.my-gateway.max_retries 1
+```
+
 ### İstem sınırı {#prompt-limit}
 
 `max_tokens`, tek alt görev (bir dosya veya ilişkili dosyalar grubu) için **istem/girdi** sınırıdır. Gömülü şablonlarda `ocr review` için 200.000, `ocr scan` için 58.888 token varsayılır. Farklı bağlam pencereli model için ayarı kaydedin:

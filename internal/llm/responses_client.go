@@ -50,7 +50,7 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
 
 	httpClient := httpClientWithHeaderTimeout(cfg.Timeout)
-	retries := 5
+	retries := effectiveMaxRetries(cfg.MaxRetries)
 	if cfg.ChatGPTPlan {
 		retries = 0
 		httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

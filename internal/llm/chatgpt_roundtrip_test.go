@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/chatgptauth"
@@ -37,6 +38,35 @@ func fixtureChatGPTClient(t *testing.T, handler http.HandlerFunc) *OpenAIRespons
 	})}))
 	return c
 }
+
+func TestChatGPTPlanResponsesDoesNotRetry(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		maxRetries *int
+	}{
+		{"default", nil},
+		{"configured", new(1)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var attempts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				attempts.Add(1)
+				w.Header().Set("Retry-After-Ms", "1")
+				http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			}))
+			defer server.Close()
+
+			c := NewOpenAIResponsesClient(ClientConfig{URL: chatgptauth.Resource, ChatGPTPlan: true, RequiresStreaming: true, MaxRetries: tt.maxRetries})
+			c.chatGPTToken = func(context.Context) (string, error) { return "fixture", nil }
+			c.sdk.Responses.Options = append(c.sdk.Responses.Options, option.WithBaseURL(server.URL))
+			_, err := c.CompletionsWithCtx(context.Background(), ChatRequest{Model: "gpt-6-luna", Messages: []Message{NewTextMessage("user", "ping")}})
+			if err == nil || attempts.Load() != 1 {
+				t.Fatalf("got %d HTTP attempts, err = %v; want one failed attempt", attempts.Load(), err)
+			}
+		})
+	}
+}
+
 func TestChatGPTNativeToolHTTPRoundTrip(t *testing.T) {
 	turns := 0
 	c := fixtureChatGPTClient(t, func(w http.ResponseWriter, r *http.Request) {
