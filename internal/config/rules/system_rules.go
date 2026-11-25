@@ -166,40 +166,19 @@ func (r *SystemRule) CanonicalConfig() []string {
 func (r *SystemRule) resolveDetail(path string) RuleDetail {
 	lowerPath := strings.ToLower(path)
 	for _, pr := range r.PathRules {
-		expanded := expandBraces(pr.Pattern)
-		for _, p := range expanded {
-			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
-				return RuleDetail{Rule: pr.Rule, Source: "system", Pattern: pr.Pattern}
-			}
+		if matchGlob(pr.Pattern, lowerPath) {
+			return RuleDetail{Rule: pr.Rule, Source: "system", Pattern: pr.Pattern}
 		}
 	}
 	return RuleDetail{Rule: r.DefaultRule, Source: "system", Pattern: "default"}
 }
 
-// expandBraces turns "{a,b,c}" style patterns into individual strings.
-// e.g. "*.go.{java,kotlin}" → ["*.go.java", "*.go.kotlin"].
-// If no braces exist, returns the original pattern unchanged.
-func expandBraces(s string) []string {
-	openIdx := strings.IndexByte(s, '{')
-	if openIdx < 0 {
-		return []string{s}
-	}
-
-	closeIdx := strings.IndexByte(s[openIdx:], '}')
-	if closeIdx < 0 {
-		return []string{s}
-	}
-	closeIdx += openIdx
-
-	prefix := s[:openIdx]
-	suffix := s[closeIdx+1:]
-	options := strings.Split(s[openIdx+1:closeIdx], ",")
-
-	results := make([]string, 0, len(options))
-	for _, opt := range options {
-		results = append(results, prefix+opt+suffix)
-	}
-	return results
+// matchGlob reports whether pattern matches lowerPath, ignoring case.
+// doublestar expands {a,b} groups itself, nested groups and backslash escapes
+// included, so the pattern is handed over whole rather than split up front.
+func matchGlob(pattern, lowerPath string) bool {
+	matched, _ := doublestar.Match(strings.ToLower(pattern), lowerPath)
+	return matched
 }
 
 // ProjectRuleEntry is a single entry in .opencodereview/rule.json.
@@ -233,11 +212,8 @@ func (f *FileFilter) HasInclude() bool {
 func (f *FileFilter) IsUserExcluded(path string) bool {
 	lowerPath := strings.ToLower(path)
 	for _, pattern := range f.Exclude {
-		expanded := expandBraces(pattern)
-		for _, p := range expanded {
-			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
-				return true
-			}
+		if matchGlob(pattern, lowerPath) {
+			return true
 		}
 	}
 	return false
@@ -252,11 +228,8 @@ func (f *FileFilter) IsUserIncluded(path string) bool {
 	}
 	lowerPath := strings.ToLower(path)
 	for _, pattern := range f.Include {
-		expanded := expandBraces(pattern)
-		for _, p := range expanded {
-			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
-				return true
-			}
+		if matchGlob(pattern, lowerPath) {
+			return true
 		}
 	}
 	return false
@@ -542,11 +515,8 @@ func matchProjectRuleEntry(pr *ProjectRule, path string) *ProjectRuleEntry {
 		if entry.Rule == "" && !entry.MergeSystemRule {
 			continue
 		}
-		expanded := expandBraces(entry.Path)
-		for _, p := range expanded {
-			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
-				return entry
-			}
+		if matchGlob(entry.Path, lowerPath) {
+			return entry
 		}
 	}
 	return nil
