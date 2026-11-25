@@ -331,6 +331,7 @@ ocr s      [flags]   (alias)
 | --- | --- | --- | --- |
 | `--path <list>` | - | Tüm depo | Depoya göre virgülle ayrılmış dosya/dizinler; ör. `internal/agent`, `internal/llm/client.go`. Çalışma ağacına göre çözümlenir. Tam yazılan yol, yalnızca harf büyüklüğü farklı kardeşinden önceliklidir. Dosya sisteminin farklı harf büyüklüğüyle çözümlediği yol (Windows, varsayılan macOS) yine izlenen dosyaları seçer. Mevcut yola karşılık gelmeyen seçim boş tarama değil hata üretir. |
 | `--exclude <patterns>` | - | - | Virgülle ayrılmış gitignore biçiminde dışlamalar; ör. `**/generated/*,*.pb.go`. `rule.json` dışlamalarıyla birleşir. |
+| `--resume <session-id>` | - | - | Önceki taramayı aynı yol kapsamıyla sürdürür; yolları, içerikleri ve geçerli inceleme kuralları değişmeyen tamamlanmış dosyaların sonuçlarını yeniden kullanır. |
 | `--output <path>` | `-o` | stdout | UTF-8 dosyaya yazar; `-`, stdout demektir. İlk yazmada oluşturulur, başarısız çalıştırma mevcut dosyaya dokunmaz. Metin çıktısından ANSI renkleri kaldırılır. |
 | `--preview` | `-p` | `false` | LLM çağırmadan dosyaları listeler ve filtreler; incelenebilir/dışlanan sayıları, toplam satırları ve dosya başına nedenleri gösterir. JSON desteklenir; SARIF desteklenmez. |
 
@@ -342,6 +343,24 @@ ocr scan --exclude '**/generated/*,*.pb.go'
 ```
 
 Tam seçenek listesi için `ocr scan -h` kullanın.
+
+### Taramayı sürdürme {#resuming-a-scan}
+
+```bash
+ocr scan --path internal/agent --resume <session-id>
+```
+
+Bir kural değiştiğinde, dosya içerikleri değişmemiş olsa bile etkilenen dosyalar
+yeniden incelenir. Tamamlanmış diğer dosyaların sonuçları yeniden kullanılabilir.
+Kural dosyasının taşınması veya biçimlendirilmesi ya da taranan dosyalardan
+hiçbiriyle eşleşmeyen bir kuralın düzenlenmesi, geçerli kurallar aynı kaldığı
+sürece kontrol noktalarını geçersiz kılmaz.
+
+Kuralları hesaba katan parmak izleri bulunmayan eski kontrol noktalarına sahip
+dosyalar yeniden incelenir; özgün oturum değiştirilmez. Yeni oturumun kontrol
+noktaları daha sonra normal şekilde yeniden kullanılabilir. Bu denetim
+`--background` gibi diğer istem ayarlarını kapsamaz; bu ayarları değiştirirken
+yeni bir tarama başlatın.
 
 ## `ocr session` {#ocr-session}
 
