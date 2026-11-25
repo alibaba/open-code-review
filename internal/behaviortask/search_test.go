@@ -5,6 +5,7 @@ package behaviortask
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -92,6 +93,35 @@ func TestSearchProviderBoundaryFiltering(test *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestWarningOnlySearchCannotBeCited(test *testing.T) {
+	input := fixture(test)
+	const warning = "Warning: Some git grep matches could not be verified"
+	for _, side := range []string{"old", "new"} {
+		test.Run(side, func(test *testing.T) {
+			runner := newTestRunner(test, input, nil, nil)
+			runner.code.registry = tool.NewRegistry()
+			runner.code.registry.Register(searchBoundaryProvider(func(context.Context, map[string]any) (string, error) {
+				return warning, nil
+			}))
+			outcome, err := runner.dispatch(test.Context(), "code_search", marshal(test, map[string]string{"search_text": "needle", "side": side}))
+			if err != nil {
+				test.Fatal(err)
+			}
+			var observation Observation
+			if err := json.Unmarshal([]byte(outcome.Content), &observation); err != nil {
+				test.Fatal(err)
+			}
+			if stripSide(observation.ReturnedContent) != warning+"\n" || observation.ID == "" {
+				test.Fatalf("unexpected search observation: %+v", observation)
+			}
+			analysis := Analysis{Markdown: "[[" + observation.ID + "]]"}
+			if _, err := runner.dispatch(test.Context(), "submit_analysis", marshal(test, analysis)); err == nil || !strings.Contains(err.Error(), "is missing or failed") {
+				test.Fatalf("expected failed citation, got %v", err)
+			}
+		})
 	}
 }
 

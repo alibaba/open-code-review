@@ -275,26 +275,73 @@ func TestGitGrep_PathsWithNewlines(t *testing.T) {
 	}
 }
 
+func TestGitGrep_TextPathMatchesBinaryAndTextHeaders(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows filenames cannot contain newlines")
+	}
+	const textPath = "Binary file a matches\nb"
+	for _, mode := range []string{"workspace", "plain_directory", "commit"} {
+		for _, firstLine := range []int{1, 3} {
+			t.Run(fmt.Sprintf("%s/b_starts_at_%d", mode, firstLine), func(t *testing.T) {
+				dir := t.TempDir()
+				if mode != "plain_directory" {
+					dir = setupTestRepo(t)
+				}
+				files := map[string]string{
+					textPath: "needle\nneedle\n",
+					"a":      "\x00needle\n",
+					"b":      strings.Repeat("\n", firstLine-1) + "needle\nneedle\n",
+				}
+				for path, content := range files {
+					if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+				if mode == "commit" {
+					for _, args := range [][]string{{"add", "."}, {"commit", "-m", "add search fixtures"}} {
+						cmd := exec.Command("git", args...)
+						cmd.Dir = dir
+						if out, err := cmd.CombinedOutput(); err != nil {
+							t.Fatalf("git %v: %v\n%s", args, err, out)
+						}
+					}
+					fr.Mode, fr.Ref = ModeCommit, "HEAD"
+				}
+				got, err := NewCodeSearch(fr).Execute(t.Context(), map[string]any{"search_text": "needle"})
+				want := fmt.Sprintf("File: %q\nMatch lines: 2\n1|needle\n2|needle\n\n", textPath) +
+					"File: a\n" + CodeSearchBinaryMatch + "\n\n" +
+					fmt.Sprintf("File: b\nMatch lines: 2\n%d|needle\n%d|needle\n\n", firstLine, firstLine+1)
+				if err != nil || got != want {
+					t.Fatalf("search = %q, error = %v; want %q", got, err, want)
+				}
+			})
+		}
+	}
+}
+
 func TestScanGrepMatches_PreservesVerifiedMatches(t *testing.T) {
 	const mixed = "a.txt\x001\x00before\nBinary file b.bin matches\nc.txt\x001\x00ambiguous\nc.txt\x002\x00after\n"
 	const ambiguousTextPath = "a.txt\x001\x00before\nBinary file b.bin matches\nb.txt\x001\x00ambiguous\nc.txt\x002\x00after\n"
 	for _, tc := range []struct {
 		name    string
 		output  string
-		paths   string
+		counts  string
 		pathErr error
 	}{
-		{name: "file removed", output: mixed, paths: "a.txt\x00c.txt\x00"},
+		{name: "file removed", output: mixed, counts: "a.txt\x001\nc.txt\x002\n"},
 		{name: "file list timed out", output: mixed, pathErr: context.DeadlineExceeded},
-		{name: "file appeared", output: ambiguousTextPath, paths: "a.txt\x00b.bin\x00c.txt\x00"},
-		{name: "incomplete file list", output: mixed, paths: "a.txt\x00b.bin\x00c.txt"},
-		{name: "incomplete text line", output: mixed + "d.txt\x001\x00unfinished", paths: "a.txt\x00b.bin\x00c.txt\x00d.txt\x00"},
+		{name: "file appeared", output: ambiguousTextPath, counts: "a.txt\x001\nb.bin\x001\nc.txt\x001\n"},
+		{name: "incomplete file list", output: mixed, counts: "a.txt\x001\nb.bin\x001\nc.txt\x002"},
+		{name: "invalid count", output: mixed, counts: "a.txt\x001\nb.bin\x001\nc.txt\x00two\n"},
+		{name: "fewer matches in second search", output: mixed, counts: "a.txt\x001\nb.bin\x001\nc.txt\x001\n"},
+		{name: "incomplete text line", output: mixed + "d.txt\x001\x00unfinished", counts: "a.txt\x001\nb.bin\x001\nc.txt\x002\nd.txt\x001\n"},
 		{name: "incomplete text after an ambiguous path", output: mixed + "Binary file d.bin matches\ne.txt\x00", pathErr: context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var matches []string
 			warning, err := scanGrepMatches(tc.output, "", func() (string, error) {
-				return tc.paths, tc.pathErr
+				return tc.counts, tc.pathErr
 			}, func(path string, line int, content string) {
 				matches = append(matches, fmt.Sprintf("%s:%d:%s", path, line, content))
 			})
@@ -307,16 +354,70 @@ func TestScanGrepMatches_PreservesVerifiedMatches(t *testing.T) {
 }
 
 func TestScanGrepMatches_SingleBinaryHitSkipsFileList(t *testing.T) {
-	var matches []string
-	warning, err := scanGrepMatches("Binary file HEAD:asset\"v2.bin matches\n", "HEAD:", func() (string, error) {
-		t.Fatal("an unambiguous binary hit must not trigger a file list search")
-		return "", nil
-	}, func(path string, line int, content string) {
-		matches = append(matches, fmt.Sprintf("%s:%d:%s", path, line, content))
-	})
-	want := []string{"asset\"v2.bin:0:"}
-	if warning != nil || err != nil || !slices.Equal(matches, want) {
-		t.Fatalf("matches = %v, warning = %v, error = %v; want %v", matches, warning, err, want)
+	for _, tc := range []struct {
+		name, output, refPrefix string
+		want                    []string
+		warn                    error
+	}{
+		{name: "quoted path", output: "Binary file HEAD:asset\"v2.bin matches\n", refPrefix: "HEAD:", want: []string{"asset\"v2.bin:0:"}},
+		{name: "workspace newline", output: "Binary file a\nb matches\n", want: []string{"a\nb:0:"}},
+		{name: "ref newline", output: "Binary file HEAD:a\nb matches\n", refPrefix: "HEAD:", want: []string{"a\nb:0:"}},
+		{name: "ambiguous diagnostics", output: "Binary file a matches\nBinary file b matches\n", warn: context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var matches []string
+			warning, err := scanGrepMatches(tc.output, tc.refPrefix, func() (string, error) {
+				if tc.warn == nil {
+					t.Fatal("an unambiguous binary hit must not trigger a count search")
+				}
+				return "", context.DeadlineExceeded
+			}, func(path string, line int, content string) {
+				matches = append(matches, fmt.Sprintf("%s:%d:%s", path, line, content))
+			})
+			if err != nil || !errors.Is(warning, tc.warn) || !slices.Equal(matches, tc.want) {
+				t.Fatalf("matches = %q, warning = %v, error = %v; want %q, warning = %v", matches, warning, err, tc.want, tc.warn)
+			}
+		})
+	}
+}
+
+func TestScanGrepMatches_RefBinaryBeforeText(t *testing.T) {
+	const pair = "Binary file HEAD:a.bin matches\nHEAD:b.txt\x001\x00first\n"
+	const ambiguous = "Binary file HEAD:c.bin matches\nBinary file HEAD:d.bin matches\nHEAD:e.txt\x001\x00next\n"
+	const twoTextPaths = "Binary file HEAD:a matches\nHEAD:b matches\nHEAD:c\x001\x00first\n"
+	for _, tc := range []struct {
+		name   string
+		output string
+		counts string
+		warn   error
+		want   []string
+	}{
+		{name: "single boundary", output: pair, want: []string{"a.bin:0:", "b.txt:1:first"}},
+		{name: "newlines inside names", output: "Binary file HEAD:a\n.bin matches\nHEAD:b\n.txt\x001\x00first\n",
+			want: []string{"a\n.bin:0:", "b\n.txt:1:first"}},
+		{name: "two possible text paths", output: twoTextPaths, warn: context.DeadlineExceeded},
+		{name: "file list resolves a newline in the binary path", output: twoTextPaths,
+			counts: "HEAD:a matches\nHEAD:b\x001\nHEAD:c\x001\n", want: []string{"a matches\nHEAD:b:0:", "c:1:first"}},
+		{name: "file list timeout after a verified pair", output: pair + ambiguous, warn: context.DeadlineExceeded,
+			want: []string{"a.bin:0:", "b.txt:1:first", "e.txt:1:next"}},
+		{name: "file list resolves remaining paths", output: pair + ambiguous,
+			counts: "HEAD:a.bin\x001\nHEAD:b.txt\x001\nHEAD:c.bin\x001\nHEAD:d.bin\x003\nHEAD:e.txt\x001\n",
+			want:   []string{"a.bin:0:", "b.txt:1:first", "c.bin:0:", "d.bin:0:", "e.txt:1:next"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var matches []string
+			warning, err := scanGrepMatches(tc.output, "HEAD:", func() (string, error) {
+				if tc.counts == "" {
+					return "", context.DeadlineExceeded
+				}
+				return tc.counts, nil
+			}, func(path string, line int, content string) {
+				matches = append(matches, fmt.Sprintf("%s:%d:%s", path, line, content))
+			})
+			if err != nil || !errors.Is(warning, tc.warn) || !slices.Equal(matches, tc.want) {
+				t.Fatalf("matches = %q, warning = %v, error = %v; want %q, warn = %v", matches, warning, err, tc.want, tc.warn)
+			}
+		})
 	}
 }
 

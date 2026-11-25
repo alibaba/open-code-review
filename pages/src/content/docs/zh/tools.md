@@ -373,9 +373,8 @@ Match lines: 1
 
 ### 限制
 
-- 通过 `git grep --max-count 100` 把每文件命中数上限设为 **100**，因此跨多文件的
-  总输出可能超过 100。触及每文件上限时，输出前会加
-  `Note: The results have been truncated. Only showing first 100 results.`。
+- 所有文件合计最多返回 **100 条**命中。只有总数超过 100 条时，工具才会截取前 100 条，
+  并在结果开头提示可以缩小 `file_patterns` 的范围。
 - 空 / 仅空白的 `search_text` 返回 `Error: search_text is blank`，而不是展开成
   每一行。
 - 工作区模式搜索**当前工作树**，区间 / commit 模式搜索解析出的目标 ref

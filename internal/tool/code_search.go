@@ -190,15 +190,15 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	matchCount := 0
 	truncated := false
 	matchedFiles := make(map[string]bool)
-	listPaths := func() (string, error) {
-		cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, noIndex, pathspec, "--files-with-matches")
-		paths, stderr, err := p.runGitGrep(searchCtx, cmdArgs)
+	countMatches := func() (string, error) {
+		cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, noIndex, pathspec, "--count")
+		counts, stderr, err := p.runGitGrep(searchCtx, cmdArgs)
 		if err != nil {
 			return "", gitGrepError(stderr, err, usePerlRegexp)
 		}
-		return paths, nil
+		return counts, nil
 	}
-	pathWarning, parseErr := scanGrepMatches(outStr, refPrefix, listPaths, func(path string, line int, content string) {
+	pathWarning, parseErr := scanGrepMatches(outStr, refPrefix, countMatches, func(path string, line int, content string) {
 		seen := matchedFiles[path]
 		matchedFiles[path] = true
 		if matchCount >= gitGrepMaxCount {
@@ -253,29 +253,45 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	return sb.String(), nil
 }
 
-func scanGrepMatches(output, refPrefix string, listPaths func() (string, error), emit func(string, int, string)) (warning error, err error) {
+func scanGrepMatches(output, refPrefix string, countMatches func() (string, error), emit func(string, int, string)) (warning error, err error) {
 	binaryPrefix := "Binary file " + refPrefix
+	binaryBoundary := " matches\n" + binaryPrefix
 	ignoreMatch := func(string, int, string) {}
 	var lastName string
 	for output != "" {
 		name, record, hasSeparator := strings.Cut(output, "\x00")
+		if names, binary := strings.CutPrefix(name, binaryPrefix); binary && hasSeparator && refPrefix != "" {
+			// The binary path may contain another diagnostic, and either path may
+			// contain the apparent transition to a ref-prefixed text record.
+			boundary := " matches\n" + refPrefix
+			path, textPath, found := strings.Cut(names, boundary)
+			if found && path != "" && textPath != "" && !strings.Contains(textPath, boundary) {
+				singleBinary := !strings.Contains(path, binaryBoundary)
+				if singleBinary {
+					emit(path, 0, "")
+				}
+				if singleBinary || warning != nil {
+					name = refPrefix + textPath
+				}
+			}
+		}
 		if strings.HasPrefix(name, binaryPrefix) && (!hasSeparator || strings.Contains(name, " matches\n")) {
-			if !hasSeparator && strings.Count(name, "\n") == 1 {
+			if !hasSeparator {
 				path, ok := strings.CutSuffix(name[len(binaryPrefix):], " matches\n")
-				if ok && path != "" {
+				if ok && path != "" && !strings.Contains(path, binaryBoundary) {
 					emit(path, 0, "")
 					break
 				}
 			}
-			// Binary diagnostics lack NUL delimiters and their paths can contain
-			// newlines. Match them against Git's separately delimited path list.
+			// A text filename can look exactly like a binary diagnostic followed
+			// by another filename. Git's per-file counts delimit the text groups.
 			if warning == nil {
-				paths, pathErr := listPaths()
+				counts, pathErr := countMatches()
 				if pathErr == nil {
-					// Verify the entire file list before trusting any of its record boundaries.
-					pathErr = scanGrepMatchesByPath(output, paths, lastName, refPrefix, ignoreMatch)
+					// The working tree may have changed between the two searches.
+					pathErr = scanGrepMatchesByCount(output, counts, lastName, refPrefix, ignoreMatch)
 					if pathErr == nil {
-						return nil, scanGrepMatchesByPath(output, paths, lastName, refPrefix, emit)
+						return nil, scanGrepMatchesByCount(output, counts, lastName, refPrefix, emit)
 					}
 				}
 				if errors.Is(pathErr, context.Canceled) {
@@ -308,12 +324,15 @@ func scanGrepMatches(output, refPrefix string, listPaths func() (string, error),
 	return warning, nil
 }
 
-func scanGrepMatchesByPath(output, paths, lastName, refPrefix string, emit func(string, int, string)) error {
-	paths, terminated := strings.CutSuffix(paths, "\x00")
-	if !terminated {
-		return fmt.Errorf("incomplete git grep file list")
-	}
-	for name := range strings.SplitSeq(paths, "\x00") {
+func scanGrepMatchesByCount(output, counts, lastName, refPrefix string, emit func(string, int, string)) error {
+	for counts != "" {
+		name, rest, hasName := strings.Cut(counts, "\x00")
+		number, remaining, hasCount := strings.Cut(rest, "\n")
+		count, err := strconv.Atoi(number)
+		if !hasName || !hasCount || err != nil || count <= 0 {
+			return fmt.Errorf("invalid git grep match count")
+		}
+		counts = remaining
 		if lastName != "" {
 			if name == lastName {
 				lastName = ""
@@ -322,27 +341,28 @@ func scanGrepMatchesByPath(output, paths, lastName, refPrefix string, emit func(
 		}
 		path, ok := strings.CutPrefix(name, refPrefix)
 		if !ok || path == "" {
-			return fmt.Errorf("invalid path in git grep file list")
+			return fmt.Errorf("invalid path in git grep counts")
 		}
+		// Git counts matching lines inside a binary file but prints one diagnostic.
 		if rest, binary := strings.CutPrefix(output, "Binary file "+name+" matches\n"); binary {
 			emit(path, 0, "")
 			output = rest
 			continue
 		}
 		prefix := name + "\x00"
-		if !strings.HasPrefix(output, prefix) {
-			return fmt.Errorf("git grep results differ from the matching file list")
-		}
-		for strings.HasPrefix(output, prefix) {
-			var err error
-			output, err = scanGrepTextLine(path, output[len(prefix):], emit)
+		for range count {
+			record, ok := strings.CutPrefix(output, prefix)
+			if !ok {
+				return fmt.Errorf("git grep results differ from the per-file counts")
+			}
+			output, err = scanGrepTextLine(path, record, emit)
 			if err != nil {
 				return err
 			}
 		}
 	}
 	if lastName != "" || output != "" {
-		return fmt.Errorf("git grep results differ from the matching file list")
+		return fmt.Errorf("git grep results differ from the per-file counts")
 	}
 	return nil
 }

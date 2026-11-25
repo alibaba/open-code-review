@@ -394,9 +394,8 @@ Match lines: 1
 
 ### 제한 {#limits}
 
-- `git grep --max-count 100`으로 **파일당 100건**까지만 받으므로, 파일이 많으면 전체
-  출력은 100건을 넘을 수 있습니다. 파일당 상한에 걸리면 출력 앞에 `Note: The results
-have been truncated. Only showing first 100 results.`가 붙습니다.
+- **모든 파일을 합쳐 최대 100건**을 반환합니다. 일치하는 결과가 100건을 넘을 때만
+  처음 100건을 표시하고, 결과 앞에 `file_patterns`로 검색 범위를 좁히라는 안내를 덧붙입니다.
 - `search_text`가 비어 있거나 공백뿐이면 모든 줄로 번지지 않고 `Error: search_text is
 blank`를 반환합니다.
 - 워크스페이스 모드에서는 **현재 작업 트리**를, range·commit 모드에서는 해석된 대상
