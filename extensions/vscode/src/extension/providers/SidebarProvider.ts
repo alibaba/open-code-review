@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
 import { ConfigPanelFocus } from '@shared/configUtils';
 import { HostToWebview, WebviewToHost } from '@shared/messages';
 import { FileChange, ReviewMode } from '@shared/types';
-import { CliService } from '../services/CliService';
+import { CliService, CustomStorageError } from '../services/CliService';
 import { ConfigService } from '../services/ConfigService';
 import { GitService } from '../services/GitService';
 import { ReviewSession } from '../services/ReviewSession';
@@ -57,11 +57,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage(msg);
   }
 
+  private readConfig(): ReturnType<ConfigService['read']> {
+    try {
+      return this.config.read();
+    } catch (error) {
+      if (!(error instanceof CustomStorageError)) throw error;
+      void vscode.window.showWarningMessage(error.message);
+      return null;
+    }
+  }
+
   private async handle(msg: WebviewToHost): Promise<void> {
     const cwd = vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? process.cwd();
     switch (msg.type) {
       case 'ready': {
-        const config = this.config.read();
+        const config = this.readConfig();
         const gitState = await this.git.getState(ReviewMode.Workspace);
         const locale = resolveLocale(vscode.env.language);
         this.post({ type: 'init', config, gitState, locale });
@@ -115,7 +125,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.openConfigPanel?.(msg.focus);
         break;
       case 'getConfig':
-        this.post({ type: 'config', config: this.config.read() });
+        this.post({ type: 'config', config: this.readConfig() });
         break;
       case 'jumpToComment':
         await this.comments.jumpTo(msg.index);

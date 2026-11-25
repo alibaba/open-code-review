@@ -18,9 +18,12 @@ import com.alibaba.opencodereview.idea.model.toReviewContext
 import com.alibaba.opencodereview.idea.providers.CommentService
 import com.alibaba.opencodereview.idea.services.CliService
 import com.alibaba.opencodereview.idea.services.ConfigService
+import com.alibaba.opencodereview.idea.services.CustomStorageException
 import com.alibaba.opencodereview.idea.services.GitService
 import com.alibaba.opencodereview.idea.services.ReviewSession
 import com.alibaba.opencodereview.idea.services.SessionCallbacks
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
@@ -87,7 +90,7 @@ class SidebarRouter(
                 }
             }
 
-            WebviewToHost.GetConfig -> background { post(HostToWebview.Config(config.read())) }
+            WebviewToHost.GetConfig -> background { post(HostToWebview.Config(readConfig())) }
 
             // In diff mode jumpTo reads file contents from a git ref, a blocking process call; it
             // must not run on the JCEF message callback thread, where the block would queue the
@@ -130,7 +133,15 @@ class SidebarRouter(
      * or files to choose from.
      */
     private fun sendInit() {
-        post(HostToWebview.Init(config.read(), git.getState(ReviewMode.WORKSPACE), locale()))
+        post(HostToWebview.Init(readConfig(), git.getState(ReviewMode.WORKSPACE), locale()))
+    }
+
+    private fun readConfig() = try {
+        config.read()
+    } catch (e: CustomStorageException) {
+        NotificationGroupManager.getInstance().getNotificationGroup(NOTIFICATION_GROUP)
+            .createNotification(e.message.orEmpty(), NotificationType.WARNING).notify(project)
+        null
     }
 
     private fun sendModeFiles(msg: WebviewToHost.GetModeFiles) {

@@ -29,6 +29,8 @@ import kotlinx.serialization.json.JsonElement
 import java.io.File
 import java.util.concurrent.CopyOnWriteArraySet
 
+internal const val NOTIFICATION_GROUP = "Open Code Review"
+
 /**
  * Project-level coordinator: service assembly, webview registration and cross-component wiring all
  * happen in this layer. Message handling does not: the sidebar is in [SidebarRouter] and the config
@@ -43,10 +45,6 @@ import java.util.concurrent.CopyOnWriteArraySet
  */
 @Service(Service.Level.PROJECT)
 class ReviewProjectService(private val project: Project) : Disposable {
-
-    private companion object {
-        const val NOTIFICATION_GROUP = "Open Code Review"
-    }
 
     private val cli = CliService()
     private val git = GitService(project)

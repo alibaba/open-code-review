@@ -14,6 +14,7 @@ export class ConfigService {
   constructor(private cli: CliService) {}
 
   private configPath(): string {
+    this.cli.requireDefaultStorage();
     return join(homedir(), '.opencodereview', 'config.json');
   }
 
@@ -86,11 +87,13 @@ export class ConfigService {
   }
 
   async set(key: string, value: string): Promise<OcrConfig | null> {
+    this.cli.requireDefaultStorage();
     await this.cli.runRaw(toConfigSetArgs(key, value), process.cwd(), () => {});
     return this.read();
   }
 
   async setMany(entries: { key: string; value: string }[]): Promise<OcrConfig | null> {
+    this.cli.requireDefaultStorage();
     for (const entry of entries) {
       await this.cli.runRaw(toConfigSetArgs(entry.key, entry.value), process.cwd(), () => {});
     }

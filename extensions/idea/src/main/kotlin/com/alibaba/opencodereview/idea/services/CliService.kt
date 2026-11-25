@@ -18,6 +18,10 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
+internal class CustomStorageException : IllegalStateException(
+    "The OCR extension does not support OCR_HOME. Use the OCR CLI with this storage directory.",
+)
+
 /** Thrown when the CLI exits non-zero. The message has already been refined by [extractCliError] and is safe to show to users. */
 class CliException(message: String, val exitCode: Int, val stdout: String) : RuntimeException(message)
 
@@ -52,6 +56,12 @@ class CliService(private val cliPath: String = "ocr") {
             return null
         }
         return env
+    }
+
+    internal fun requireDefaultStorage() {
+        val windows = File.separatorChar == '\\'
+        val home = ShellEnv.env().entries.firstOrNull { it.key.equals("OCR_HOME", ignoreCase = windows) }?.value
+        if (!home.isNullOrEmpty()) throw CustomStorageException()
     }
 
     fun isAvailable(): Boolean = checkEnvironment().ocr.ok
@@ -218,6 +228,7 @@ class CliService(private val cliPath: String = "ocr") {
         cancellation: CliCancellation,
     ): CliResult {
         val stdout = try {
+            requireDefaultStorage()
             runRaw(buildReviewArgs(opts), cwd, onLog, cancellation = cancellation)
         } catch (error: CliException) {
             if (error.exitCode != 1) throw error
