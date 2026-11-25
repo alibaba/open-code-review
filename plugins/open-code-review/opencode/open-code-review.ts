@@ -179,6 +179,7 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
         env: process.env,
         shell: false,
         detached: process.platform !== "win32",
+        windowsHide: true,
       },
     )
     child.stdin.end()
@@ -205,7 +206,10 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
     const killProcessGroup = (signal: NodeJS.Signals): void => {
       if (closed || child.pid === undefined) return
       if (process.platform === "win32") {
-        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" })
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        })
         return
       }
       try {
@@ -472,9 +476,9 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
 // below is a plain object literal: `Plugin.define` is an identity function,
 // so V1 never needs the `@opencode/plugin` package at runtime.
 //
-// V2 limitations (no equivalent in the V2 tool API): tool execution has no
-// abort signal, so cancellation relies on the overall timeout, and the
-// per-session working directory is resolved from the session location.
+// V2 may omit the executor's abort signal from its type package; forward it
+// when available and otherwise rely on the overall timeout. The per-session
+// working directory is resolved from the session location.
 // ---------------------------------------------------------------------------
 
 const OCR_REVIEW_DESCRIPTION =
@@ -517,6 +521,23 @@ const reviewInputSchema = {
   additionalProperties: false,
 }
 
+function getToolSignal(toolCtx: unknown): AbortSignal | undefined {
+  if (typeof toolCtx !== "object" || toolCtx === null || !("signal" in toolCtx)) {
+    return undefined
+  }
+  const signal = (toolCtx as { signal?: unknown }).signal
+  if (
+    typeof signal !== "object" ||
+    signal === null ||
+    typeof (signal as AbortSignal).aborted !== "boolean" ||
+    typeof (signal as AbortSignal).addEventListener !== "function" ||
+    typeof (signal as AbortSignal).removeEventListener !== "function"
+  ) {
+    return undefined
+  }
+  return signal as AbortSignal
+}
+
 async function resolveSessionCwd(ctx: PluginV2.Context, sessionID: string): Promise<string> {
   try {
     const session = await ctx.session.get({ sessionID })
@@ -537,8 +558,10 @@ async function setupV2(ctx: PluginV2.Context): Promise<void> {
       execute: async (input, toolCtx) => {
         const review = input as ReviewInput
         const cwd = await resolveSessionCwd(ctx, toolCtx.sessionID)
+        const signal = getToolSignal(toolCtx)
         const result = await runOcr(buildReviewArgs(review, cwd), {
           cwd,
+          ...(signal ? { signal } : {}),
           timeoutMs: review.overallTimeoutMinutes !== undefined
             ? review.overallTimeoutMinutes * 60 * 1000
             : 30 * 60 * 1000,
@@ -552,10 +575,18 @@ async function setupV2(ctx: PluginV2.Context): Promise<void> {
       input: { type: "object", properties: {}, additionalProperties: false },
       execute: async (_input, toolCtx) => {
         const cwd = await resolveSessionCwd(ctx, toolCtx.sessionID)
+        const signal = getToolSignal(toolCtx)
+        const signalOptions = signal ? { signal } : {}
         const [version, llm] = await Promise.allSettled([
-          runOcr(["version"], { cwd, timeoutMs: 30_000 }),
-          runOcr(["llm", "test"], { cwd, timeoutMs: 60_000 }),
+          runOcr(["version"], { cwd, timeoutMs: 30_000, ...signalOptions }),
+          runOcr(["llm", "test"], { cwd, timeoutMs: 60_000, ...signalOptions }),
         ])
+        const rejected = [version, llm].find(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
+        )
+        if (signal?.aborted && rejected) {
+          throw rejected.reason
+        }
         const parts: string[] = []
         if (version.status === "fulfilled") {
           parts.push(version.value.stdout)
