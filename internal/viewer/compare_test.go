@@ -37,6 +37,11 @@ func fullCoverage(paths ...string) string {
 	return `{"selected":[` + joined + `],"completed":[` + joined + `],"reused":[],"failed":[],"waived":[]}`
 }
 
+func renamedCoverage(oldPath, newPath string) string {
+	item := fmt.Sprintf(`{"item_id":"renamed","path":%q,"old_path":%q}`, newPath, oldPath)
+	return `{"selected":[` + item + `],"completed":[` + item + `],"reused":[],"failed":[],"waived":[]}`
+}
+
 // splitCoverage is fullCoverage's counterpart for a run that stopped early:
 // every path is selected, only some are completed. It is what separates
 // session.ReviewedPaths (completed+reused) from Coverage.Selected - a handler
@@ -174,10 +179,20 @@ func compareFixture(t *testing.T) string {
 	// session.ReviewedPaths return nil.
 	writeCompareSession(t, repoDir, "legacy", "commit", "")
 	writeCompareSession(t, repoDir, "s4", "workspace", fullCoverage("a.go", "b.go"), kept, added)
+	writeCompareSession(t, repoDir, "rename-before", "commit", fullCoverage("old/name.go"),
+		compareFinding("old/name.go", "still broken", "x := 1", "x := 2"))
+	writeCompareSession(t, repoDir, "rename-after", "commit", renamedCoverage("old/name.go", "new/name.go"),
+		compareFinding("new/name.go", "still broken", "x := 1", "x := 2"))
 	// An interrupted run: it meant to review a.go and b.go and reached only
 	// b.go, so a.go carries no verdict.
 	writeCompareSession(t, repoDir, "partial", "commit",
 		splitCoverage([]string{"a.go", "b.go"}, []string{"b.go"}))
+	writeJSONL(t, filepath.Join(repoDir, "same-repo-alias.jsonl"),
+		`{"type":"session_start","timestamp":"2025-03-01T09:00:00Z","cwd":"/home/user/project/","model":"gpt-4","reviewMode":"commit"}`,
+		`{"type":"review_item_done","filePath":"a.go","comments":[`+kept+`]}`,
+		`{"type":"session_end","duration_seconds":1,"run_manifest":{"schema_version":"ocr.run-manifest/v1",`+
+			`"run_id":"r","operation":"review","terminal_state":"complete","repository":{},"input":{},`+
+			`"execution":{},"coverage":`+fullCoverage("a.go")+`,"elapsed_ms":1}}`)
 	// A session recorded in a different working directory. Written from literal
 	// lines because writeCompareSession hardcodes one cwd for all six of its
 	// call sites.
@@ -206,7 +221,8 @@ func TestHandleCompare(t *testing.T) {
 		{
 			name: "happy path", query: "before=s1&after=s2", status: http.StatusOK,
 			contains: []string{"New (1)", "Persisting (1)", "Resolved (1)", "Not reviewed (0)",
-				"newly broken", "still broken", "was broken", "none"},
+				"newly broken", "still broken", "was broken", "none", `data-pagination-source`,
+				`<div class="comment-card" data-pagination-item hidden>`, `id="compare-0-pagination"`},
 		},
 		{
 			name:   "back link returns to sessions",
@@ -246,6 +262,12 @@ func TestHandleCompare(t *testing.T) {
 			contains: []string{"New (0)", "Persisting (2)", "Resolved (0)", "Not reviewed (0)"},
 		},
 		{
+			name:  "renamed file finding persists under its new path",
+			query: "before=rename-before&after=rename-after", status: http.StatusOK,
+			contains: []string{"New (0)", "Persisting (1)", "Resolved (0)", "Not reviewed (0)", "new/name.go"},
+			absent:   []string{"old/name.go"},
+		},
+		{
 			name: "mode mismatch warns and still renders", query: "before=s1&after=s4", status: http.StatusOK,
 			contains: []string{
 				"review modes differ (commit vs workspace); the two runs may not have looked at the same files",
@@ -273,6 +295,12 @@ func TestHandleCompare(t *testing.T) {
 			name:  "interrupted after run does not resolve the files it never reached",
 			query: "before=s1&after=partial", status: http.StatusOK,
 			contains: []string{"New (0)", "Persisting (0)", "Resolved (0)", "Not reviewed (2)"},
+		},
+		{
+			name: "equivalent repository path spelling is accepted", query: "before=s1&after=same-repo-alias",
+			status:   http.StatusOK,
+			contains: []string{"New (0)", "Persisting (1)", "Resolved (1)", "Not reviewed (0)", "still broken"},
+			absent:   []string{"sessions belong to different repositories"},
 		},
 		{
 			// Reachable because encodeRepoPath collapses "/" to "-", so
@@ -361,12 +389,12 @@ func TestRenderTemplate_SessionsCompareLink(t *testing.T) {
 			name:     "two sessions link newest to next oldest",
 			sessions: []SessionSummary{{SessionID: "s-new"}, {SessionID: "s-old"}},
 			// Rows are newest-first, so the oldest row has no link.
-			contains: []string{"/compare?before=s-old&amp;after=s-new", "<th>Compare</th>"},
+			contains: []string{"/compare?before=s-old&amp;after=s-new", `<th scope="col" class="col-action">Action</th>`},
 		},
 		{
 			name:     "a single session has nothing to compare against",
 			sessions: []SessionSummary{{SessionID: "only"}},
-			contains: []string{"<th>Compare</th>"},
+			contains: []string{`<th scope="col" class="col-action">Action</th>`},
 			absent:   []string{"/compare?"},
 		},
 	}
@@ -431,7 +459,7 @@ func TestNewMux_RouteDispatch(t *testing.T) {
 		},
 		{
 			name: "session list", target: "/r/myrepo", status: http.StatusOK,
-			contains: []string{"Sessions:", "<th>Compare</th>"},
+			contains: []string{"Sessions:", `<th scope="col" class="col-action">Action</th>`},
 		},
 		{
 			name: "repo list", target: "/", status: http.StatusOK,

@@ -117,6 +117,12 @@ func TestViewerCmd_RejectsInvalidOpenMode(t *testing.T) {
 	}
 }
 
+func TestLLMHelpIncludesModels(t *testing.T) {
+	if !strings.Contains(llmCmd.Example, "ocr llm models") {
+		t.Error("llm help examples do not include the models command")
+	}
+}
+
 func TestRunLLMProviders(t *testing.T) {
 	got := captureStdout(t, func() {
 		runLLMProviders()

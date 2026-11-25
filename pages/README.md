@@ -117,7 +117,7 @@ pages/
 │   ├── utils/           # Shared helpers
 │   ├── assets/          # Imported icons and images
 │   └── index.tsx        # Frontend entry point
-├── public/              # Static files copied verbatim into dist/
+├── public/              # Static files copied verbatim into dist/ & crawling policies
 ├── dist/                # Production build artifacts (generated, gitignored)
 ├── index.html           # HTML template used by HtmlWebpackPlugin
 ├── webpack.config.cjs   # Bundling + dev server config

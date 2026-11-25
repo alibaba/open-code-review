@@ -193,22 +193,23 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 }
 
 // llmRuntime bundles the LLM-side state both subcommands need once they've
-// decided to actually run a session: tool definitions, an app-language
+// decided to actually run a session: an app-language
 // adjusted template (mutated in place via ApplyLanguage), the LLM client,
 // the resolved model name, and a fresh comment collector.
 type llmRuntime struct {
-	Client       llm.LLMClient
-	Model        string
-	Provider     string // resolved provider name (non-secret label; empty for non-provider endpoints)
-	PlanToolDefs []llm.ToolDef
-	MainToolDefs []llm.ToolDef
-	Collector    *tool.CommentCollector
+	Endpoint  llm.ResolvedEndpoint
+	Client    llm.LLMClient
+	Model     string
+	Provider  string // resolved provider name (non-secret label; empty for non-provider endpoints)
+	Source    string // resolved configuration source (non-secret label)
+	Collector *tool.CommentCollector
 	// RetryCollector observes every LLM HTTP attempt this run makes. It is
 	// created here rather than on the session or the agent because the client is
 	// built before either exists, and it is per-run rather than package-level so
 	// two runs in one process cannot share data. scan gets one too; its requests
 	// carry no RequestMeta, so every attempt is dropped and the frozen report is
-	// nil.
+	// nil. The review path hands it to the agent for the pre-session_end snapshot;
+	// the command takes the equal output snapshot after Run. scan never freezes.
 	RetryCollector *llm.RetryCollector
 	// RawHolder is the opt-in raw LLM capture sink (OCR_RAW_LOGGING=1),
 	// created with the client because the middleware mounts at construction;
@@ -236,19 +237,12 @@ func configuredLanguage(cfg *Config) string {
 // so a well-behaved run can never produce one.
 var newRetryCollector = llm.NewRetryCollector
 
-// loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
+// loadLLMRuntime reads the app config
 // from the user's default config path (applying the configured language to
 // tpl — defaulting when the config file is absent), resolves the LLM
 // endpoint (honoring resolveOpts), and
 // returns the runtime bundle. tpl is mutated in place.
-func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts llm.ResolveOptions) (*llmRuntime, error) {
-	toolEntries, err := toolsconfig.Load(toolConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("load tools: %w", err)
-	}
-	planToolDefs := agent.BuildToolDefs(toolEntries, true)
-	mainToolDefs := agent.BuildToolDefs(toolEntries, false)
-
+func loadLLMRuntime(tpl *template.Template, resolveOpts llm.ResolveOptions) (*llmRuntime, error) {
 	cfgPath, err := defaultConfigPath()
 	if err != nil {
 		return nil, err
@@ -275,11 +269,11 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 	}
 
 	return &llmRuntime{
+		Endpoint:       ep,
 		Client:         llm.NewLLMClient(ep, retryCollector, rawHolder),
 		Model:          ep.Model,
 		Provider:       ep.Provider,
-		PlanToolDefs:   planToolDefs,
-		MainToolDefs:   mainToolDefs,
+		Source:         ep.Source,
 		Collector:      tool.NewCommentCollector(),
 		RetryCollector: retryCollector,
 		RawHolder:      rawHolder,
@@ -298,14 +292,17 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 // or an open failure returns a no-op closer: raw capture must never fail a
 // review.
 func bindRawWriter(holder *llm.RawHolder, repoDir string, sess *session.SessionHistory) func() {
-	noop := func() {}
 	if holder == nil {
-		return noop
+		return func() {}
 	}
 	w, err := session.NewRawFileWriter(repoDir, sess.SessionID)
+	return attachRawWriter(holder, w, err)
+}
+
+func attachRawWriter(holder *llm.RawHolder, w *session.RawFileWriter, err error) func() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: raw logging disabled for this run: %v\n", err)
-		return noop
+		return func() {}
 	}
 	holder.Set(w)
 	return func() {
@@ -348,18 +345,12 @@ func applyCLIExcludes(cc *commonContext, patterns []string) {
 	cc.FileFilter.Exclude = append(cc.FileFilter.Exclude, patterns...)
 }
 
-// excludeToolDef returns a copy of defs with any entries whose function name
-// matches name removed. Used by `ocr scan` to hide tools that don't make
-// sense in full-scan mode (e.g. file_read_diff).
-func excludeToolDef(defs []llm.ToolDef, name string) []llm.ToolDef {
-	out := make([]llm.ToolDef, 0, len(defs))
-	for _, d := range defs {
-		if d.Function.Name == name {
-			continue
-		}
-		out = append(out, d)
+func loadToolDefs(names []string) ([]llm.ToolDef, error) {
+	entries, err := toolsconfig.LoadDefault()
+	if err != nil {
+		return nil, err
 	}
-	return out
+	return toolsconfig.Resolve(entries, names)
 }
 
 // quietHandle wraps the restorer returned by whichever stdout redirection
@@ -371,12 +362,16 @@ type quietHandle struct {
 }
 
 // isMachineReadable reports whether the output format writes a structured
-// document to stdout that must not be interleaved with progress text. Both
-// json and sarif move [ocr] progress lines off stdout and suppress the trace
-// summary, which is already carried inside the document.
+// document to stdout that must not be interleaved with progress text. json and
+// sarif move [ocr] progress lines off stdout and suppress the trace summary,
+// which is already carried inside the document. html joins them for the second
+// reason resolveOutputWriter consults this: it must not run the exported page
+// through stripAnsiWriter, which would eat the ESC bytes in trace-quoted
+// source. It is not a value validateOutputFormat accepts, so it reaches this
+// function only from `session export`.
 func isMachineReadable(outputFormat string) bool {
 	switch strings.ToLower(strings.TrimSpace(outputFormat)) {
-	case "json", "sarif":
+	case "json", "sarif", "html":
 		return true
 	default:
 		return false
@@ -394,7 +389,7 @@ func isMachineReadable(outputFormat string) bool {
 //     Every result document (json, sarif, text) is written straight to
 //     os.Stdout and never through stdout.Writer(), so stdout stays a single
 //     parseable document while stderr carries the live progress.
-//   - otherwise: no-op, progress stays on stdout.
+//   - otherwise: progress stays on stdout, styled according to --color.
 func newQuietHandle(outputFormat, audience string) *quietHandle {
 	h := &quietHandle{}
 	switch {
@@ -402,6 +397,14 @@ func newQuietHandle(outputFormat, audience string) *quietHandle {
 		h.fn = stdout.Quiet()
 	case isMachineReadable(outputFormat):
 		h.fn = stdout.Swap(os.Stderr)
+	}
+	restoreRouting := h.fn
+	restoreStyle := stdout.StyleProgress(resolveColorFor(stdout.Writer()), resolveColorFor(os.Stderr))
+	h.fn = func() {
+		restoreStyle()
+		if restoreRouting != nil {
+			restoreRouting()
+		}
 	}
 	return h
 }
@@ -829,7 +832,7 @@ func emitRunResult(
 	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
-	duration := time.Since(startTime)
+	duration := reviewDuration(ag, startTime)
 	telemetry.RecordReviewDuration(ctx, duration)
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
@@ -837,12 +840,13 @@ func emitRunResult(
 
 	traceID := telemetry.TraceIDFromContext(ctx)
 	manifest := ag.RunManifest()
+	analysis := analysisOutputOf(ag)
 
 	// JSON and SARIF are machine-readable formats written to stdout; they
 	// share the same suppression of trace summaries and early stdout restore.
 	machineReadable := isMachineReadable(outputFormat)
 
-	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
+	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 && analysis == nil {
 		if outputFormat == "json" {
 			return outputJSONNoFiles(traceID, llmIdentity, out)
 		}
@@ -869,6 +873,10 @@ func emitRunResult(
 		})
 	}
 
+	if outputFormat == "sarif" {
+		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+	}
+	comments = inCommentSeverityOrder(comments, comments)
 	if outputFormat == "json" {
 		var resumeInfo *agent.ResumeInfo
 		if p, ok := ag.(resumeInfoProvider); ok {
@@ -881,10 +889,7 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
-	}
-	if outputFormat == "sarif" {
-		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, analysis)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
 	// Between the comments/warnings block and the project summary: the report is
@@ -892,7 +897,10 @@ func emitRunResult(
 	// after them but must not separate the summary from the end of output.
 	outputRetryReportText(out, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
-		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", sanitizeTerminal(summary))
+		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", markdownForOutput(out, summary))
+	}
+	if analysis != nil {
+		outputAnalysisText(out, analysis)
 	}
 	// Text rendering ignores fmt.Fprintf write errors; surface them here so a
 	// failed --output write (permission, disk full) fails the command non-zero

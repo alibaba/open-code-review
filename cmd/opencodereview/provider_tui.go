@@ -4,7 +4,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -120,9 +122,7 @@ func (m providerTUIModel) sessionModelPickSnapshot() map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(m.sessionModelPick))
-	for k, v := range m.sessionModelPick {
-		out[k] = v
-	}
+	maps.Copy(out, m.sessionModelPick)
 	return out
 }
 
@@ -982,6 +982,15 @@ func (m providerTUIModel) apiKeyCmdForStep() string {
 	return ""
 }
 
+func (m providerTUIModel) officialProviderUsesExternalCredentials() bool {
+	p := m.currentProvider()
+	var entry ProviderEntry
+	if m.existingCfg != nil {
+		entry = m.existingCfg.Providers[p.Name]
+	}
+	return providerUsesExternalCredentials(p, entry)
+}
+
 func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	if m.apiKeyOriginal != "" {
 		return true, ""
@@ -997,9 +1006,9 @@ func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	}
 	if m.activeTab == tabOfficial {
 		p := m.currentProvider()
-		if p.AmbientAuth {
+		if m.officialProviderUsesExternalCredentials() {
 			// Reachable when an existing config is edited: an empty key is the
-			// correct state for a provider that signs from the AWS chain.
+			// correct state when credentials are supplied outside the config.
 			return true, ""
 		}
 		if officialProviderEnvKeySet(p) {
@@ -1130,6 +1139,21 @@ func authHeaderFormError(raw string) string {
 
 const manualAuthTokenRequiredError = "Auth token is required (configure it or set llm.auth_token_cmd; whitespace-only input is not accepted)"
 
+const manualURLRequiredError = "URL is required (for example https://api.example.com/v1)"
+
+// manualURLFormError words a rejected Base URL so the manual form can keep the
+// cursor on the URL field; applyManualConfig still validates at save time.
+func manualURLFormError(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return manualURLRequiredError
+	}
+	if err := validateBaseURL(trimmed); err != nil {
+		return fmt.Sprintf("Invalid URL: %v", err)
+	}
+	return ""
+}
+
 // manualAuthTokenCmd returns the configured llm.auth_token_cmd, which the
 // resolver runs when llm.auth_token is empty. Trimmed for the same reason as
 // apiKeyCmdForStep: the resolver treats a whitespace-only command as unset.
@@ -1236,6 +1260,11 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 		m.cpStep = cpStepName
 		return m, m.cpNameInput.Focus()
 	}
+	if err := validateProviderName(r.provider); err != nil {
+		m.formError = err.Error()
+		m.cpStep = cpStepName
+		return m, m.cpNameInput.Focus()
+	}
 	if m.customProviderNameTaken(r.provider) {
 		m.formError = fmt.Sprintf(`Provider "%s" already exists`, r.provider)
 		m.cpStep = cpStepName
@@ -1300,17 +1329,25 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		AWSProfile: v.AWSProfile,
 		AWSRegion:  v.AWSRegion,
 	}
+	out.unknownJSONFields = cloneUnknownJSONFields(v.unknownJSONFields)
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
-		for k, val := range v.ExtraBody {
-			out.ExtraBody[k] = val
-		}
+		maps.Copy(out.ExtraBody, v.ExtraBody)
 	}
 	if v.ExtraHeaders != nil {
 		out.ExtraHeaders = make(map[string]string, len(v.ExtraHeaders))
-		for k, val := range v.ExtraHeaders {
-			out.ExtraHeaders[k] = val
-		}
+		maps.Copy(out.ExtraHeaders, v.ExtraHeaders)
+	}
+	return out
+}
+
+func cloneUnknownJSONFields(src map[string]json.RawMessage) map[string]json.RawMessage {
+	if src == nil {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(src))
+	for key, value := range src {
+		out[key] = append(json.RawMessage(nil), value...)
 	}
 	return out
 }
@@ -1712,9 +1749,14 @@ func (m *providerTUIModel) reloadConfigAfterSaveFailure() bool {
 func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
 	switch m.manualStep {
 	case manualStepURL:
-		if m.manualURLInput.Value() == "" {
+		// Reject a bad URL here so a typo is fixed in place instead of after the
+		// model and credentials have been typed in.
+		if msg := manualURLFormError(m.manualURLInput.Value()); msg != "" {
+			m.formError = msg
 			return m, nil
 		}
+		m.formError = ""
+		m.manualURLInput.SetValue(strings.TrimSpace(m.manualURLInput.Value()))
 		m.manualURLInput.Blur()
 		m.manualStep = manualStepProtocol
 		return m, nil
@@ -1856,10 +1898,17 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.formError = err.Error()
 			return m, nil
 		}
-		if m.activeTab == tabOfficial && m.currentProvider().AmbientAuth {
-			// An ambient-auth provider has no key to collect, so the model step
-			// is the last one. Showing an API-key prompt that must be left blank
-			// would read as a step the user failed to complete.
+		if m.activeTab == tabOfficial && m.officialProviderUsesExternalCredentials() {
+			// This provider has no key to collect, so the model step is the last
+			// one. Showing an API-key prompt that must be left blank would read as
+			// a step the user failed to complete.
+			//
+			// The api-key state still carries whatever the previously active
+			// provider seeded (or the user typed before backing out), and
+			// result() would report it as this provider's key — drop it.
+			m.apiKeyOriginal = ""
+			m.apiKeyMasked = false
+			m.apiKeyInput.SetValue("")
 			m.formError = ""
 			m.confirmed = true
 			return m, tea.Quit
@@ -2370,6 +2419,11 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 			case manualStepAuthHeader:
 				s.WriteString("    " + m.manualAuthHeaderInput.View() + "\n")
 			}
+			// The error belongs to the field the user can still fix, so it sits
+			// under the active input rather than below the whole form.
+			if m.formError != "" {
+				s.WriteString(tuiErrorStyle.Render("    "+m.formError) + "\n")
+			}
 		} else {
 			display := f.value
 			if display == "" && f.label == "Auth Header" {
@@ -2381,12 +2435,6 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 				s.WriteString("  " + tuiDimStyle.Render(f.label+": "+display) + "\n")
 			}
 		}
-	}
-
-	if m.formError != "" {
-		s.WriteString("\n")
-		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
-		s.WriteString("\n")
 	}
 }
 

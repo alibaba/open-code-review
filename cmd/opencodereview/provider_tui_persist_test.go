@@ -184,6 +184,22 @@ func TestApplyCreateCustomProvider(t *testing.T) {
 		return m
 	}
 
+	for _, name := range []string{".gateway", "gateway.", "gateway..v2"} {
+		t.Run("invalid name "+name, func(t *testing.T) {
+			cfg := &Config{Provider: "openai", Model: "saved-model"}
+			m := setup(t, cfg, filepath.Join(t.TempDir(), "config.json"))
+			m.cpNameInput.SetValue(name)
+			out, _ := m.applyCreateCustomProvider()
+			got := out.(providerTUIModel)
+			if got.formError == "" || got.savedInSession || got.cpStep != cpStepName {
+				t.Fatalf("invalid name was not rejected: formError=%q, saved=%v, step=%v", got.formError, got.savedInSession, got.cpStep)
+			}
+			if cfg.Provider != "openai" || cfg.Model != "saved-model" || cfg.CustomProviders != nil {
+				t.Fatalf("configuration changed after rejected write: %#v", cfg)
+			}
+		})
+	}
+
 	t.Run("nil config guard", func(t *testing.T) {
 		m := setup(t, &Config{}, filepath.Join(t.TempDir(), "c.json"))
 		m.existingCfg = nil

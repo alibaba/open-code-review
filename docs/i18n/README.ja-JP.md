@@ -12,7 +12,7 @@
 </p>
 <p align="center">
   <a href="https://trendshift.io/repositories/41087" target="_blank">
-    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
   </a>
   <a href="https://trendshift.io/repositories/41087" target="_blank">
     <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/monthly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 280px; height: 60px;" width="280" height="60" />
@@ -22,7 +22,7 @@
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
-  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://img.shields.io/badge/Ask-DeepWiki-blue?style=flat-square" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
@@ -32,9 +32,10 @@
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | 日本語 | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
+  <a href="../../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | 日本語 | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a> | <a href="README.tr-TR.md">Türkçe</a> | <a href="README.fr-FR.md">Français</a> | <a href="README.vi-VN.md">Tiếng Việt</a>
 </p>
 
 ---
@@ -101,9 +102,41 @@ Open Code Reviewのコア哲学は、決定論的エンジニアリングとエ�
 
 ## 使い方
 
+<a id="supported-platforms"></a>
+
 ### 前提条件
 
+- **対応 OS:** Windows、macOS、Linux。
 - **Git >= 2.41** — Open Code Review は diff 生成、コード検索、リポジトリ操作に Git を利用します。
+
+<a id="supported-agents"></a>
+
+### Agent Skills
+
+Claude Code、Codex、Cursor、Kimi Codeなど、Agent Skillsに対応しローカルコマンドを実行できるエージェントで利用できます。両モードとも **Git >= 2.41** と **`ocr` CLI** が必要ですが、OCRのモデルプロバイダー設定が必要なのはネイティブモードだけです。
+
+#### 1. スキルをインストール
+
+レビュー対象のプロジェクト内で実行し、インストーラーで必要なスキルとエージェントを選択します。
+
+```bash
+npx skills add alibaba/open-code-review
+```
+
+`ocr` がなければ、スキルは環境の権限に従ってエージェントにインストールを案内します。事前に `npm install -g @alibaba-group/open-code-review` を実行しても構いません。プラグインや手動インストールについては[エージェント別ガイド](../../plugins/open-code-review/README.md)を参照するか、[`skills/`](../../skills/) 内の必要なフォルダーをエージェントのスキルディレクトリにコピーしてください。
+
+#### 2. レビューモードを選択
+
+| | ネイティブモード | デリゲートモード |
+|---|---|---|
+| スキル | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
+| レビュー担当 | OCR専用のレビューエージェントとパイプライン | OCRのレビューパイプラインとガードレールに従う現在のエージェント |
+| モデルと認証 | OCR独自のプロバイダー設定 | ホストエージェントの既存モデルと認証 |
+| 適した用途 | OCR用のモデルエンドポイントがあり、完全なレビューパイプラインを使いたい場合 | 別のAPIキーがない、または既存のエージェントの契約・設定を使いたい場合 |
+
+**別のキーがなければ、デリゲートモードから始めてください。** 不要になるのはOCRのプロバイダー設定だけで、ホストエージェントの認証、利用制限、料金は引き続き適用されます。エージェントのサブスクリプションは、ネイティブモード用のAPI認証情報にはなりません。デリゲートモードでは、OCRのCLIとスキルが共同でレビューパイプラインとガードレールを提供します。ファイル選択、ルール解決、カバレッジ要件、構造化された報告が含まれます。ホストエージェントがこの手順に沿って分析・位置特定・報告を行い、OCRの完全なネイティブパイプラインを実行するわけではありません。
+
+ネイティブモードでは `ocr config provider` と `ocr config model` で一度設定します。認証要件はプロバイダーによって異なります。[設定](https://open-codereview.ai/docs/configuration)を参照してください。
 
 ### CLI
 
@@ -123,12 +156,15 @@ npm install -g @alibaba-group/open-code-review
 
 コードレビューの前にLLMの設定が必要です。[デリゲートモード](https://open-codereview.ai/docs/delegate)を使用する場合は不要です。
 
+- **OCR がモデルを呼び出す場合:** `ocr review`、`/open-code-review:review` コマンド、`open-code-review` スキルは、Claude Code Team/Pro サブスクリプションのログインではなく、OCR 側のプロバイダー設定を使用します。認証要件はプロバイダーによって異なります。[設定](https://open-codereview.ai/docs/configuration)を参照してください。
+- **ホストエージェントがモデルを呼び出す場合:** `/open-code-review:delegate-review` コマンドと `open-code-review-delegate` スキルは、ホストエージェントに設定されたモデルと認証方式を使用します。OCR 側で LLM や認証情報を別途設定する必要はありません。[Claude Code のインストール手順](../../plugins/open-code-review/README.md#claude-code)を参照してください。
+
 ```bash
 ocr config provider          # ビルトインプロバイダーを選択またはカスタムプロバイダーを追加
 ocr config model             # アクティブなプロバイダーのモデルを選択
 ```
 
-![Provider setup](../../imgs/providers.jpg)
+![Model providers](../../imgs/providers-ja.jpg)
 
 対話的UIがプロバイダーの選択、APIキーの入力、モデル設定をガイドし、完了後に自動的に接続テストを行います。
 
@@ -141,6 +177,9 @@ cd your-project
 
 # ワークスペースモード — ステージ済み・未ステージ・未追跡のすべての変更をレビュー
 ocr review
+
+# 現在のブランチ — main から分岐した後の変更をレビュー（--to のデフォルトは HEAD）
+ocr review --from main
 
 # ブランチ範囲 — main から分岐した後の feature-branch の変更をレビュー（マージベースモード）
 ocr review --from main --to feature-branch
@@ -180,6 +219,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — レビュー用スラッシュコマンドを含むプラグインをインストール
   - [Codex](../../plugins/open-code-review/README.md#codex) — 呼び出し可能なレビュースキルを含むプラグインをインストール
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — 移植可能なレビュースキルを含むプラグインをインストール
+  - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — レビュー用スラッシュコマンドとスキルを含むプラグインをインストール
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — ネイティブレビュー・ツールとスラッシュコマンドをインストール
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA ホストモデルと公開可能なテンプレートで委任モードを実行
   - [Skill 対応エージェント](https://open-codereview.ai/docs/agent-skill) — 移植可能なエージェントスキルをインストール

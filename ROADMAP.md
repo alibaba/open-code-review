@@ -14,7 +14,7 @@ OpenCodeReview currently provides:
 - A CLI tool (`ocr`) for AI-powered code review with deterministic
   engineering and agent hybrid architecture.
 - Integration with coding agents: Claude Code (plugin/skill), Codex
-  (plugin), and Cursor (plugin).
+  (plugin), Cursor (plugin), and Kimi Code (plugin).
 - A VSCode extension for in-editor code review.
 - CI/CD integration (GitHub Actions, GitLab CI, etc.).
 - Multi-provider LLM support (OpenAI-compatible, Anthropic, Google Gemini,
@@ -26,6 +26,15 @@ OpenCodeReview currently provides:
 - Multi-language documentation (English, Chinese, Japanese, Korean, Russian).
 
 ## Planned — H2 2026
+
+### ACP Server Adapter
+
+- **Experimental: local source builds only** — Expose OCR as a dedicated review
+  agent through an independent ACP v1 stdio adapter, keeping protocol handling
+  outside the core review engine. Review/scan, command discovery, progress,
+  findings and cancellation are implemented.
+  See the [adapter documentation](acp/README.md) for configuration and support
+  boundaries.
 
 ### IDE Plugins
 

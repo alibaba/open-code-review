@@ -8,4 +8,7 @@ module.exports = {
     '^.+\\.tsx?$': ['ts-jest', { isolatedModules: true, tsconfig: 'tsconfig.extension.json' }],
   },
   testMatch: ['**/__tests__/**/*.test.ts'],
+  moduleNameMapper: {
+    '^@shared/(.*)$': '<rootDir>/../frontend/src/shared/$1'
+  }
 };

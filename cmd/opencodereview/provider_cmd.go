@@ -107,10 +107,16 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	if result.model == "" {
 		return fmt.Errorf("model is required for manual configuration")
 	}
+	// The other writer of llm.url (ocr config set) validates the same way, so
+	// the two cannot disagree about what a valid value is.
+	baseURL := strings.TrimSpace(result.url)
+	if err := validateBaseURL(baseURL); err != nil {
+		return fmt.Errorf("invalid URL for manual configuration: %w", err)
+	}
 
 	cfg.Provider = ""
 	cfg.Model = ""
-	cfg.Llm.URL = result.url
+	cfg.Llm.URL = baseURL
 	cfg.Llm.Model = result.model
 	cfg.Llm.AuthToken = result.apiKey
 	authHeader, err := llm.NormalizeAuthHeader(result.authHeader)
@@ -145,7 +151,7 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	fmt.Printf("Model: %s\n", result.model)
 
 	fmt.Println("\nTesting connection...")
-	if err := runLLMTest(); err != nil {
+	if err := runLLMTestPath(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Connection test failed: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Configuration has been saved. Fix the issue and run 'ocr llm test' to re-verify.")
 		return nil
@@ -157,6 +163,9 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 func applyCustomProviderConfig(configPath string, cfg *Config, result providerTUIResult) error {
 	if result.provider == "" {
 		return fmt.Errorf("provider name is required")
+	}
+	if err := validateProviderName(result.provider); err != nil {
+		return err
 	}
 	model := result.resolvedModel()
 	if model == "" {
@@ -219,7 +228,7 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	fmt.Printf("Model: %s\n", model)
 
 	fmt.Println("\nTesting connection...")
-	if err := runLLMTest(); err != nil {
+	if err := runLLMTestPath(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Connection test failed: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Provider configuration has been saved. Fix the issue and run 'ocr llm test' to re-verify.")
 		return nil
@@ -237,15 +246,15 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 // command as unset, so without this a command of "   " would satisfy the check
 // here and then fail resolution with "no api_key or api_key_cmd configured".
 //
-// An ambient-auth provider has no credential to save at all: demanding one would
-// make it impossible to configure, since the credentials live in the AWS chain
+// Ambient-auth and external-auth providers have no credential to save here:
+// their credentials come from the environment chain or a dedicated token store
 // rather than the config file.
-func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool) error {
+func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool, entry ProviderEntry) error {
 	if apiKey != "" || strings.TrimSpace(apiKeyCmd) != "" {
 		return nil
 	}
 	switch {
-	case isPreset && preset.AmbientAuth:
+	case isPreset && providerUsesExternalCredentials(preset, entry):
 		return nil
 	case isPreset && preset.EnvVar != "":
 		if os.Getenv(preset.EnvVar) == "" {
@@ -255,6 +264,16 @@ func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.P
 	default:
 		return fmt.Errorf("API key is required for provider %s (configure it or set providers.%s.api_key_cmd)", providerName, providerName)
 	}
+}
+
+func providerUsesExternalCredentials(preset llm.Provider, entry ProviderEntry) bool {
+	if preset.ExternalAuth {
+		return true
+	}
+	if entry.Protocol != "" {
+		return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicBedrock
+	}
+	return preset.AmbientAuth || llm.NormalizeProtocol(preset.Protocol) == llm.ProtocolAnthropicBedrock
 }
 
 func applyOfficialProviderConfig(configPath string, cfg *Config, result providerTUIResult) error {
@@ -268,7 +287,7 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	preset, isPreset := llm.LookupProvider(result.provider)
 
-	if err := checkAPIKeyRequirement(result.provider, result.apiKey, cfg.Providers[result.provider].APIKeyCmd, preset, isPreset); err != nil {
+	if err := checkAPIKeyRequirement(result.provider, result.apiKey, cfg.Providers[result.provider].APIKeyCmd, preset, isPreset, cfg.Providers[result.provider]); err != nil {
 		return err
 	}
 
@@ -304,7 +323,7 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	fmt.Printf("Model: %s\n", model)
 
 	fmt.Println("\nTesting connection...")
-	if err := runLLMTest(); err != nil {
+	if err := runLLMTestPath(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Connection test failed: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Provider configuration has been saved. Fix the issue and run 'ocr llm test' to re-verify.")
 		return nil
@@ -425,11 +444,14 @@ func saveConfig(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
+	// WriteFile applies 0o600 only when creating the file; existing files keep
+	// their prior permissions. Tighten an existing config before writing any
+	// credential material; a missing file will be created as 0600 below.
+	if err := os.Chmod(path, 0o600); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("chmod config: %w", err)
+	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod config: %w", err)
 	}
 	return nil
 }

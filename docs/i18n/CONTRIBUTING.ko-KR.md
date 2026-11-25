@@ -2,7 +2,7 @@
 
 OpenCodeReview에 기여해 주셔서 감사합니다. 오타 수정, bug report, 새 기능 구현 등 모든 기여는 프로젝트에 도움이 됩니다.
 
-[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | 한국어 | [Русский](CONTRIBUTING.ru-RU.md)
+[English](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md) | 한국어 | [Русский](CONTRIBUTING.ru-RU.md) | [Türkçe](CONTRIBUTING.tr-TR.md) | [Tiếng Việt](CONTRIBUTING.vi-VN.md)
 
 ## Code of Conduct
 
@@ -22,7 +22,7 @@ OpenCodeReview에 기여해 주셔서 감사합니다. 오타 수정, bug report
 
 ### 전제 조건
 
-- [Go 1.25+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -85,14 +85,22 @@ git checkout -b feat/your-feature-name
 예시:
 
 ```text
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
 
+`PR Commit Policy`는 PR 제목과 본문을 포함한 모든 커밋 메시지를 대소문자 구분 없이 검사합니다.
+`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]` 또는
+`skip-checks: true` / `skip-checks:true`만 있는 줄을 포함하지 마세요.
+
+검사에 실패하면 PR 제목을 수정하거나 자신의 기여 브랜치에서 해당 커밋 메시지를 다시 작성하세요.
+이러한 지시가 없는 새 커밋을 추가해도 이전 커밋의 위반 사항은 해결되지 않습니다.
+PR 설명에서는 이러한 지시를 논의할 수 있으며 검사 대상이 아닙니다.
+
 ### License Headers
 
-모든 소스 파일(`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`)에는 SPDX 라이선스 헤더가 필요합니다. 새 파일을 생성한 후 다음을 실행하세요:
+모든 소스 파일(`.go`, `.js`, `.mjs`, `.ts`, `.tsx`, `.kt`, `.kts`, `.sh`, `.py`, `.css`)에는 SPDX 라이선스 헤더가 필요합니다. 새 파일을 생성한 후 다음을 실행하세요:
 
 ```bash
 make license-add
@@ -119,20 +127,38 @@ make build
 
 ```text
 .
+├── acp/                  # ACP adapter for the CLI
+├── bin/                  # NPM wrapper
 ├── cmd/opencodereview/   # CLI entry point
+├── docs/                 # Localized README and CONTRIBUTING
+├── examples/             # CI/CD integration examples
+├── extensions/           # Editor extensions (VS Code and IDEA)
+├── imgs/                 # Logo, benchmark, and highlight images
 ├── internal/
 │   ├── agent/            # Review agent logic
+│   ├── chatgptauth/      # ChatGPT OAuth and credential management
 │   ├── config/           # Configuration management
+│   ├── delegate/         # Delegation-mode review specs (no LLM)
 │   ├── diff/             # Git diff parsing
-│   ├── llm/              # LLM API client (Anthropic & OpenAI)
+│   ├── gitcmd/           # Bounded git subprocess runner
+│   ├── llm/              # LLM API client (Anthropic, Bedrock & OpenAI)
+│   ├── llmloop/          # Shared per-subtask tool-use loop
+│   ├── mcp/              # MCP server client and tool adapter
 │   ├── model/            # Data models
+│   ├── pathutil/         # Canonical paths and containment checks
+│   ├── release/          # Release asset URL naming checks
+│   ├── scan/             # Full-file code review (ocr scan)
 │   ├── session/          # Review session management
-│   ├── tool/             # Built-in tools (file_read, code_search, etc.)
+│   ├── stdout/           # Swappable stdout writer
+│   ├── suggestdiff/      # Line-level diffs for suggestion rendering
 │   ├── telemetry/        # OpenTelemetry integration
+│   ├── tool/             # Built-in tools (file_read, code_search, etc.)
 │   └── viewer/           # WebUI session viewer
-├── pages/                # WebUI frontend
-├── scripts/              # Build & install scripts
-└── bin/                  # NPM wrapper
+├── npm/                  # Per-platform optional binary packages
+├── pages/                # Landing page
+├── plugins/              # Coding agent plugins
+├── scripts/              # Install, publish, and check scripts
+└── skills/               # Agent skill manifests
 ```
 
 ## AI 지원 개발
@@ -164,7 +190,7 @@ AI가 개발 과정에 관여했다면 아래 규칙을 따라 주세요.
 - 혼란스러운 설명을 명확히 하거나 빠진 맥락 추가
 - command나 configuration option의 사용 예시 추가
 - feature 변경 이후 오래된 내용 update
-- 지역화 문서 번역 또는 개선(`docs/i18n/README.zh-CN.md`, `docs/i18n/README.ja-JP.md`, `docs/i18n/README.ko-KR.md`, `docs/i18n/CONTRIBUTING.zh-CN.md`, `docs/i18n/CONTRIBUTING.ja-JP.md`, `docs/i18n/CONTRIBUTING.ko-KR.md`)
+- `docs/i18n/`에 있는 README와 기여 가이드를 번역하거나 기존 번역을 개선하기
 
 ### 문서 workflow
 
@@ -180,10 +206,13 @@ AI가 개발 과정에 관여했다면 아래 규칙을 따라 주세요.
 | `docs/i18n/README.zh-CN.md` | Chinese translation |
 | `docs/i18n/README.ja-JP.md` | Japanese translation |
 | `docs/i18n/README.ko-KR.md` | Korean translation |
+| `docs/i18n/README.tr-TR.md` | 튀르키예어 번역 |
+| `docs/i18n/README.fr-FR.md` | 프랑스어 번역 |
 | `CONTRIBUTING.md` | contribution guide (English) |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | contribution guide (Chinese) |
 | `docs/i18n/CONTRIBUTING.ja-JP.md` | contribution guide (Japanese) |
 | `docs/i18n/CONTRIBUTING.ko-KR.md` | contribution guide (Korean) |
+| `docs/i18n/CONTRIBUTING.tr-TR.md` | 튀르키예어 기여 가이드 |
 
 ## 변경 제출
 
@@ -212,7 +241,7 @@ Bug를 보고할 때는 다음 정보를 포함해 주세요.
 commit message와 같은 Conventional Commits 형식을 사용합니다.
 
 ```text
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### Review process

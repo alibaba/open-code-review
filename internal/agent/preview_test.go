@@ -195,6 +195,55 @@ func TestWhyExcluded_DefaultPathFilter(t *testing.T) {
 			},
 			expected: ExcludeNone,
 		},
+		{
+			name: "rust integration test excluded by default path",
+			diff: model.Diff{
+				NewPath: "tests/integration.rs",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "rust tests.rs module excluded by default path",
+			diff: model.Diff{
+				NewPath: "crates/core/src/tests.rs",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "rust _tests.rs file excluded by default path",
+			diff: model.Diff{
+				NewPath: "crates/core/src/parser_tests.rs",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "rust benchmark file excluded by default path",
+			diff: model.Diff{
+				NewPath: "benches/throughput.rs",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "cpp gtest file excluded by default path",
+			diff: model.Diff{
+				NewPath: "absl/strings/str_cat_test.cc",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "c file in tests directory excluded by default path",
+			diff: model.Diff{
+				NewPath: "tests/unit/test_list.c",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "cpp contest source kept",
+			diff: model.Diff{
+				NewPath: "src/contest.cc",
+			},
+			expected: ExcludeNone,
+		},
 	}
 
 	for _, tt := range tests {
@@ -250,9 +299,13 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 		{
 			name: "non-included file with valid extension still reviewed (additive semantics)",
 			diff: model.Diff{
-				NewPath: "vendor/baz.go",
+				// Was vendor/baz.go, chosen only as a path outside the include
+				// patterns that nothing else excluded. #1494 added **/vendor/**
+				// to the default list, so it needs a path that is still only
+				// non-included and not excluded on any other ground.
+				NewPath: "cmd/baz.go",
 			},
-			// .go is a supported extension and vendor/baz.go does not hit
+			// .go is a supported extension and cmd/baz.go does not hit
 			// IsExcludedPath, so it falls through to ExcludeNone.
 			expected: ExcludeNone,
 		},
@@ -534,6 +587,22 @@ func TestSelectFilesDeletionGate(t *testing.T) {
 	if decisions[1].selected() || decisions[1].Reason != ExcludeDeleted {
 		t.Errorf("gone.go = (selected=%v, reason=%q), want (false, %q)",
 			decisions[1].selected(), decisions[1].Reason, ExcludeDeleted)
+	}
+}
+
+func TestSelectFiles_Starlark(t *testing.T) {
+	agent := New(Args{})
+	for _, path := range []string{
+		"BUILD", "src/library/BUILD", "WORKSPACE", "legacy/WORKSPACE",
+		"src/library/BUILD.bazel", "legacy/WORKSPACE.bazel", "MODULE.bazel",
+		"rules/library.bzl", "config.star",
+	} {
+		t.Run(path, func(t *testing.T) {
+			decisions := agent.selectFiles([]model.Diff{{NewPath: path}})
+			if !decisions[0].selected() {
+				t.Errorf("selectFiles(%q) excluded file: %s", path, decisions[0].Reason)
+			}
+		})
 	}
 }
 

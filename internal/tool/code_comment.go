@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -46,6 +47,9 @@ var validCodeCommentSeverities = map[string]struct{}{
 	codeCommentSeverityLow:      {},
 }
 
+// CommentNoneUsableMsg reports a parsed batch with no usable comments.
+const CommentNoneUsableMsg = "Error: none of the 'comments' entries could be filed; each entry needs a non-empty 'content' and a 'path' (or the reviewed file's path). Re-send the finding with those fields."
+
 // CodeCommentProvider submits review comments to the per-Agent CommentCollector.
 type CodeCommentProvider struct {
 	Collector *CommentCollector
@@ -61,6 +65,9 @@ func (p *CodeCommentProvider) Execute(_ context.Context, args map[string]any) (s
 	comments, errMsg := ParseComments(args)
 	if errMsg != "" {
 		return errMsg, nil
+	}
+	if len(comments) == 0 {
+		return CommentNoneUsableMsg, nil
 	}
 
 	for i := range comments {
@@ -144,11 +151,11 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		if severity, ok := obj["severity"].(string); ok {
 			cm.Severity = normalizeCodeCommentSeverity(severity)
 		}
-		if path, ok := obj["path"].(string); ok && path != "" {
-			cm.Path = path
+		if pathVal, ok := obj["path"].(string); ok && pathVal != "" {
+			cm.Path = normalizeCommentPath(pathVal)
 		}
 		if cm.Path == "" {
-			cm.Path = defaultPath
+			cm.Path = normalizeCommentPath(defaultPath)
 		}
 
 		if cm.Path == "" || cm.Content == "" {
@@ -158,6 +165,18 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		comments = append(comments, cm)
 	}
 	return comments, repair, ""
+}
+
+func normalizeCommentPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	p = strings.ReplaceAll(p, "\\", "/")
+	p = path.Clean(p)
+	if p == "." {
+		return ""
+	}
+	return strings.TrimPrefix(p, "/")
 }
 
 func normalizeCodeCommentCategory(category string) string {

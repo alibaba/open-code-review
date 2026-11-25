@@ -7,7 +7,9 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,6 +45,7 @@ type SessionHistory struct {
 	RepoDir      string
 	GitBranch    string
 	Model        string
+	LLMSource    string
 	ReviewMode   string
 	DiffFrom     string
 	DiffTo       string
@@ -64,6 +67,10 @@ type SessionHistory struct {
 	// Finalize, embedded into session_end and exposed to the CLI. Nil for
 	// legacy/scan runs.
 	finalManifest *RunManifest
+	// finalRetryReport is the frozen retry report handed back by the agent before
+	// Finalize and embedded into session_end. Nil is the common case: Freeze
+	// withholds a report unless something retried, failed or was cancelled.
+	finalRetryReport *llm.RetryReport
 	// persistInitErr records a failure to create the JSONL writer. The run may
 	// still produce a manifest for CLI output, but Finalize must report that the
 	// persisted-session outlet was never available.
@@ -129,12 +136,15 @@ type ToolResultRecord struct {
 
 // SessionOptions holds optional metadata for a new session.
 type SessionOptions struct {
-	ReviewMode  string
-	DiffFrom    string
-	DiffTo      string
-	DiffCommit  string
-	ScanPaths   []string
-	ResumedFrom string
+	AnalysisEnabled bool
+	tracePath       string
+	ReviewMode      string
+	DiffFrom        string
+	DiffTo          string
+	DiffCommit      string
+	ScanPaths       []string
+	ResumedFrom     string
+	LLMSource       string
 
 	// Operation opts this session into a run manifest. When non-empty (e.g.
 	// "review") New creates a ManifestBuilder with this operation and the session
@@ -153,12 +163,24 @@ type ResumeInfo struct {
 
 // New creates a new SessionHistory with the given repo directory.
 func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
-	sessionID := generateUUID()
+	return newHistory(generateUUID(), repoDir, gitBranch, model, opts)
+}
+
+func NewAnalysisTrace(reportID, directory, repoDir, model string, opts SessionOptions) *SessionHistory {
+	if reportID == "" {
+		reportID = generateUUID()
+	}
+	opts.tracePath = filepath.Join(directory, "trace.jsonl")
+	return newHistory(reportID, repoDir, "", model, opts)
+}
+
+func newHistory(sessionID, repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
 	sh := &SessionHistory{
 		SessionID:    sessionID,
 		RepoDir:      repoDir,
 		GitBranch:    gitBranch,
 		Model:        model,
+		LLMSource:    opts.LLMSource,
 		ReviewMode:   opts.ReviewMode,
 		DiffFrom:     opts.DiffFrom,
 		DiffTo:       opts.DiffTo,
@@ -221,6 +243,19 @@ func (sh *SessionHistory) FinalManifest() *RunManifest {
 	}
 	m := sh.finalManifest.cloned()
 	return &m
+}
+
+// SetFinalRetryReport stores the frozen retry report the agent produced, which
+// Finalize embeds into session_end. Passing nil leaves the field out, which is
+// what a run with nothing to report looks like. The report is frozen before it
+// gets here and never mutated, so it is stored by pointer rather than cloned.
+func (sh *SessionHistory) SetFinalRetryReport(r *llm.RetryReport) {
+	if sh == nil {
+		return
+	}
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	sh.finalRetryReport = r
 }
 
 // HasPersistence reports whether this session has a JSONL writer. A false value
@@ -328,6 +363,7 @@ func (sh *SessionHistory) Finalize() error {
 		p := sh.persist
 		persistInitErr := sh.persistInitErr
 		manifest := sh.finalManifest
+		retryReport := sh.finalRetryReport
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
 		if manifest != nil && manifest.SchemaVersion == ManifestSchemaVersion {
@@ -354,7 +390,7 @@ func (sh *SessionHistory) Finalize() error {
 		// result is cached in finalizeErr. sync.Once guarantees every other
 		// caller blocks until this completes, then reads the same finalizeErr.
 		if p != nil {
-			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest)
+			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest, retryReport)
 		}
 	})
 	return sh.finalizeErr
@@ -391,9 +427,25 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 			Role:             m.Role,
 			Content:          m.Content,
 			ToolCallID:       m.ToolCallID,
-			ToolCalls:        append([]llm.ToolCall(nil), m.ToolCalls...),
+			ToolCalls:        copyToolCalls(m.ToolCalls),
 			Native:           m.Native,
 			ReasoningContent: m.ReasoningContent,
+		}
+	}
+	return cp
+}
+
+// copyToolCalls deep-copies tool calls. ExtraContent is a byte slice, so an
+// element copy alone would alias the caller's bytes.
+func copyToolCalls(tcs []llm.ToolCall) []llm.ToolCall {
+	if len(tcs) == 0 {
+		return nil
+	}
+	cp := make([]llm.ToolCall, len(tcs))
+	for i, tc := range tcs {
+		cp[i] = tc
+		if len(tc.ExtraContent) > 0 {
+			cp[i].ExtraContent = append(json.RawMessage(nil), tc.ExtraContent...)
 		}
 	}
 	return cp
@@ -405,7 +457,7 @@ func copyMessagesForJSON(msgs []llm.Message) any {
 		Role          string         `json:"role"`
 		Content       any            `json:"content"`
 		ToolCallID    string         `json:"tool_call_id,omitempty"`
-		ToolCalls     []llm.ToolCall `json:"tool_calls,omitempty"`
+		ToolCalls     []toolCallJSON `json:"tool_calls,omitempty"`
 		NativePayload any            `json:"native_payload,omitempty"`
 	}
 	out := make([]msg, 0, len(msgs))
@@ -414,9 +466,32 @@ func copyMessagesForJSON(msgs []llm.Message) any {
 			Role:          m.Role,
 			Content:       m.Content,
 			ToolCallID:    m.ToolCallID,
-			ToolCalls:     m.ToolCalls,
+			ToolCalls:     toolCallsForJSON(m.ToolCalls),
 			NativePayload: nativeTurnForJSON(m.Native),
 		})
+	}
+	return out
+}
+
+// toolCallJSON is the persisted shape of a tool call. A struct rather than a
+// map, because a map sorts its keys: this keeps each record byte-identical to
+// what []llm.ToolCall produced before, with extra_content appended only when
+// present. ExtraContent is json:"-" on ToolCall, so it is carried here (#1357).
+type toolCallJSON struct {
+	ID           string           `json:"id"`
+	Type         string           `json:"type"`
+	Function     llm.FunctionCall `json:"function"`
+	ExtraContent json.RawMessage  `json:"extra_content,omitempty"`
+}
+
+// toolCallsForJSON projects tool calls for persistence.
+func toolCallsForJSON(tcs []llm.ToolCall) []toolCallJSON {
+	if len(tcs) == 0 {
+		return nil
+	}
+	out := make([]toolCallJSON, 0, len(tcs))
+	for _, tc := range tcs {
+		out = append(out, toolCallJSON{ID: tc.ID, Type: tc.Type, Function: tc.Function, ExtraContent: tc.ExtraContent})
 	}
 	return out
 }
@@ -450,7 +525,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 		cacheWriteTokens = int(resp.Usage.CacheWriteTokens)
 	} else {
 		for _, m := range tr.RequestMessages {
-			promptTokens += llm.CountTokens(m.ExtractText())
+			promptTokens += llm.CountTokens(m.ExtractText()) + m.EstimatedTokens()
 		}
 		completionTokens = llm.CountTokens(content)
 	}
@@ -476,11 +551,15 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 		if p := fs.session.persist; p != nil {
 			toolCallsJSON := make([]map[string]any, 0, len(choice.Message.ToolCalls))
 			for _, tc := range choice.Message.ToolCalls {
-				toolCallsJSON = append(toolCallsJSON, map[string]any{
+				entry := map[string]any{
 					"id":        tc.ID,
 					"name":      tc.Function.Name,
 					"arguments": tc.Function.Arguments,
-				})
+				}
+				if len(tc.ExtraContent) > 0 {
+					entry["extra_content"] = tc.ExtraContent
+				}
+				toolCallsJSON = append(toolCallsJSON, entry)
 			}
 			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native))
 		}

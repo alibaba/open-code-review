@@ -6,6 +6,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -148,10 +149,5 @@ func TestConfirmDeleteOfficialModel_SaveFailureRollback(t *testing.T) {
 }
 
 func containsStr(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, want)
 }

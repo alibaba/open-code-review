@@ -6,6 +6,7 @@ package diff
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -36,7 +37,6 @@ var providerDirIgnoreDirs = []string{
 	".cachefile/",
 	"_packages/",
 	"rpm/",
-	"pkgs/",
 }
 
 // Mode defines how the diff is retrieved.
@@ -60,15 +60,40 @@ type Provider struct {
 	// Commit mode parameter
 	commit string // single commit hash/ref
 
-	mergeBase string // cached common ancestor for range mode
+	mergeBase     string // cached common ancestor for range mode
+	workspaceBase *InputResolution
 }
 
 // DiffSet separates the diffs a review may process from files excluded by the
 // provider's built-in directory rules. The latter remain unavailable to a
 // review, but callers such as Preview can account for them.
+//
+// excludedAt[i] is Excluded[i]'s index in the changeset order of Included and
+// Excluded combined, so ForEachInOrder can walk the two slices as Git listed
+// them rather than every provider exclusion first.
 type DiffSet struct {
-	Included []model.Diff
-	Excluded []model.Diff
+	Included   []model.Diff
+	Excluded   []model.Diff
+	excludedAt []int
+}
+
+// ForEachInOrder visits Included and Excluded in the original changeset order.
+// providerExcluded is true for built-in directory exclusions. Files dropped by
+// .gitignore are not visited.
+func (s DiffSet) ForEachInOrder(visit func(d model.Diff, providerExcluded bool)) {
+	next := 0
+	for i, d := range s.Excluded {
+		// excludedAt[i] is the mixed-stream index, so the number of included
+		// files that precede this exclusion is excludedAt[i]-i.
+		upTo := s.excludedAt[i] - i
+		for ; next < upTo; next++ {
+			visit(s.Included[next], false)
+		}
+		visit(d, true)
+	}
+	for ; next < len(s.Included); next++ {
+		visit(s.Included[next], false)
+	}
 }
 
 // NewProvider creates a Provider for range mode: from..to (via merge-base).
@@ -103,14 +128,15 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 
 // InputResolution carries this run's frozen, immutable commit endpoints, per the
 // run-manifest input-mode matrix. An empty field means "not applicable or not
-// resolvable" — a root commit and a merge commit have no single comparison base,
-// an unborn workspace has no HEAD, and a workspace has no immutable head — and a
+// resolvable" — a root commit and an unborn workspace have an empty old tree,
+// and a workspace has no immutable head — and a
 // caller must never treat an empty value as a real endpoint or fabricate one.
 // ExactRange is populated only when both a unique base and a head resolve.
 type InputResolution struct {
 	ResolvedBase string
 	ResolvedHead string
 	ExactRange   string
+	BaseIsEmpty  bool
 }
 
 // ResolveInput freezes this run's commit endpoints by asking git, following the
@@ -151,9 +177,8 @@ func (p *Provider) ResolveInput(ctx context.Context) InputResolution {
 		}
 		return r
 	case ModeWorkspace:
-		// base = current HEAD if the repository has one; an unborn repository has
-		// no HEAD, so this stays empty rather than fabricating a base.
-		return InputResolution{ResolvedBase: p.resolveCommit(ctx, "HEAD")}
+		resolution, _ := p.ResolveWorkspaceComparison(ctx)
+		return resolution
 	default:
 		return InputResolution{}
 	}
@@ -217,12 +242,6 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 		combined.WriteString(out)
 
 	case ModeWorkspace:
-		// The stderr returned here is the fallback's (`git diff --staged`), and
-		// that is the one worth surfacing. Reaching the fallback at all means
-		// `git diff HEAD` already failed, and in the case the fallback exists
-		// for — a repository with no commits — it failed with "bad revision
-		// 'HEAD'", which is expected rather than diagnostic. Only the second
-		// failure describes what actually blocked the review.
 		tracked, stderr, err := p.workspaceTrackedDiff(ctx)
 		if err != nil {
 			return DiffSet{}, gitFailure("workspace tracked diff", stderr, err)
@@ -251,7 +270,14 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 	if err != nil {
 		return DiffSet{}, err
 	}
-	return p.partitionDiffs(diffs), nil
+	var patterns GitignorePatterns
+	if p.mode != ModeWorkspace && len(diffs) > 0 {
+		patterns, err = LoadGitignoreAtRef(ctx, p.repoDir, ref, p.runner)
+		if err != nil {
+			return DiffSet{}, err
+		}
+	}
+	return partitionDiffs(diffs, patterns), nil
 }
 
 // loadGitignorePatterns reads and parses .gitignore patterns from the repo root.
@@ -260,7 +286,11 @@ func (p *Provider) loadGitignorePatterns() []string {
 	if err != nil {
 		return nil
 	}
-	var patterns []string
+	return parseGitignorePatterns(data)
+}
+
+func parseGitignorePatterns(data []byte) GitignorePatterns {
+	var patterns GitignorePatterns
 	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -281,12 +311,12 @@ func (p *Provider) loadGitignorePatterns() []string {
 // correct under last-match-wins. Treating negations as unmatchable made every
 // file in such a repository look excluded, so a review silently covered nothing.
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
-	if isProviderDirExcluded(relPath) {
-		return true
-	}
+	return isProviderDirExcluded(relPath) || GitignorePatterns(gitignorePatterns).Matches(relPath)
+}
 
+func (patterns GitignorePatterns) Matches(relPath string) bool {
 	excluded := false
-	for _, pat := range gitignorePatterns {
+	for _, pat := range patterns {
 		body, negated := strings.CutPrefix(pat, "!")
 		if body == "" {
 			continue
@@ -311,13 +341,7 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 // unconditional directory blocklist. A .gitignore negation cannot re-admit
 // one of these paths.
 func isProviderDirExcluded(relPath string) bool {
-	for _, prefix := range providerDirIgnoreDirs {
-		dirPart := strings.TrimSuffix(prefix, "/")
-		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
-			return true
-		}
-	}
-	return false
+	return ProviderDirPrefix(relPath) != ""
 }
 
 // matchGitignorePattern checks if relPath matches a single .gitignore pattern.
@@ -413,8 +437,10 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 
 // partitionDiffs keeps diffs filtered by built-in directory rules available
 // for reporting while preserving the review input as the Included slice.
-func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	patterns := p.loadGitignorePatterns()
+//
+// In workspace mode, ignored untracked files are already filtered out.
+// Applying .gitignore here would incorrectly drop tracked changes.
+func partitionDiffs(diffs []model.Diff, patterns GitignorePatterns) DiffSet {
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
@@ -425,8 +451,9 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 			path = d.OldPath
 		}
 		if isProviderDirExcluded(path) {
+			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
 			result.Excluded = append(result.Excluded, d)
-		} else if !p.isPathExcluded(path, patterns) {
+		} else if !patterns.Matches(path) {
 			result.Included = append(result.Included, d)
 		}
 	}
@@ -587,7 +614,7 @@ func (p *Provider) commitParents(ctx context.Context, ref string) []string {
 // firstLine returns the first non-empty trimmed line of git output, so a stray
 // trailing newline or an unexpected second line never pollutes a resolved SHA.
 func firstLine(out string) string {
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if s := strings.TrimSpace(line); s != "" {
 			return s
 		}
@@ -599,19 +626,37 @@ func firstLine(out string) string {
 // failure if there was one. Stderr is returned separately so the caller can
 // quote it without risking diff content in the error; see runGitSplit.
 func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, string, error) {
-	out, _, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", "HEAD", "--")
-	if err == nil && out != "" {
-		return out, "", nil
+	resolution, err := p.ResolveWorkspaceComparison(ctx)
+	if err != nil {
+		return "", "", err
 	}
-	if ctx.Err() != nil {
-		return "", "", ctx.Err()
+	base := resolution.ResolvedBase
+	if resolution.BaseIsEmpty {
+		out, stderr, err := p.runGitSplit(ctx, "hash-object", "-t", "tree", "--stdin")
+		if err != nil {
+			return "", stderr, err
+		}
+		base = strings.TrimSpace(out)
 	}
-	// Fall back to the staged diff when `git diff HEAD` errored or was empty. This is
-	// not redundant with the call above: in a repository with no commits yet there is no
-	// HEAD, so `git diff HEAD` fails with "bad revision 'HEAD'", but `git diff --staged`
-	// still surfaces staged changes by diffing the index against the empty tree — the only
-	// way to review a workspace before its first commit.
-	return p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--staged", "--")
+	return p.runGitSplit(ctx, "--no-optional-locks", "-c", "core.quotepath=false", "-c", "diff.autoRefreshIndex=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, "--")
+}
+
+// binarySniffWindow is the number of leading bytes inspected when deciding
+// whether an untracked file is binary. Matches git's own heuristic and the
+// scan provider's sniff window.
+const binarySniffWindow = 8000
+
+// looksBinary reports whether content contains a NUL byte within the sniff
+// window — the same marker git uses to report a file as binary.
+func looksBinary(content []byte) bool {
+	if len(content) > binarySniffWindow {
+		content = content[:binarySniffWindow]
+	}
+	return bytes.IndexByte(content, 0) >= 0
+}
+
+func untrackedBinaryDiff(path string) string {
+	return fmt.Sprintf("diff --git a/%s b/%s\nnew file mode 100644\nBinary files /dev/null and b/%s differ\n", path, path, path)
 }
 
 func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
@@ -622,8 +667,20 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 
 	var results []string
 	for _, f := range files {
-		content, rerr := readWorkspaceFileForDiff(p.repoDir, f)
+		content, rerr := readWorkspaceFileForDiffWithLimit(p.repoDir, f, maxUntrackedFileSize)
+		if errors.Is(rerr, errWorkspaceFileTooLarge) {
+			results = append(results, untrackedBinaryDiff(f))
+			continue
+		}
 		if rerr != nil {
+			continue
+		}
+
+		if looksBinary(content) {
+			// Emit git's own binary marker so the parser flags the file and
+			// the selection layer excludes it, matching the tracked path where
+			// `git diff` itself reports "Binary files ... differ".
+			results = append(results, untrackedBinaryDiff(f))
 			continue
 		}
 
@@ -653,7 +710,13 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 }
 
 func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
-	out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
+	// -z, and no trimming of the records it produces. Without it git quotes
+	// any pathname holding a tab, a newline, a quote or a backslash, so the
+	// name arrives escaped and matches nothing on disk; a newline in a name
+	// also splits one file into two entries. Trimming then removes leading and
+	// trailing spaces, which are filename bytes. Each of those drops an
+	// untracked file out of the review with no error.
+	out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "ls-files", "-z", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, gitFailure("git ls-files", stderr, err)
 	}
@@ -662,13 +725,12 @@ func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
 	}
 	patterns := p.loadGitignorePatterns()
 	var files []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for name := range strings.SplitSeq(strings.TrimRight(out, "\x00"), "\x00") {
+		if name == "" {
 			continue
 		}
-		if !p.isPathExcluded(line, patterns) {
-			files = append(files, line)
+		if !p.isPathExcluded(name, patterns) {
+			files = append(files, name)
 		}
 	}
 	return files, nil

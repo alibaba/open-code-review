@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -294,6 +295,9 @@ func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
 		ExtraHeaders: map[string]string{"X-Trace": "on"},
 		AWSRegion:    "us-west-2",
 		AWSProfile:   "example-profile",
+		unknownJSONFields: map[string]json.RawMessage{
+			"future_provider": json.RawMessage(`{"value":"preserve-me"}`),
+		},
 	}
 
 	rv := reflect.ValueOf(orig)
@@ -1948,6 +1952,11 @@ func TestApiKeyStepCanConfirm(t *testing.T) {
 			wantOK: true,
 		},
 		{
+			name:   "official external auth",
+			cfg:    &Config{Provider: "chatgpt", Providers: map[string]ProviderEntry{"chatgpt": {}}},
+			wantOK: true,
+		},
+		{
 			name:      "custom saved api_key",
 			customTab: true,
 			cfg: &Config{
@@ -2160,6 +2169,31 @@ func TestProviderTUIView_ManualForm_WithError(t *testing.T) {
 	v := m.View()
 	if !strings.Contains(v.Content, "URL required") {
 		t.Error("expected form error in view")
+	}
+}
+
+// The URL error is rendered under the URL input, so the user sees it next to
+// the value to fix instead of below the other fields.
+func TestProviderTUIView_ManualForm_URLErrorUnderField(t *testing.T) {
+	m := newProviderTUI(&Config{}, "")
+	m.activeTab = tabManual
+	m.inManualForm = true
+	m.manualStep = manualStepURL
+	m.manualURLInput.SetValue("api.example.com/v1")
+
+	out, _ := m.handleManualFormEnter()
+	view := stripANSI(out.(providerTUIModel).View().Content)
+
+	errIdx := strings.Index(view, "Invalid URL")
+	if errIdx < 0 {
+		t.Fatalf("expected the URL error in the view, got:\n%s", view)
+	}
+	protocolIdx := strings.Index(view, "Protocol:")
+	if protocolIdx < 0 {
+		t.Fatalf("expected the Protocol field in the view, got:\n%s", view)
+	}
+	if errIdx > protocolIdx {
+		t.Errorf("URL error should be rendered above the Protocol field, got:\n%s", view)
 	}
 }
 
