@@ -144,6 +144,16 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/.npmrc`
 - `**/.pypirc`
 - `**/.dockercfg`
+- `**/.docker/config.json`
+- `**/.aws/credentials`
+- `**/.kube/config`
+- `**/.git-credentials`
+- `**/.pgpass`
+- `**/.cargo/credentials`
+- `**/.cargo/credentials.toml`
+- `**/.gem/credentials`
+- `**/.vault-token`
+- `**/.config/gh/hosts.yml`
 
 また、`.env` と `.env.*` の各変種（`.env.example`、`.env.sample`、`.env.template` を除く）もシークレットパスとして扱われます。
 

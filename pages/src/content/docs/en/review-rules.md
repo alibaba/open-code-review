@@ -199,6 +199,16 @@ The built-in secret paths are not reviewed (see
 - `**/.npmrc`
 - `**/.pypirc`
 - `**/.dockercfg`
+- `**/.docker/config.json`
+- `**/.aws/credentials`
+- `**/.kube/config`
+- `**/.git-credentials`
+- `**/.pgpass`
+- `**/.cargo/credentials`
+- `**/.cargo/credentials.toml`
+- `**/.gem/credentials`
+- `**/.vault-token`
+- `**/.config/gh/hosts.yml`
 
 `.env` and any `.env.*` variant is likewise treated as a secret path, except the templates `.env.example`, `.env.sample`, and `.env.template`.
 

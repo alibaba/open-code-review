@@ -50,6 +50,42 @@ func TestIsSecretPath(t *testing.T) {
 		{"pypirc", ".pypirc", true},
 		{"dockercfg", ".dockercfg", true},
 
+		// Credential stores that tools write at a fixed path under the home
+		// directory. They have no extension, a dotfile name, or an allowlisted
+		// extension (.json, .toml, .yml), so the extension gate passes every one
+		// of them and only this list keeps them out of a dotfiles repository review.
+		{"docker config", ".docker/config.json", true},
+		{"docker config nested", "home/user/.docker/config.json", true},
+		{"aws credentials", ".aws/credentials", true},
+		{"aws credentials nested", "dotfiles/.aws/credentials", true},
+		{"kubeconfig", ".kube/config", true},
+		{"kubeconfig nested", "home/.kube/config", true},
+		{"git credential store", ".git-credentials", true},
+		{"git credential store nested", "dotfiles/.git-credentials", true},
+		{"postgres password file", ".pgpass", true},
+		{"cargo registry token", ".cargo/credentials", true},
+		{"cargo registry token toml", ".cargo/credentials.toml", true},
+		{"rubygems api key", ".gem/credentials", true},
+		{"vault token", ".vault-token", true},
+		{"github cli hosts", ".config/gh/hosts.yml", true},
+		{"uppercase aws credentials", ".AWS/Credentials", true},
+
+		// Neighbouring configuration in the same tool directories holds no
+		// credentials and keeps its normal review behaviour.
+		{"aws config", ".aws/config", false},
+		{"docker daemon config", ".docker/daemon.json", false},
+		{"cargo build config", ".cargo/config.toml", false},
+		{"github cli config", ".config/gh/config.yml", false},
+		{"kubeconfig template", ".kube/config.example", false},
+		{"gitconfig", ".gitconfig", false},
+		// The credential patterns are anchored to the tool's dot directory; the
+		// same file names elsewhere are ordinary project files.
+		{"docker config without dot dir", "deploy/docker/config.json", false},
+		{"kube config without dot dir", "charts/kube/config", false},
+		{"aws credentials without dot dir", "src/aws/credentials", false},
+		{"credentials toml outside cargo", "config/credentials.toml", false},
+		{"git credentials helper script", "scripts/.git-credentials-helper.sh", false},
+
 		// Templates are not credentials. They stay out of the secret list so an
 		// explicit include can still bring them into review.
 		{"env example", ".env.example", false},
