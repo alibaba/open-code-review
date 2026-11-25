@@ -407,6 +407,52 @@ function runPrRefs(sources) {
   }
 }
 
+function writeMergeBaseGitFixture(fixture) {
+  fs.writeFileSync(
+    path.join(fixture.bin, "git"),
+    `#!/usr/bin/env node
+const fs = require("fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.OCR_GIT_CALLS, JSON.stringify(args) + "\\n");
+if (args[0] === "fetch") process.exit(Number(process.env.OCR_FAKE_FETCH_STATUS || 0));
+if (args[0] === "rev-parse") process.exit(Number(process.env.OCR_FAKE_REV_PARSE_STATUS || 0));
+if (args[0] === "merge-base") {
+  const status = Number(process.env.OCR_FAKE_MERGE_BASE_STATUS || 0);
+  if (status !== 0) process.exit(status);
+  process.stdout.write((process.env.OCR_FAKE_MERGE_BASE || "base-sha") + "\\n");
+}
+process.exit(0);
+`,
+    { mode: 0o755 }
+  );
+}
+
+function runMergeBaseStep(extraEnv = {}) {
+  const step = stepNamed("Compute merge-base");
+  assert.ok(step, "action.yml must retain the Compute merge-base step");
+  const fixture = makeFixture();
+  try {
+    writeMergeBaseGitFixture(fixture);
+    const gitCalls = path.join(fixture.dir, "git-calls.jsonl");
+    const env = Object.assign(
+      {
+        BASE_REF: "main",
+        HEAD_SHA: "head-sha",
+        OCR_GIT_CALLS: gitCalls,
+      },
+      extraEnv
+    );
+    const result = runShell(renderedRun(step, inputValues()), env, fixture);
+    return {
+      result,
+      calls: readJsonLines(gitCalls),
+      exported: readEnvAssignments(path.join(fixture.dir, "github-env")),
+    };
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
 function testPrNumberInputIsOptionalAndDocumented() {
   assert.ok(INPUTS.pr_number, "action.yml must define the pr_number input");
   assert.strictEqual(
@@ -450,6 +496,76 @@ function testPrNumberResolutionOrder() {
     assert.strictEqual(exported.PR_NUMBER, expected, label);
     assert.strictEqual(exported.BASE_REF, "main", `${label}; the ref resolution is unchanged`);
     assert.strictEqual(exported.HEAD_SHA, "a".repeat(40), `${label}; the head resolution is unchanged`);
+  }
+}
+
+function testMissingReviewRangeFailsBeforeAnyReviewWork() {
+  const cases = [
+    [
+      "issue_comment payload without pull_request refs",
+      {
+        INPUT_PR_NUMBER: "42",
+        EVENT_BASE_REF: "",
+        EVENT_HEAD_SHA: "",
+        GITHUB_EVENT_NAME: "issue_comment",
+      },
+    ],
+    [
+      "workflow_run payload without pull_request refs",
+      {
+        WORKFLOW_RUN_PR_NUMBER: "42",
+        EVENT_BASE_REF: "",
+        EVENT_HEAD_SHA: "",
+        GITHUB_EVENT_NAME: "workflow_run",
+      },
+    ],
+    [
+      "base ref without head sha",
+      {
+        INPUT_PR_NUMBER: "42",
+        EVENT_BASE_REF: "main",
+        EVENT_HEAD_SHA: "",
+        GITHUB_EVENT_NAME: "issue_comment",
+      },
+    ],
+  ];
+  for (const [label, sources] of cases) {
+    const { result, exported } = runPrRefs(sources);
+    assert.notStrictEqual(result.status, 0, `${label}; ${resultDescription(result)}`);
+    const output = `${result.stdout}${result.stderr}`;
+    assert.match(output, /::error::/, `${label}; the failure must be annotated`);
+    assert.match(output, /base_ref and head_sha/, `${label}; the error must name both required inputs`);
+    assert.strictEqual(exported.PR_NUMBER, undefined, `${label}; nothing is exported without a complete range`);
+  }
+
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({ ocr_version: "contract-test" });
+    const refs = prRefsStep();
+    const install = installStep();
+    const script = `${renderedRun(refs, values)}\n${renderedRun(install, values)}`;
+    const env = Object.assign(
+      {
+        INPUT_BASE_REF: "",
+        INPUT_HEAD_SHA: "",
+        INPUT_PR_NUMBER: "42",
+        EVENT_BASE_REF: "",
+        EVENT_HEAD_SHA: "",
+        EVENT_PR_NUMBER: "",
+        WORKFLOW_RUN_PR_NUMBER: "",
+        GITHUB_EVENT_NAME: "issue_comment",
+      },
+      renderedEnv(install, values)
+    );
+    const combined = runShell(script, env, fixture);
+    assert.notStrictEqual(combined.status, 0, `the run must stop; ${resultDescription(combined)}`);
+    assert.deepStrictEqual(
+      readJsonLines(fixture.npmCallsPath),
+      [],
+      "NPM must not run after review-range resolution fails"
+    );
+  } finally {
+    removeFixture(fixture);
   }
 }
 
@@ -557,6 +673,56 @@ require("fs").appendFileSync(process.env.OCR_GIT_CALLS, JSON.stringify(process.a
   } finally {
     removeFixture(fixture);
   }
+}
+
+function testComputeMergeBaseExportsResolvedRange() {
+  const { result, calls, exported } = runMergeBaseStep({ OCR_FAKE_MERGE_BASE: "merge-base-sha" });
+  assert.strictEqual(result.status, 0, resultDescription(result));
+  assert.deepStrictEqual(
+    calls,
+    [
+      ["fetch", "origin", "main"],
+      ["rev-parse", "--verify", "--quiet", "origin/main^{commit}"],
+      ["merge-base", "origin/main", "head-sha"],
+    ],
+    "the step must fetch, verify, and compare the named refs"
+  );
+  assert.strictEqual(exported.MERGE_BASE, "merge-base-sha");
+}
+
+function testComputeMergeBaseFailsWhenBaseFetchFails() {
+  const { result, calls, exported } = runMergeBaseStep({ OCR_FAKE_FETCH_STATUS: "1" });
+  assert.notStrictEqual(result.status, 0, resultDescription(result));
+  const output = `${result.stdout}${result.stderr}`;
+  assert.match(output, /::error::Cannot fetch base ref 'main'/, "the failure must name the unfetchable base ref");
+  assert.deepStrictEqual(calls, [["fetch", "origin", "main"]], "merge-base must not run after a failed fetch");
+  assert.strictEqual(exported.MERGE_BASE, undefined, "a failed fetch must not invent a review range");
+}
+
+function testComputeMergeBaseFailsWhenBaseRefIsMissing() {
+  const { result, calls, exported } = runMergeBaseStep({ OCR_FAKE_REV_PARSE_STATUS: "1" });
+  assert.notStrictEqual(result.status, 0, resultDescription(result));
+  const output = `${result.stdout}${result.stderr}`;
+  assert.match(output, /::error::Cannot resolve base 'origin\/main'/, "the failure must name the unresolved base ref");
+  assert.deepStrictEqual(
+    calls,
+    [
+      ["fetch", "origin", "main"],
+      ["rev-parse", "--verify", "--quiet", "origin/main^{commit}"],
+    ],
+    "merge-base must not run when the base ref cannot be resolved"
+  );
+  assert.strictEqual(exported.MERGE_BASE, undefined);
+}
+
+function testComputeMergeBaseFailsWithoutMergeBase() {
+  const { result, calls, exported } = runMergeBaseStep({ OCR_FAKE_MERGE_BASE_STATUS: "1" });
+  assert.notStrictEqual(result.status, 0, resultDescription(result));
+  const output = `${result.stdout}${result.stderr}`;
+  assert.match(output, /::error::No merge base between 'origin\/main' and 'head-sha'/, "the failure must name both sides");
+  assert.match(output, /refusing to review HEAD\.\.HEAD/, "the failure must rule out the former empty-range fallback");
+  assert.strictEqual(calls.length, 3, "the merge-base command itself must run before failing");
+  assert.strictEqual(exported.MERGE_BASE, undefined);
 }
 
 function testPrNumberWiredIntoBothGithubScriptSteps() {
@@ -2133,8 +2299,13 @@ const TESTS = [
   ["pr_number is an optional, documented input", testPrNumberInputIsOptionalAndDocumented],
   ["the PR number resolves input, then payload, then workflow_run", testPrNumberResolutionOrder],
   ["an unresolvable PR number fails before any review work", testPrNumberFailsBeforeAnyReviewWork],
+  ["a trigger without pull_request refs fails before any review work", testMissingReviewRangeFailsBeforeAnyReviewWork],
   ["pr_number rejects values that are not a PR number", testPrNumberRejectsValuesThatAreNotAPrNumber],
   ["the resolved PR number reaches the fork-safe head fetch", testResolvedPrNumberReachesTheHeadFetch],
+  ["Compute merge-base exports a resolved range", testComputeMergeBaseExportsResolvedRange],
+  ["Compute merge-base fails when the base fetch fails", testComputeMergeBaseFailsWhenBaseFetchFails],
+  ["Compute merge-base fails when the base ref is missing", testComputeMergeBaseFailsWhenBaseRefIsMissing],
+  ["Compute merge-base fails without a merge base", testComputeMergeBaseFailsWithoutMergeBase],
   ["both github-script steps read the resolved PR number", testPrNumberWiredIntoBothGithubScriptSteps],
   ["GitHub Actions README documents PR number resolution", testExampleReadmeDocumentsPrNumberResolution],
   ["Post review comments wires the app slug", testPostReviewCommentsWiresAppSlug],
