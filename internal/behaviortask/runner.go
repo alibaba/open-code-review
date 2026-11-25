@@ -22,6 +22,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/pathutil"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -360,6 +361,9 @@ func (runner *Runner) dispatch(ctx context.Context, name, raw string) (llmloop.T
 		if _, exists := schema.Schema().Properties[key]; !exists {
 			return llmloop.ToolOutcome{}, fmt.Errorf("unknown tool argument %q", key)
 		}
+	}
+	if err := tool.NormalizeBoolArgs(args, codeBoolOptions[name]...); err != nil {
+		return llmloop.ToolOutcome{}, err
 	}
 	if err := schema.Validate(args); err != nil {
 		return llmloop.ToolOutcome{}, err

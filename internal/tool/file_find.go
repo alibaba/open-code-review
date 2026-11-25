@@ -40,11 +40,14 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 
 func (p *FileFindProvider) execute(ctx context.Context, args map[string]any) (string, error) {
 	queryName, _ := args["query_name"].(string)
+	caseSensitive, err := boolArg(args, "case_sensitive")
+	if err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(queryName) == "" {
 		return "// The file was not found", nil
 	}
 
-	caseSensitive, _ := args["case_sensitive"].(bool)
 	files, err := p.listGitFiles(ctx)
 	if err != nil {
 		return "", err
