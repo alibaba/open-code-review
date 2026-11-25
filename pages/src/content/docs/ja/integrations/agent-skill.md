@@ -4,13 +4,13 @@ sidebar:
   order: 1
 ---
 
-OCR を呼び出し可能な skill として登録することで、agent フレームワークが正しい引数、事前チェック、分類基準を用いて OCR を呼び出せるようになります。呼び出し側でこれらを改めて導き出す必要はありません。
+OCR を呼び出し可能な skill として登録することで、agent フレームワークが正しい引数と指摘の検証手順を用いて OCR を呼び出せるようになります。呼び出し側でこれらを改めて導き出す必要はありません。
 
 ## リポジトリに含まれるもの
 
 リポジトリには
 [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md)
-に SKILL マニフェストが用意されています。これは OCR を呼び出し可能な skill として宣言し、事前チェック、呼び出しワークフロー、コメントの分類基準（High/Medium/Low）を含みます。
+に SKILL マニフェストが用意されています。OCR の呼び出し、指摘の検証、不確実性の報告、依頼に応じた修正の手順を定義しています。skill ディレクトリには GitHub PR レビュー用ヘルパーも含まれるため、SKILL.md だけでなくディレクトリ全体をインストールしてください。
 
 ## インストール
 
@@ -24,10 +24,9 @@ npx skills add alibaba/open-code-review --skill open-code-review
 
 これは
 [skills registry](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md)
-からマニフェストを取得してプロジェクトに配置し、skills の規約を尊重するコーディング agent が次回の呼び出し時にそれをロードするようにします。skill を最新版に更新するには、このコマンドを再実行してください。
+から skill ディレクトリを取得してプロジェクトに配置し、skills の規約を尊重するコーディング agent が次回の呼び出し時にそれをロードするようにします。skill を最新版に更新するには、このコマンドを再実行してください。
 
-> **前提条件：** 初回実行時、バイナリが `PATH` 上に存在しない場合、skill は
-> （`npm install -g @alibaba-group/open-code-review` を通じて）`ocr` CLI を自動的にインストールします——[skill が行うこと](#what-the-skill-does)を参照してください。ただし、LLM は事前に設定しておく**必要があります**。skill が代わりに行うことはできず、処理を止めて尋ねます。[設定](../../configuration/)を参照してください。
+> **前提条件：** ネイティブモードでは OCR のモデルプロバイダーをローカルで設定する必要があります。認証情報を会話に貼り付けないでください。`ocr` がない場合のトラブルシューティングには、`npm install -g @alibaba-group/open-code-review` によるインストール手順があります。GitHub PR モードのみ、Python 3 と認証済みの `gh` も必要です。[設定](../../configuration/)を参照してください。
 
 ### 方法 2：手動コピー（システムレベル）
 
@@ -44,18 +43,13 @@ cp -R /path/to/open-code-review/skills/open-code-review ~/.claude/skills/
 
 SKILL.md は一つの prompt です。呼び出し側の agent がそれをロードすると、agent 自身が手順を実行します。完全な `/open-code-review`（または同等）のリクエストは、次のように展開されます。
 
-1. **事前チェック。** `which ocr` を実行して CLI が `PATH` 上にあることを確認し、続いて `ocr llm test` で LLM に到達可能であることを確認します。
-2. **CLI が無ければ自動インストール。** `which ocr` が "NOT INSTALLED" を報告した場合、agent は `npm install -g @alibaba-group/open-code-review` を実行して続行します。ユーザーへの確認は行いません——これは通常のセットアップ手順とみなされます。
-3. **LLM 設定が無ければ止めて尋ねる。** `ocr llm test` が失敗した場合、agent は認証情報を*でっち上げません*。サポートされている 2 つの方法（環境変数または `ocr config set …`）をユーザーに提示し、API key の提供を待ちます。
-4. **業務コンテキストの抽出。** レビュー対象（commit、ブランチ、作業コピー）を確認し、短い `--background` 文字列を生成します。
-5. **レビューの実行。**
-   `ocr review --audience agent --background "…" [--commit | --from/--to]`
-   を呼び出します。ユーザーが作業コピー、特定の commit、ブランチ区間のいずれをレビューしたいかに応じて引数を選択します。
-6. **分類とレポート。** SKILL.md の基準を用いて JSON コメントを **High** /
-   **Medium** / **Low** に分類し（bug とセキュリティ問題は High、些細な指摘や誤検知と疑われるものは黙って破棄）、Markdown 形式のサマリーをレンダリングします。
-7. **必要に応じて修正。** ユーザーが「レビュー**して**修正して」（または類似）と指示した場合、High/Medium 項目に対して安全な修正をインラインで適用します。そうでない場合はコードを変更する前に尋ねます。
+1. **業務コンテキストの抽出。** レビュー対象（commit、ブランチ、作業コピー）を確認し、短い `--background` 文字列を生成します。
+2. **依頼されたレビューの実行。** ローカルのレビューでは `ocr review --audience agent --background "…"` を直接実行し、コミット済みの変更には `--commit` または `--from`/`--to` を追加します。通常はインストールや接続の事前確認を行いません。新しい commit・区間レビューには既定で `--analysis` を追加し、別の形式を指定されなければ JSON を使います。作業コピー、プレビュー、再開、SARIF、分析を省略する明示的な依頼では分析を追加しません。失敗したら原因を調べてから再試行します。
+   GitHub PR の番号または URL には、インストール済みの `python3 "$SKILL_DIR/scripts/review_pr.py" <id-or-url>` を使います。番号はチェックアウトの `gh` 既定リポジトリを選び、fork では上流を指す場合があります。PR URL、レビューしたリビジョン、スナップショットの鮮度、成果物のパスを報告します。
+3. **検証と報告。** 低重要度も含め、すべての指摘をレビュー対象のコードと照合します。**Reproduced（再現済み）** と **Uncertain（未確定）** に分け、OCR の重要度と各グループ内の順序を保ちます。具体的な反証がある場合のみ指摘を省略し、不確実という理由だけでは破棄しません。元の結果を保持し、Review のカバレッジと未確認範囲も報告します。併用時は Analysis Markdown を別に表示し、実行状態とモデルによる完全性の評価を区別します。
+4. **依頼に応じた修正。** 編集を依頼された場合のみ、安全かつ検証済みの修正を行い、critical、high、medium の指摘を優先します。レビューのみの依頼はコード変更を許可しません。PR モードのスナップショットは、ユーザーが明示的に削除に同意するまで保持します。削除後もレポートは残ります。
 
-完全な prompt——正確な分類基準、出力テンプレート、注意事項を含む——は
+完全な prompt——検証要件、報告方法、PR モードの制限、注意事項を含む——は
 [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md)
 にあります。上記のいずれかを厳しくしたい場合（例えばデフォルトの動作を、修正前に常に尋ねるように変更するなど）は、ローカルのコピーを編集してください。
 
@@ -73,7 +67,7 @@ agent = Agent(
 agent.run("Review my staged changes — focus on race conditions.")
 ```
 
-SDK は SKILL.md prompt をロードし、agent が[skill が行うこと](#what-the-skill-does)で述べられているワークフローを実行します——`npm install` のフォールバックや、LLM 設定が無いときに認証情報の入力を促す手順を含みます。
+SDK は SKILL.md prompt をロードし、agent が[skill が行うこと](#what-the-skill-does)のワークフローを実行します。呼び出しの失敗を調査し、認証情報が必要ならユーザーにローカルでの設定を依頼します。
 
 ## その他の agent フレームワーク
 
