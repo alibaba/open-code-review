@@ -331,6 +331,7 @@ ocr s      [flags]   (alias)
 | --- | --- | --- | --- |
 | `--path <list>` | - | Tüm depo | Depoya göre virgülle ayrılmış dosya/dizinler; ör. `internal/agent`, `internal/llm/client.go`. Çalışma ağacına göre çözümlenir. Tam yazılan yol, yalnızca harf büyüklüğü farklı kardeşinden önceliklidir. Dosya sisteminin farklı harf büyüklüğüyle çözümlediği yol (Windows, varsayılan macOS) yine izlenen dosyaları seçer. Mevcut yola karşılık gelmeyen seçim boş tarama değil hata üretir. |
 | `--exclude <patterns>` | - | - | Virgülle ayrılmış gitignore biçiminde dışlamalar; ör. `**/generated/*,*.pb.go`. `rule.json` dışlamalarıyla birleşir. |
+| `--max-tools <n>` | - | Şablon varsayılanı | Tarama alt görevi başına en fazla araç çağrısı turu. `0`, tarama şablonunun varsayılan değerini kullanır. Varsayılanın üzerindeki değerler sınırı yükseltir. |
 | `--output <path>` | `-o` | stdout | UTF-8 dosyaya yazar; `-`, stdout demektir. İlk yazmada oluşturulur, başarısız çalıştırma mevcut dosyaya dokunmaz. Metin çıktısından ANSI renkleri kaldırılır. |
 | `--preview` | `-p` | `false` | LLM çağırmadan dosyaları listeler ve filtreler; incelenebilir/dışlanan sayıları, toplam satırları ve dosya başına nedenleri gösterir. JSON desteklenir; SARIF desteklenmez. |
 
