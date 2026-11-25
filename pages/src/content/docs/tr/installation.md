@@ -202,15 +202,17 @@ fish, PowerShell ve kalıcı kurulum yönergeleri için [CLI başvurusu](../cli-
 
 ## OCR durum verilerini nerede saklar? {#where-ocr-stores-state}
 
+`OCR_HOME` ayarlanmamışsa veya boşsa CLI, `~/.opencodereview` dizinini kullanır. Başka bir dizin kullanmak için OCR’yi çalıştırmadan önce `OCR_HOME` değişkenini mutlak bir yola ayarlayın. Örneğin macOS veya Linux’ta `export OCR_HOME=/data/ocr` komutunu çalıştırın. Tablodaki `<storage>`, seçilen CLI depolama dizinidir. npm güncelleme durumu ve proje kuralları kendi konumlarında kalır.
+
+Mevcut veriler otomatik olarak taşınmaz. Verileri korumak için geçişten önce yapılandırmanızı ve oturumlarınızı yeni dizine kopyalayın.
+
 | Yol | İçerik |
 |---|---|
-| `~/.opencodereview/config.json` | LLM uç noktası, dil ve telemetri ayarları (`ocr config set` ile yönetilir). |
-| `~/.opencodereview/rule.json` | İsteğe bağlı genel inceleme kuralları. |
-| `~/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl` | Her inceleme oturumunun akış hâlindeki JSONL kaydı; `ocr viewer` kullanır. |
+| `<storage>/config.json` | LLM uç noktası, dil ve telemetri ayarları (`ocr config set` ile yönetilir). |
+| `<storage>/rule.json` | İsteğe bağlı genel inceleme kuralları. |
+| `<storage>/sessions/<encoded-repo-path>/<session-id>.jsonl` | Her inceleme oturumunun akış hâlindeki JSONL kaydı; `ocr viewer` kullanır. |
 | `~/.opencodereview/{last-update-check,update.lock,update-available}` | NPM sarmalayıcısının arka plan güncelleme kontrolü durumu. Varsayılan olarak yaklaşık 18 dakikada bir yeni sürüm arar ve yükseltme ipucu gösterir. `OCR_NO_UPDATE=1` ile kapatın veya `OCR_UPDATE_INTERVAL` ile aralığı dakika cinsinden ayarlayın. Statik ikili dosya bunları yazmaz. |
 | `<repo>/.opencodereview/rule.json` | İsteğe bağlı proje inceleme kuralları; commit'e eklenebilir. |
-
-OCR, NPM üzerinden geçici ikili dosya indirmesi dışında `~/.opencodereview/` dışına yazmaz. Bu dizini silmek temiz bir kaldırma sağlar.
 
 ## Ayrıca bakın {#see-also}
 

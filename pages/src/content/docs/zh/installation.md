@@ -214,16 +214,17 @@ ocr completion zsh > "${fpath[1]}/_ocr"
 
 ## OCR 在哪里存放状态
 
+未设置 `OCR_HOME` 或值为空时，CLI 使用 `~/.opencodereview`。要使用其他目录，请在运行 OCR 前将 `OCR_HOME` 设为绝对路径，例如在 macOS 或 Linux 上运行 `export OCR_HOME=/data/ocr`。表中的 `<storage>` 指选定的 CLI 存储目录。npm 更新状态和项目规则仍保存在原来的位置。
+
+已有数据不会自动迁移。如需保留，请在切换前将配置和会话复制到新目录。
+
 | 路径 | 存放内容 |
 |---|---|
-| `~/.opencodereview/config.json` | LLM 端点、语言、遥测配置（由 `ocr config set` 管理）。 |
-| `~/.opencodereview/rule.json` | 可选的全局评审规则。 |
-| `~/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl` | 每次评审会话的流式 JSONL 转录，供 `ocr viewer` 使用。 |
+| `<storage>/config.json` | LLM 端点、语言、遥测配置（由 `ocr config set` 管理）。 |
+| `<storage>/rule.json` | 可选的全局评审规则。 |
+| `<storage>/sessions/<encoded-repo-path>/<session-id>.jsonl` | 每次评审会话的流式 JSONL 转录，供 `ocr viewer` 使用。 |
 | `~/.opencodereview/{last-update-check,update.lock,update-available}` | NPM wrapper 的后台更新检查状态。wrapper 会轮询是否有更新的 release（默认约每 18 分钟一次）并打印升级提示。用 `OCR_NO_UPDATE=1` 禁用，或用 `OCR_UPDATE_INTERVAL`（分钟）调整间隔。静态二进制不写入这些文件。 |
 | `<repo>/.opencodereview/rule.json` | 可选的项目级评审规则——可安全提交。 |
-
-OCR 永远不会写入 `~/.opencodereview/` 之外（除 NPM 临时下载二进制外）。
-删除该目录即可完成干净的卸载。
 
 ## 另见
 

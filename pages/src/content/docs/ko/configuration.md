@@ -4,7 +4,9 @@ sidebar:
   order: 5
 ---
 
-설정 파일은 `~/.opencodereview/config.json`에 있습니다. 편집하는 방법은 세 가지입니다:
+기본 설정 파일은 `~/.opencodereview/config.json`에 있습니다. CLI에서 영구 볼륨을 사용하려면 `OCR_HOME`에 마운트 지점의 절대 경로(예: `/data/ocr`)를 지정하세요. `ocr config`, `ocr review`, `ocr viewer`가 같은 저장 디렉터리를 사용하면 뷰어에서 저장된 세션을 읽을 수 있습니다. 저장 위치 변경은 CLI에서 지원합니다.
+
+설정 파일을 편집하는 방법은 세 가지입니다.
 
 - **대화형 TUI** — `ocr config provider` / `ocr config model`. 메뉴가 안내합니다.
 - **커맨드라인** — `ocr config set <key> <value>`. 스크립트와 CI에 적합합니다.

@@ -4,7 +4,9 @@ sidebar:
   order: 5
 ---
 
-配置文件在 `~/.opencodereview/config.json`，你有三种方式编辑它：
+配置文件默认为 `~/.opencodereview/config.json`。CLI 在持久卷上运行时，可将 `OCR_HOME` 设为挂载点的绝对路径（例如 `/data/ocr`）。让 `ocr config`、`ocr review` 和 `ocr viewer` 使用同一存储目录，viewer 就能读取保存的会话。自定义存储通过 CLI 使用。
+
+你有三种方式编辑配置：
 
 - **交互式 TUI** —— `ocr config provider` / `ocr config model`，带引导菜单。
 - **命令行** —— `ocr config set <key> <value>`，适合脚本与 CI。

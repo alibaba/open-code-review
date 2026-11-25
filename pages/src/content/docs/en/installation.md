@@ -235,16 +235,17 @@ PowerShell, and persistent setup instructions.
 
 ## Where OCR stores state
 
+The CLI uses `~/.opencodereview` when `OCR_HOME` is unset or empty. To use another directory, set `OCR_HOME` to an absolute path before running OCR. For example, on macOS or Linux, run `export OCR_HOME=/data/ocr`. In the table, `<storage>` is the selected CLI directory. The npm update state and project rules keep their own locations.
+
+Existing data is not migrated automatically. To keep it, copy your config and sessions to the new directory before switching.
+
 | Path | What it holds |
 |---|---|
-| `~/.opencodereview/config.json` | LLM endpoint, language, telemetry config (managed by `ocr config set`). |
-| `~/.opencodereview/rule.json` | Optional global review rules. |
-| `~/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl` | Streaming JSONL transcript of every review session, used by `ocr viewer`. |
+| `<storage>/config.json` | LLM endpoint, language, telemetry config (managed by `ocr config set`). |
+| `<storage>/rule.json` | Optional global review rules. |
+| `<storage>/sessions/<encoded-repo-path>/<session-id>.jsonl` | Streaming JSONL transcript of every review session, used by `ocr viewer`. |
 | `~/.opencodereview/{last-update-check,update.lock,update-available}` | NPM wrapper's background update-check state. The wrapper polls for a newer release (every ~18 min by default) and prints an upgrade hint. Disable with `OCR_NO_UPDATE=1`, or tune the interval with `OCR_UPDATE_INTERVAL` (minutes). Not written by the static binary. |
 | `<repo>/.opencodereview/rule.json` | Optional per-project review rules — safe to commit. |
-
-OCR never writes outside `~/.opencodereview/` (besides the transient binary
-download via NPM). Removing the directory is a clean uninstall.
 
 ## See Also
 
