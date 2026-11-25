@@ -804,7 +804,7 @@ func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
 		Session:          sess,
 	})
 
-	toDispatch := a.applyResume(diffs)
+	toDispatch, _ := a.applyResume(diffs)
 	if len(toDispatch) != 1 || toDispatch[0].NewPath != "b.go" {
 		t.Fatalf("toDispatch = %+v, want only b.go", toDispatch)
 	}
@@ -858,7 +858,7 @@ func TestApplyResumeWorkspaceReusesCompletedItems(t *testing.T) {
 		Session:          sess,
 	})
 
-	toDispatch := a.applyResume(diffs)
+	toDispatch, _ := a.applyResume(diffs)
 	if len(toDispatch) != 1 || toDispatch[0].NewPath != "b.go" {
 		t.Fatalf("toDispatch = %+v, want only b.go", toDispatch)
 	}

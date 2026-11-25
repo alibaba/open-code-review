@@ -204,6 +204,13 @@ type Agent struct {
 	repoRemoteIdentity string
 }
 
+type reviewCheckpoint struct {
+	diff        model.Diff
+	fingerprint string
+	comments    []model.LlmComment
+	reused      bool
+}
+
 // ResumeInfo summarizes file-level reuse for a resumed review.
 type ResumeInfo = session.ResumeInfo
 
@@ -427,13 +434,6 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
 	}
-	// Join background memory compression before anything freezes run-level
-	// state. Those jobs are cancelled rather than awaited when a conversation
-	// ends, so their LLM request can still be in flight here; a retry report
-	// frozen at the command boundary would then see an un-finalized request
-	// and be discarded wholesale. Cheap in the normal case — every job has
-	// already been cancelled by now.
-	a.runner.WaitBackground()
 	// Every request is finalized now, so the report can be frozen.
 	a.freezeRetryReport()
 	// Freeze coverage into the immutable manifest before session_end embeds it,
@@ -663,7 +663,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		}
 	}
 
-	toDispatch := a.applyResume(a.diffs)
+	toDispatch, checkpoints := a.applyResume(a.diffs)
 
 	// Filter out deleted files before grouping.
 	var nonDeleted []model.Diff
@@ -683,7 +683,17 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		a.runner.RecordUsage(groupResult.usage)
 	}
 
-	var wg sync.WaitGroup
+	var (
+		wg           sync.WaitGroup
+		commentsMu   sync.Mutex
+		relocated    = make(map[string][]model.LlmComment)
+	)
+	recordCompleted := func(d model.Diff, fingerprint string, comments []model.LlmComment) {
+		a.markCompleted(d)
+		commentsMu.Lock()
+		checkpoints = append(checkpoints, reviewCheckpoint{diff: d, fingerprint: fingerprint, comments: comments})
+		commentsMu.Unlock()
+	}
 
 	concurrency := a.args.MaxConcurrency
 	if concurrency <= 0 {
@@ -775,7 +785,17 @@ dispatchLoop:
 				groupCtx = ctx
 			}
 
-			completed, stop, err := a.executeGroupSubtask(groupCtx, g)
+			taskCtx := reviewtask.WithRelocatedCommentReceiver(groupCtx, func(comment model.LlmComment) bool {
+				// Deleted diffs share the sentinel path, which cannot identify a target diff.
+				if comment.Path == "/dev/null" || slices.ContainsFunc(g.Diffs, func(d model.Diff) bool { return d.NewPath == comment.Path }) {
+					return false
+				}
+				commentsMu.Lock()
+				relocated[comment.Path] = append(relocated[comment.Path], comment)
+				commentsMu.Unlock()
+				return true
+			})
+			completed, stop, err := a.executeGroupSubtask(taskCtx, g)
 			if err != nil {
 				atomic.AddInt64(&a.subtaskFailed, int64(len(g.Diffs)))
 				class, reason := classifyItemError(err)
@@ -803,8 +823,7 @@ dispatchLoop:
 					for _, d := range g.Diffs {
 						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
 						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
-							a.markCompleted(d)
-							a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+							recordCompleted(d, fingerprint, comments)
 							continue
 						}
 						a.markFailed(d, stop.class, stop.reason)
@@ -832,16 +851,29 @@ dispatchLoop:
 			for _, d := range g.Diffs {
 				fingerprint := reviewItemFingerprint(a.reviewMode(), d)
 				comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
-				a.markCompleted(d)
-				a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+				recordCompleted(d, fingerprint, comments)
 			}
 		}(group)
 	}
 
 	wg.Wait()
-	// All subtasks finished — collect comments from the global collector once.
 	if a.args.CommentWorkerPool != nil {
 		a.args.CommentWorkerPool.Await()
+	}
+	// Cancelled compression jobs can still have requests in flight. Join them
+	// before checking the budget for the remaining filters or freezing retries.
+	a.runner.WaitBackground()
+	a.finishRelocatedComments(ctx, relocated)
+	// Publish one checkpoint per completed or reused file, with all accepted findings.
+	for _, checkpoint := range checkpoints {
+		d := checkpoint.diff
+		path := effectivePath(d)
+		comments := append(checkpoint.comments, relocated[path]...)
+		if checkpoint.reused {
+			a.session.RecordReviewItemReused(path, d.OldPath, d.NewPath, checkpoint.fingerprint, a.args.Resume.SessionID, comments)
+		} else {
+			a.session.RecordReviewItemDone(path, d.OldPath, d.NewPath, checkpoint.fingerprint, comments)
+		}
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		a.recordContextFailure(ctxErr)
@@ -873,6 +905,30 @@ dispatchLoop:
 	return a.args.CommentCollector.Comments(), nil
 }
 
+func (a *Agent) finishRelocatedComments(ctx context.Context, relocated map[string][]model.LlmComment) {
+	budget := a.args.MaxTokensBudget
+	for _, path := range slices.Sorted(maps.Keys(relocated)) {
+		candidates := relocated[path]
+		var rejected map[int]struct{}
+		if ctx.Err() == nil && (budget <= 0 || a.runner.TotalTokensUsed() < budget) {
+			target := slices.IndexFunc(a.diffs, func(d model.Diff) bool {
+				return d.NewPath == path || (d.NewPath == "" && d.OldPath == path)
+			})
+			if target >= 0 {
+				rejected = a.reviewFilterRemovals(ctx, path, a.diffs[target:target+1], candidates)
+			}
+		}
+		kept := candidates[:0]
+		for i, comment := range candidates {
+			if _, remove := rejected[i]; !remove {
+				a.args.CommentCollector.Add(comment)
+				kept = append(kept, comment)
+			}
+		}
+		relocated[path] = kept
+	}
+}
+
 func (a *Agent) recordContextFailure(err error) {
 	if b := a.session.Manifest(); b != nil {
 		var setErr error
@@ -889,15 +945,15 @@ func (a *Agent) recordContextFailure(err error) {
 	}
 }
 
-func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
+func (a *Agent) applyResume(diffs []model.Diff) ([]model.Diff, []reviewCheckpoint) {
 	resume := a.args.Resume
 	if resume == nil {
-		return diffs
+		return diffs, nil
 	}
 
 	mode := a.reviewMode()
 	toDispatch := make([]model.Diff, 0, len(diffs))
-	var reused int64
+	var checkpoints []reviewCheckpoint
 	for _, d := range diffs {
 		if d.IsDeleted {
 			toDispatch = append(toDispatch, d)
@@ -915,11 +971,13 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 		for _, cm := range item.Comments {
 			a.args.CommentCollector.Add(cm)
 		}
-		a.session.RecordReviewItemReused(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments)
 		a.markReused(d)
-		reused++
+		checkpoints = append(checkpoints, reviewCheckpoint{
+			diff: d, fingerprint: fingerprint, comments: item.Comments, reused: true,
+		})
 	}
 
+	reused := int64(len(checkpoints))
 	rerun := countDispatchable(toDispatch)
 	a.resumeInfo = &ResumeInfo{
 		ResumedFrom:   resume.SessionID,
@@ -929,7 +987,7 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 		CurrentModel:  a.args.Model,
 	}
 	fmt.Fprintf(stdout.Writer(), "[ocr] Resume %s: reusing %d file(s), reviewing %d file(s)\n", resume.SessionID, reused, rerun)
-	return toDispatch
+	return toDispatch, checkpoints
 }
 
 func countDispatchable(diffs []model.Diff) int64 {
@@ -1876,49 +1934,62 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 // comments for the group's paths are filtered (legacy full-group behavior).
 func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from map[string]int) {
 	groupKey := fileGroupKey(g.Diffs)
+	if ft := a.args.Template.ReviewFilterTask; a.args.SkipFilter || ft == nil || len(ft.Messages) == 0 {
+		a.reviewFilterRemovals(ctx, groupKey, g.Diffs, nil)
+		return
+	}
+
+	var candidates []model.LlmComment
+	var pathIndices []int
+	for _, d := range g.Diffs {
+		all := a.args.CommentCollector.CommentsForPath(d.NewPath)
+		start := min(from[d.NewPath], len(all))
+		for i := start; i < len(all); i++ {
+			candidates = append(candidates, all[i])
+			pathIndices = append(pathIndices, i)
+		}
+	}
+
+	indices := a.reviewFilterRemovals(ctx, groupKey, g.Diffs, candidates)
+	if len(indices) == 0 {
+		return
+	}
+	perPath := make(map[string]map[int]struct{})
+	for i := range indices {
+		path := candidates[i].Path
+		if perPath[path] == nil {
+			perPath[path] = make(map[int]struct{})
+		}
+		perPath[path][pathIndices[i]] = struct{}{}
+	}
+	for path, idxSet := range perPath {
+		a.args.CommentCollector.RemoveByPathAndIndices(path, idxSet)
+	}
+}
+
+func (a *Agent) reviewFilterRemovals(ctx context.Context, groupKey string, diffs []model.Diff, candidates []model.LlmComment) map[int]struct{} {
 	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
 	defer span.End()
 	telemetry.SetAttr(span, "group.label", groupKey)
 
 	ft := a.args.Template.ReviewFilterTask
 	if ft == nil || len(ft.Messages) == 0 {
-		return
+		return nil
 	}
 
 	if a.args.SkipFilter {
 		telemetry.SetAttr(span, "skipped", true)
 		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for group %q (--no-filter)\n", groupKey)
-		return
+		return nil
 	}
 
-	// Collect candidate comments with their true per-path indices.
-	type filterCandidate struct {
-		cm      model.LlmComment
-		pathIdx int
-	}
-	var candidates []filterCandidate
-	for _, d := range g.Diffs {
-		all := a.args.CommentCollector.CommentsForPath(d.NewPath)
-		start := 0
-		if from != nil {
-			start = min(from[d.NewPath], len(all))
-		}
-		for i := start; i < len(all); i++ {
-			candidates = append(candidates, filterCandidate{cm: all[i], pathIdx: i})
-		}
-	}
 	if len(candidates) == 0 {
-		return
+		return nil
 	}
 	telemetry.SetAttr(span, "comments.before", len(candidates))
 
-	// Build the comment list for the filter prompt.
-	candidateComments := make([]model.LlmComment, len(candidates))
-	for i, c := range candidates {
-		candidateComments[i] = c.cm
-	}
-	commentsJSON := buildGroupFilterCommentsJSON(candidateComments)
-	concatenatedDiffs := buildConcatenatedDiffs(g.Diffs)
+	commentsJSON := buildGroupFilterCommentsJSON(candidates)
+	concatenatedDiffs := buildConcatenatedDiffs(diffs)
 
 	messages := make([]llm.Message, 0, len(ft.Messages))
 	for _, m := range ft.Messages {
@@ -1951,7 +2022,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter failed for group %q: %v\n", groupKey, err)
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
-		return
+		return nil
 	}
 	var totalTokens int64
 	if resp.Usage != nil {
@@ -1967,35 +2038,14 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		indices = parseFilterResponse(resp.Content(), len(candidates))
 	}
 	telemetry.SetAttr(span, "comments.filtered", len(indices))
-	if len(indices) == 0 {
-		telemetry.Event(ctx, "review_filter.completed",
-			attribute.String("group.label", groupKey),
-			attribute.Int("total_comments", len(candidates)),
-			attribute.Int("removed", 0))
-		return
-	}
-
-	// Map candidate indices to per-path removals using the true pathIdx.
-	perPath := make(map[string]map[int]struct{})
-	for i, c := range candidates {
-		if _, remove := indices[i]; !remove {
-			continue
-		}
-		if perPath[c.cm.Path] == nil {
-			perPath[c.cm.Path] = make(map[int]struct{})
-		}
-		perPath[c.cm.Path][c.pathIdx] = struct{}{}
-	}
-	var totalRemoved int
-	for path, idxSet := range perPath {
-		a.args.CommentCollector.RemoveByPathAndIndices(path, idxSet)
-		totalRemoved += len(idxSet)
-	}
 	telemetry.Event(ctx, "review_filter.completed",
 		attribute.String("group.label", groupKey),
 		attribute.Int("total_comments", len(candidates)),
-		attribute.Int("removed", totalRemoved))
-	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for group %q\n", totalRemoved, groupKey)
+		attribute.Int("removed", len(indices)))
+	if len(indices) > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for group %q\n", len(indices), groupKey)
+	}
+	return indices
 }
 
 // buildGroupFilterCommentsJSON serializes comments with path info for group-level filtering.
