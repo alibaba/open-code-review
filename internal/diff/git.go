@@ -683,6 +683,12 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 			results = append(results, untrackedBinaryDiff(f))
 			continue
 		}
+		if len(content) == 0 {
+			// git writes no hunk for an empty new file; an "@@ -0,0 +1,0 @@"
+			// here would make it look like a change with content to review.
+			results = append(results, fmt.Sprintf("diff --git a/%s b/%s\nnew file mode 100644\n", f, f))
+			continue
+		}
 
 		lineCount := bytes.Count(content, []byte{'\n'})
 		if len(content) > 0 && content[len(content)-1] != '\n' {

@@ -184,6 +184,11 @@ file whose new path is `/dev/null` as `deleted`; there's no new content
 to review. Use `ocr review --preview` to print the result of this filter
 without spending a token.
 
+A file whose diff has no hunk at all — a pure rename, a mode-only change, or
+an empty new file — is marked `unchanged`. Like a deleted file, it stays in
+the change list the other files are reviewed against, but is not sent to the
+LLM itself.
+
 ### Built-in secret paths
 
 The built-in secret paths are not reviewed (see

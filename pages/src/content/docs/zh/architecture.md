@@ -78,6 +78,11 @@ default_path    — matched a built-in test-file exclude pattern
    `**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）。每个模式都以
    `**/` 作为根前缀。
 
+各门之后，`selectFiles` 还会施加 `unchanged`：被保留文件的 diff 中若没有任何
+hunk（纯重命名、仅修改权限模式或新增空文件），就没有可评审的改动行。与 `deleted`
+一样，`unchanged` 文件仍留在提示词展示的变更文件列表中，但不会被分发、计入成本
+估算或登记到覆盖率中。
+
 噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，
 位于 diff-provider 层，通过 `internal/diff/git.go` 中的 `providerDirIgnoreDirs`
 列表——这些目录的 diff 被解析后即被剔除，永远不会到达 per-file 过滤器。

@@ -58,6 +58,8 @@ Dosya tutulursa boş değer döndürür. `deleted` ve `too_large`, **`whyExclude
 5. `unsupported_ext` — Uzantı izin listesine göre filtreler.
 6. `default_path` — Son aşama, yerleşik dışlama kalıplarını uygular. Bunlar test dosyalarını (`**/*_test.go`, `**/__tests__/**`, `**/*_spec.rb` vb.) ve bağımlılık/derleme çıktısı dizinlerini (`**/node_modules/**`, `**/vendor/**`, `**/target/**`, `**/__pycache__/**` vb.) kapsar. Kalıplar `**/` önekiyle köklendirilir.
 
+Aşamalardan sonra `selectFiles`, `unchanged` nedenini de uygular: tutulan dosyanın farkında hiç hunk yoksa (yalnızca yeniden adlandırma, yalnızca mod değişikliği ya da boş yeni dosya) incelenecek değişmiş satır yoktur. `deleted` dosyalar gibi `unchanged` dosyalar da istemlerde gösterilen değişen dosyalar listesinde kalır, ancak hiçbir zaman dağıtılmaz, tahmine katılmaz ve kapsama olarak kaydedilmez.
+
 Aynı dizinler daha erken bir aşamada, fark sağlayıcısında `internal/diff/git.go` içindeki `providerDirIgnoreDirs` listesiyle de filtrelenir. Liste yol önekiyle eşleştiği için yalnızca **depo kökündeki** dizinleri yakalar. `vendor/pkg/x.go` dosya filtresine ulaşmaz; `api/vendor/pkg/x.go` ise ulaşır ve `default_path` tarafından dışlanır.
 
 Bu fark kullanıcıya da yansır: önizleme ilkini `provider_directory` olarak bildirir ve `include` kuralı incelemeye alamaz. İkincisi `default_path` olarak bildirilir ve `include` ile geçersiz kılınabilir.

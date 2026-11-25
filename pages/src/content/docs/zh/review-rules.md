@@ -156,6 +156,10 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 为 `/dev/null` 的文件标记为 `deleted`；没有新内容可评审。用 `ocr review
 --preview` 可在不花 token 的情况下打印此过滤结果。
 
+diff 中没有任何 hunk 的文件（纯重命名、仅修改权限模式或新增空文件）会被标记为
+`unchanged`。与已删除文件一样，它仍留在评审其他文件时可见的变更文件列表中，
+但其本身不会发送给 LLM。
+
 ### 内置敏感路径 {#built-in-secret-paths}
 
 内置的敏感路径不会被审查（见

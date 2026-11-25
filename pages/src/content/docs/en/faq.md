@@ -118,6 +118,7 @@ The exclusion reasons map to gates in the
 | `provider_directory` | Nothing to do — provider directories such as `vendor/` and `node_modules/` are never reviewable, even when included. |
 | `deleted` | Nothing to do — there's no new content to review. |
 | `too_large` | The diff alone exceeds 80% of `max_tokens`. Raise `--max-tokens` (or the saved `max_tokens`), or split the change into smaller commits. |
+| `unchanged` | Nothing to do — the file was only renamed, had its mode changed, or was added empty, so there is no changed line to review. |
 
 ### My custom rule isn't firing
 

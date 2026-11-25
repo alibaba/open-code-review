@@ -58,6 +58,8 @@ default_path    — matched a built-in test-file exclude pattern
 5. `unsupported_ext` は拡張子のホワイトリストでフィルタリングします。
 6. `default_path` は最後のゲートです: 組み込みの**テストファイル**除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）に一致します。各パターンはルートプレフィックスとして `**/` を付けます。
 
+ゲートのあと、`selectFiles` は `unchanged` も適用します。保持されたファイルの diff にハンクがない場合（名前の変更のみ、モードの変更のみ、空ファイルの追加）、レビューすべき変更行はありません。`deleted` と同じく、`unchanged` のファイルはプロンプトに示す変更ファイル一覧に残りますが、ディスパッチ、見積もり、カバレッジ登録の対象にはなりません。
+
 ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、diff-provider 層で、`internal/diff/git.go` の `providerDirIgnoreDirs` リストを通じて発生します。これらのディレクトリの diff は解析されたあと除去され、ファイルごとのフィルターに到達することは決してありません。Preview はこれらのファイルを `provider_directory` として報告します。`include` ルールでこれらをレビュー対象に戻すことはできません。
 
 このリストはパスの接頭辞で照合するため、対象は**リポジトリルート**のディレクトリだけです。ネストした同名ディレクトリはファイルごとのフィルターに到達し、`default_path` で除外されます。`vendor/pkg/x.go` は `provider_directory`、`api/vendor/pkg/x.go` は `default_path` として報告され、`include` ルールで戻せるのは後者だけです。

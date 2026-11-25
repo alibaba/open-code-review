@@ -123,7 +123,7 @@ Her span yararlı öznitelikler taşır:
 | `llm.request` | `llm.model`, `llm.duration_ms`, `llm.total_tokens`, `llm.status` |
 | `tool.execute.<tool-name>` | `tool.name`, `tool.duration_ms`, `tool.status` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
-| `event.review.skipped` | `reason` (`too_large` / `deleted` / `no_supported_files`), `file.count`, `too_large.count` |
+| `event.review.skipped` | `reason` (`too_large` / `unchanged` / `deleted` / `no_supported_files`), `file.count`, `too_large.count` |
 | `event.grouping.skipped` | `strategy`, `file.count`, `lines.changed`, `threshold.files`, `threshold.lines` |
 | `event.plan.skipped` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file`, `threshold`, `threshold.group` |
 | `event.plan.failed` | `group.label`, `message` |
@@ -155,7 +155,7 @@ Olaylar karar noktalarında kısa ömürlü `event.<name>` span'leri olarak olu�
 |---|---|
 | `review.started` | Farklar yüklendi; incelenecek dosya sayısı belli. |
 | `no.files.changed` | Fark sıfır dosya içeriyor. |
-| `review.skipped` | Seçimden sonra incelenecek dosya kalmadı; `reason`: `too_large`, `deleted` veya `no_supported_files`. |
+| `review.skipped` | Seçimden sonra incelenecek dosya kalmadı; `reason`: `too_large`, `unchanged`, `deleted` veya `no_supported_files`. |
 | `grouping.skipped` | Değişiklik kümesi `GROUPING_MIN_FILES` değerinden az dosya içerdiği için gruplama çağrısı atlandı. `strategy`, değişen satır sayısı `GROUPING_BUNDLE_LINE_THRESHOLD` altındaysa `bundle_all` (tüm dosyalar tek grup), eşit veya üstündeyse `per_file` (dosya başına grup) olur. Tek dosyalı küme, bölünecek bir şey olmadığından eşiklerden bağımsız olarak her zaman `per_file` olur; terminal satırı olmadan yalnızca burada raporlanır. |
 | `plan.skipped` | Grup iki plan eşiğinin de altında: en çok değişen dosyada `PLAN_MODE_LINE_THRESHOLD` değerinden az satır değişmiş ve 2+ dosyalı gruplarda toplam `PLAN_MODE_GROUP_LINE_THRESHOLD` altında. |
 | `plan.failed` | Plan aşaması hata verdi; ana döngü plansız çalıştı. |

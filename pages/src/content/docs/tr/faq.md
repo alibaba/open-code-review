@@ -88,6 +88,7 @@ Dışlama nedenleri [dosya filtresindeki](../review-rules/#how-files-are-filtere
 | `provider_directory` | İşlem gerekmez; `vendor/`, `node_modules/` gibi dizinler include ile bile incelenmez. |
 | `deleted` | İncelenecek yeni içerik yoktur. |
 | `too_large` | Fark tek başına `max_tokens` değerinin %80'ini aşar. `--max-tokens` veya kayıtlı `max_tokens` değerini artırın ya da değişikliği küçük commit'lere bölün. |
+| `unchanged` | Yapılacak bir şey yok — dosya yalnızca yeniden adlandırıldı, modu değişti ya da boş olarak eklendi; incelenecek değişmiş satır yok. |
 
 ### Özel kuralım uygulanmıyor {#my-custom-rule-isn-t-firing}
 

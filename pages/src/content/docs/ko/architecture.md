@@ -84,6 +84,11 @@ default_path    — matched a built-in test-file exclude pattern
    `**/*_test.py`, `**/*_spec.rb`, `**/*.test.ets` 등)에 걸리는지 봅니다.
    모든 패턴 앞에는 `**/` 접두사가 붙습니다.
 
+관문 뒤에서 `selectFiles`는 `unchanged`도 적용합니다. 남긴 파일의 diff에
+hunk가 없으면(이름 변경만, 모드 변경만, 빈 파일 추가) 리뷰할 변경 줄이
+없습니다. `deleted`처럼 `unchanged` 파일은 프롬프트에 보이는 변경 파일 목록에는
+남지만 디스패치, 비용 추정, 커버리지 등록 대상이 되지 않습니다.
+
 잡음이 많은 디렉터리(`vendor/`, `node_modules/`, `target/` 등)는 그보다 앞선
 diff 프로바이더 단계에서, `internal/diff/git.go`의 `providerDirIgnoreDirs`
 목록으로 걸러 냅니다. 이 디렉터리의 diff는 일단 파싱한 뒤 `isProviderDirExcluded`가
