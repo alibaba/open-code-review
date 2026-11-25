@@ -130,6 +130,13 @@ inputs:
       comparison, so an unquoted YAML boolean will not match.
     required: false
     default: 'true'
+  artifact_name_suffix:
+    description: >-
+      Optional artifact-name discriminator used instead of the calling job id.
+      Set this when a matrix or repeated action use would otherwise produce the
+      same artifact name; the value must satisfy GitHub artifact-name rules.
+    required: false
+    default: ''
   sticky_summary:
     description: >-
       Summary dimension. true = update an existing summary comment in place
@@ -1027,7 +1034,7 @@ runs:
       if: ${{ always() && inputs.upload_artifacts == 'true' }}
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
-        name: ocr-review-result-${{ github.run_id }}-${{ github.run_attempt }}
+        name: ocr-review-result-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.artifact_name_suffix || github.job }}
         path: |
           /tmp/ocr-result.json
           /tmp/ocr-stderr.log

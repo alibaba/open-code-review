@@ -2068,6 +2068,42 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
 }
 
+function testArtifactNameIsJobScopedWithAnExplicitOverride() {
+  assert.ok(INPUTS.artifact_name_suffix, "action.yml must define artifact_name_suffix");
+  assert.strictEqual(
+    INPUTS.artifact_name_suffix.default,
+    "",
+    "artifact_name_suffix must default to the job discriminator"
+  );
+  const inputBlock = ACTION_TEXT.match(
+    /^  artifact_name_suffix:\s*$([\s\S]*?)(?=^  [A-Za-z0-9_]+:\s*$|^outputs:|^runs:)/m
+  );
+  assert.ok(inputBlock, "action.yml must expose artifact_name_suffix metadata");
+  assert.match(inputBlock[1], /matrix/i, "artifact_name_suffix must document the matrix collision it solves");
+  assert.match(inputBlock[1], /artifact-name rules/i, "artifact_name_suffix must document GitHub's naming constraint");
+
+  const step = ACTION_TEXT.match(/^    - name: Upload review artifacts\s*$([\s\S]*?)(?=^    - name:|\Z)/m);
+  assert.ok(step, "action.yml must retain the Upload review artifacts step");
+  assert.match(
+    step[1],
+    /name:\s*ocr-review-result-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-\$\{\{ inputs\.artifact_name_suffix \|\| github\.job \}\}/,
+    "artifact names must include the job id by default and accept an explicit suffix"
+  );
+}
+
+function testExampleReadmeDocumentsArtifactNaming() {
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /artifact_name_suffix: \$\{\{ matrix\.rule-set \}\}/,
+    "GitHub Actions README must show how matrix callers disambiguate artifact names"
+  );
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /ocr-review-result-<run_id>-<run_attempt>-<job-or-suffix>/,
+    "GitHub Actions README must describe the job-scoped artifact name shape"
+  );
+}
+
 function testPostReviewCommentsWiresAppSlug() {
   const post = stepNamed("Post review comments");
   assert.ok(post, "action.yml must retain the Post review comments step");
@@ -2137,6 +2173,8 @@ const TESTS = [
   ["the resolved PR number reaches the fork-safe head fetch", testResolvedPrNumberReachesTheHeadFetch],
   ["both github-script steps read the resolved PR number", testPrNumberWiredIntoBothGithubScriptSteps],
   ["GitHub Actions README documents PR number resolution", testExampleReadmeDocumentsPrNumberResolution],
+  ["artifact names are job-scoped with an explicit override", testArtifactNameIsJobScopedWithAnExplicitOverride],
+  ["GitHub Actions README documents artifact naming", testExampleReadmeDocumentsArtifactNaming],
   ["Post review comments wires the app slug", testPostReviewCommentsWiresAppSlug],
 ];
 
