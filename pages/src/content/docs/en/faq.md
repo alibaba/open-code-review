@@ -111,6 +111,7 @@ The exclusion reasons map to gates in the
 | Reason | Fix |
 |---|---|
 | `binary` | Nothing to do — binary files have no reviewable text. |
+| `secret_exclude` | Nothing to do — credential paths such as `.env`, `id_rsa`, and `.netrc` are never reviewable, even when included. |
 | `user_exclude` | Remove the pattern from your `exclude` list. |
 | `unsupported_ext` | Add the extension to your `include` list to bypass the allowlist gate. |
 | `default_path` | Add the file to `include` — that overrides built-in test-file exclude patterns. |

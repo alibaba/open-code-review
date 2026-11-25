@@ -14,7 +14,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (selection.go) — drop binaries, secret paths,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -47,7 +47,7 @@ flowchart TD
 
 untracked 文件从磁盘读取并作为整文件新增处理，以便 commit 前评审。
 
-## 五重门文件过滤
+## 六重门文件过滤
 
 diff 加载后，每个文件经过
 [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)。
@@ -55,6 +55,7 @@ diff 加载后，每个文件经过
 
 ```
 binary          — file is binary
+secret_exclude  — path matches a built-in secret pattern (.env, id_rsa, …)
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
@@ -65,11 +66,14 @@ default_path    — matched a built-in test-file exclude pattern
 文件，`too_large` 用于仅 diff 本身就超过 `max_tokens` 80% 的文件。各门按以下顺序执行：
 
 1. `binary`——二进制文件先被丢弃。
-2. `user_exclude`——你项目的 `exclude` 总是优先。
-3. `user_include`——若配置了 include 模式**且**文件匹配其一，立即保留
+2. `secret_exclude`——新旧路径中任一路径匹配内置**密钥路径**防护
+   （`.env`、`id_rsa`、`.netrc`……）。与 `provider_directory` 一样，
+   任何 `include` 规则都无法把它带回。
+3. `user_exclude`——你项目的 `exclude` 总是优先。
+4. `user_include`——若配置了 include 模式**且**文件匹配其一，立即保留
    （返回空），绕过下面的 `unsupported_ext` 和 `default_path` 门。
-4. `unsupported_ext` 按扩展名白名单过滤。
-5. `default_path` 是最后一道门：匹配内置**测试文件**排除模式
+5. `unsupported_ext` 按扩展名白名单过滤。
+6. `default_path` 是最后一道门：匹配内置**测试文件**排除模式
    （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、
    `**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）。每个模式都以
    `**/` 作为根前缀。

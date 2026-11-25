@@ -81,6 +81,7 @@ Dışlama nedenleri [dosya filtresindeki](../review-rules/#how-files-are-filtere
 | Neden | Çözüm |
 |---|---|
 | `binary` | İşlem gerekmez; ikili dosyada incelenebilir metin yoktur. |
+| `secret_exclude` | İşlem gerekmez; `.env`, `id_rsa` ve `.netrc` gibi kimlik bilgisi dosyaları bir `include` kalıbıyla eşleşse bile incelemeye alınmaz. |
 | `user_exclude` | Deseni `exclude` listesinden kaldırın. |
 | `unsupported_ext` | İzin listesi kontrolünü aşmak için uzantıyı `include` listesine ekleyin. |
 | `default_path` | Yerleşik test dosyası dışlamasını aşmak için dosyayı `include` listesine ekleyin. |

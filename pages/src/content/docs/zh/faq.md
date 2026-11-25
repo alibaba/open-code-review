@@ -100,6 +100,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | 原因 | 修复 |
 |---|---|
 | `binary` | 无需处理——二进制文件无可评审文本。 |
+| `secret_exclude` | 无需操作——`.env`、`id_rsa`、`.netrc` 等凭据路径永远不可评审，即使被 `include` 匹配也是如此。 |
 | `user_exclude` | 从你的 `exclude` 列表移除该模式。 |
 | `unsupported_ext` | 把扩展名加入你的 `include` 列表以绕过白名单门。 |
 | `default_path` | 把文件加入 `include`——那会覆盖内置测试文件排除模式。 |

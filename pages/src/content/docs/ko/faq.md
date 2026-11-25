@@ -110,6 +110,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | 사유 | 해결 |
 |---|---|
 | `binary` | 할 일이 없습니다. 바이너리 파일에는 리뷰할 텍스트가 없습니다. |
+| `secret_exclude` | 조치할 필요가 없습니다. `.env`, `id_rsa`, `.netrc` 같은 자격 증명 경로는 `include`와 일치해도 검토 대상이 될 수 없습니다. |
 | `user_exclude` | `exclude` 목록에서 해당 패턴을 빼세요. |
 | `unsupported_ext` | 확장자를 `include` 목록에 넣어 허용 목록 관문을 건너뛰세요. |
 | `default_path` | 파일을 `include`에 넣으세요. 내장 테스트 파일 제외 패턴을 덮어씁니다. |
