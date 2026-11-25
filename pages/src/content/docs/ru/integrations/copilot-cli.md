@@ -31,7 +31,7 @@ copilot plugin install alibaba/open-code-review:plugins/open-code-review
 ```
 
 Устанавливаются навыки `open-code-review` и `open-code-review-delegate`.
-Удалить плагин можно командой `copilot plugin uninstall open-code-review`.
+Удалить плагин можно командой `copilot plugin uninstall open-code-review-codex`.
 
 Установщик Copilot CLI сейчас предупреждает, что прямая установка плагинов
 (repo/path/URL) устарела в пользу установки через marketplace; запись в marketplace
