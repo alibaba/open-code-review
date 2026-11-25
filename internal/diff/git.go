@@ -61,7 +61,8 @@ type Provider struct {
 	// Commit mode parameter
 	commit string // single commit hash/ref
 
-	mergeBase string // cached common ancestor for range mode
+	mergeBase     string // cached common ancestor for range mode
+	workspaceBase *InputResolution
 }
 
 // DiffSet separates the diffs a review may process from files excluded by the
@@ -128,14 +129,15 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 
 // InputResolution carries this run's frozen, immutable commit endpoints, per the
 // run-manifest input-mode matrix. An empty field means "not applicable or not
-// resolvable" — a root commit and a merge commit have no single comparison base,
-// an unborn workspace has no HEAD, and a workspace has no immutable head — and a
+// resolvable" — a root commit and an unborn workspace have an empty old tree,
+// and a workspace has no immutable head — and a
 // caller must never treat an empty value as a real endpoint or fabricate one.
 // ExactRange is populated only when both a unique base and a head resolve.
 type InputResolution struct {
 	ResolvedBase string
 	ResolvedHead string
 	ExactRange   string
+	BaseIsEmpty  bool
 }
 
 // ResolveInput freezes this run's commit endpoints by asking git, following the
@@ -176,9 +178,8 @@ func (p *Provider) ResolveInput(ctx context.Context) InputResolution {
 		}
 		return r
 	case ModeWorkspace:
-		// base = current HEAD if the repository has one; an unborn repository has
-		// no HEAD, so this stays empty rather than fabricating a base.
-		return InputResolution{ResolvedBase: p.resolveCommit(ctx, "HEAD")}
+		resolution, _ := p.ResolveWorkspaceComparison(ctx)
+		return resolution
 	default:
 		return InputResolution{}
 	}
@@ -242,12 +243,6 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 		combined.WriteString(out)
 
 	case ModeWorkspace:
-		// The stderr returned here is the fallback's (`git diff --staged`), and
-		// that is the one worth surfacing. Reaching the fallback at all means
-		// `git diff HEAD` already failed, and in the case the fallback exists
-		// for — a repository with no commits — it failed with "bad revision
-		// 'HEAD'", which is expected rather than diagnostic. Only the second
-		// failure describes what actually blocked the review.
 		tracked, stderr, err := p.workspaceTrackedDiff(ctx)
 		if err != nil {
 			return DiffSet{}, gitFailure("workspace tracked diff", stderr, err)
@@ -276,7 +271,14 @@ func (p *Provider) GetDiffSet(ctx context.Context) (DiffSet, error) {
 	if err != nil {
 		return DiffSet{}, err
 	}
-	return p.partitionDiffs(diffs), nil
+	var patterns GitignorePatterns
+	if p.mode != ModeWorkspace && len(diffs) > 0 {
+		patterns, err = LoadGitignoreAtRef(ctx, p.repoDir, ref, p.runner)
+		if err != nil {
+			return DiffSet{}, err
+		}
+	}
+	return partitionDiffs(diffs, patterns), nil
 }
 
 // loadGitignorePatterns reads and parses .gitignore patterns from the repo root.
@@ -285,7 +287,11 @@ func (p *Provider) loadGitignorePatterns() []string {
 	if err != nil {
 		return nil
 	}
-	var patterns []string
+	return parseGitignorePatterns(data)
+}
+
+func parseGitignorePatterns(data []byte) GitignorePatterns {
+	var patterns GitignorePatterns
 	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -306,10 +312,13 @@ func (p *Provider) loadGitignorePatterns() []string {
 // correct under last-match-wins. Treating negations as unmatchable made every
 // file in such a repository look excluded, so a review silently covered nothing.
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
-	if isProviderDirExcluded(relPath) {
-		return true
-	}
+	return isProviderDirExcluded(relPath) || GitignorePatterns(gitignorePatterns).Matches(relPath)
+}
 
+func (patterns GitignorePatterns) Matches(relPath string) bool {
+	if len(patterns) == 0 {
+		return false
+	}
 	// Git resolves ignore rules separately for a path and each of its parent
 	// directories. Keeping those results separate matters for patterns such as
 	// `*` + `!*/`: the negation re-includes directories for traversal, but does
@@ -317,7 +326,7 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 	parts := strings.Split(filepath.ToSlash(relPath), "/")
 	directoryExcluded := make([]bool, len(parts)-1)
 	fileExcluded := false
-	for _, pat := range gitignorePatterns {
+	for _, pat := range patterns {
 		body, negated := strings.CutPrefix(pat, "!")
 		if body == "" {
 			continue
@@ -531,12 +540,7 @@ func matchGitignoreDirectoryEntry(directoryPath, pattern string) bool {
 //
 // In workspace mode, ignored untracked files are already filtered out.
 // Applying .gitignore here would incorrectly drop tracked changes.
-func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
-	var patterns []string
-	honorGitignore := p.mode != ModeWorkspace
-	if honorGitignore {
-		patterns = p.loadGitignorePatterns()
-	}
+func partitionDiffs(diffs []model.Diff, patterns GitignorePatterns) DiffSet {
 	result := DiffSet{
 		Included: make([]model.Diff, 0, len(diffs)),
 		Excluded: make([]model.Diff, 0),
@@ -549,7 +553,7 @@ func (p *Provider) partitionDiffs(diffs []model.Diff) DiffSet {
 		if isProviderDirExcluded(path) {
 			result.excludedAt = append(result.excludedAt, len(result.Included)+len(result.Excluded))
 			result.Excluded = append(result.Excluded, d)
-		} else if !honorGitignore || !p.isPathExcluded(path, patterns) {
+		} else if !patterns.Matches(path) {
 			result.Included = append(result.Included, d)
 		}
 	}
@@ -710,7 +714,7 @@ func (p *Provider) commitParents(ctx context.Context, ref string) []string {
 // firstLine returns the first non-empty trimmed line of git output, so a stray
 // trailing newline or an unexpected second line never pollutes a resolved SHA.
 func firstLine(out string) string {
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if s := strings.TrimSpace(line); s != "" {
 			return s
 		}
@@ -722,19 +726,19 @@ func firstLine(out string) string {
 // failure if there was one. Stderr is returned separately so the caller can
 // quote it without risking diff content in the error; see runGitSplit.
 func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, string, error) {
-	out, _, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", "HEAD", "--")
-	if err == nil && out != "" {
-		return out, "", nil
+	resolution, err := p.ResolveWorkspaceComparison(ctx)
+	if err != nil {
+		return "", "", err
 	}
-	if ctx.Err() != nil {
-		return "", "", ctx.Err()
+	base := resolution.ResolvedBase
+	if resolution.BaseIsEmpty {
+		out, stderr, err := p.runGitSplit(ctx, "hash-object", "-t", "tree", "--stdin")
+		if err != nil {
+			return "", stderr, err
+		}
+		base = strings.TrimSpace(out)
 	}
-	// Fall back to the staged diff when `git diff HEAD` errored or was empty. This is
-	// not redundant with the call above: in a repository with no commits yet there is no
-	// HEAD, so `git diff HEAD` fails with "bad revision 'HEAD'", but `git diff --staged`
-	// still surfaces staged changes by diffing the index against the empty tree — the only
-	// way to review a workspace before its first commit.
-	return p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--staged", "--")
+	return p.runGitSplit(ctx, "--no-optional-locks", "-c", "core.quotepath=false", "-c", "diff.autoRefreshIndex=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, "--")
 }
 
 // binarySniffWindow is the number of leading bytes inspected when deciding
@@ -821,7 +825,7 @@ func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
 	}
 	patterns := p.loadGitignorePatterns()
 	var files []string
-	for _, name := range strings.Split(strings.TrimRight(out, "\x00"), "\x00") {
+	for name := range strings.SplitSeq(strings.TrimRight(out, "\x00"), "\x00") {
 		if name == "" {
 			continue
 		}

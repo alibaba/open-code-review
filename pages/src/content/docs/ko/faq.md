@@ -110,6 +110,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | 사유 | 해결 |
 |---|---|
 | `binary` | 할 일이 없습니다. 바이너리 파일에는 리뷰할 텍스트가 없습니다. |
+| `secret_exclude` | 조치할 필요가 없습니다. `.env`, `id_rsa`, `.netrc` 같은 자격 증명 경로는 `include`와 일치해도 검토 대상이 될 수 없습니다. |
 | `user_exclude` | `exclude` 목록에서 해당 패턴을 빼세요. |
 | `unsupported_ext` | 확장자를 `include` 목록에 넣어 허용 목록 관문을 건너뛰세요. |
 | `default_path` | 파일을 `include`에 넣으세요. 내장 테스트 파일 제외 패턴을 덮어씁니다. |
@@ -198,8 +199,9 @@ OCR이 코멘트를 diff의 정확한 줄에 붙이지 못했다는 뜻입니다
 
 그래서 작은 파일이라도 합치면 양이 되는 다른 변경과 함께 묶였다면 plan 패스를
 거칠 수 있습니다. 의도한 동작입니다. 크거나 넓게 퍼진 diff는 계획 단계에서
-이득을 봅니다. 한 번만 건너뛰고 싶다면 diff를 더 작게 만들어 돌리거나, 내장
-템플릿을 잠시 고치세요(고급 사용자용이며 `--tools`를 덮어써야 합니다).
+이득을 봅니다. diff를 줄이면 두 임계값보다 작아질 수 있습니다.
+리뷰 계획은 도구 덮어쓰기가 아닌 내장 템플릿으로 제어되므로,
+이 핵심 동작을 바꾸려면 소스 수정과 재빌드가 필요합니다.
 
 ### "Max tool requests reached" {#max-tool-requests-reached}
 
@@ -224,13 +226,14 @@ OCR이 코멘트를 diff의 정확한 줄에 붙이지 못했다는 뜻입니다
   ["No tool calls parsed"(로컬 모델 / Ollama)](#no-tool-calls-parsed-local-models-ollama)를
   참고하세요.
 
-### 서브 Agent 일부가 실패했는데 종료 코드가 0입니다 {#some-sub-agents-fail-the-run-still-exits-0}
+### 일부 서브 Agent 실패 시 종료 코드가 0이 아닌 이유 {#some-sub-agents-fail-why-is-the-exit-code-non-zero}
 
-의도한 동작입니다. OCR은 그룹별 실패를 격리해 그룹 하나가 잘못됐다고 파일
-20개짜리 리뷰가 통째로 죽지 않게 합니다. *하나라도* 성공했다면 전체 종료 코드는
-`0`입니다. 완전히 실패한 실행(성공한 서브 Agent가 0개)만 0이 아닌 코드로
-끝납니다. 어느 그룹이 실패했는지는 JSON 모드의 `warnings` 배열이나 텍스트 모드의
-stderr에서 확인하세요.
+OCR은 그룹별 실패를 격리하고 완료된 그룹의 발견 사항을 출력합니다.
+시간 초과, 프로바이더 오류, 잘못된 설정 등으로 일부 그룹이 실패하면 명령은
+0이 아닌 코드로 종료됩니다. CI에서 미완료된 리뷰를 감지할 수 있습니다.
+설정된 예산 한도만으로 중단된 부분 리뷰는 종료 코드 `0`을 유지합니다.
+JSON 모드의 `manifest.coverage.failed`와 `warnings`, 또는 텍스트 요약에서
+실패한 그룹과 재개 가능 여부를 확인하세요.
 
 ### CI 실행이 로컬보다 훨씬 느립니다 {#ci-run-is-much-slower-than-local}
 
@@ -255,7 +258,8 @@ stderr로 나갑니다(경고, 오류). `--audience agent`가 보장하는 깨�
 리뷰할 대상 파일이 없었다는 뜻입니다. `files_reviewed`는 최상위 필드가 아니라 `summary` 아래에
 있으며, 이 경로에서는 `0`입니다. 최상위 `[]`은 `comments` 쪽입니다. 같은 객체에는
 `"status": "skipped"`와 `"message": "Review skipped: no items were selected."`, 그리고
-`terminal_state`가 `"skipped"`이고 `coverage`의 각 배열이 비어 있는 `manifest`도 함께 실립니다.
+`terminal_state`가 `"skipped"`이고 `coverage.selected`가 비어 있는 `manifest`도 함께 실립니다.
+선택 단계에서 제외된 파일은 `coverage.excluded`에 나열되며, 각 항목에는 `exclude_reason`이 있습니다.
 
 파일을 리뷰했는데 지적이 없는 경우에도 **`comments: []`을 담은 JSON 객체**가 반환됩니다.
 `summary.files_reviewed`는 실제로 리뷰한 파일 수가 되고, `status`는 `"complete"`, `message`는
@@ -264,6 +268,15 @@ stderr로 나갑니다(경고, 오류). `--audience agent`가 보장하는 깨�
 review 출력에서는 `summary.files_reviewed`나 `manifest.terminal_state`를 사용하세요. 다만 호출자는
 아래의 manifest-less 경로에서 `summary`와 `manifest`가 둘 다 없을 수 있다는 점도 처리해야 합니다.
 `review --format json`은 stdout에 항상 JSON 객체 하나만 기록하며, 맨 배열을 내보내는 일은 없습니다.
+
+`terminal_state: "complete"`는 선택된 파일 집합의 리뷰가 완료되었다는 뜻이지, 변경된 모든 파일을
+리뷰했다는 뜻은 아닙니다. 선택 단계에서 제외된 파일(지원하지 않는 확장자, 경로 규칙, 내장된 민감 정보
+경로, 바이너리, 삭제된 파일 또는 파일별 크기 제한 초과)은 `--preview`와 같은 `exclude_reason`과
+함께 `manifest.coverage.excluded`에 기록되며, 이로 인해 실행 상태가 `partial`이 되지는 않습니다.
+이 목록은 선택 단계까지 도달한 파일만 포함합니다. diff provider가 그보다 먼저 제외한 파일은
+포함하지 않습니다. 여기에는 `vendor/`나 `node_modules/`처럼 항상 건너뛰는 디렉터리의 변경,
+`.gitignore`가 무시하는 추적되지 않은 파일, 그리고 단일 커밋이나 커밋 범위를 리뷰할 때
+`.gitignore`에 일치하는 모든 변경이 해당합니다.
 
 manifest-less no-files 경로는 더 간소해서 `summary`와 `manifest`를 모두 생략하지만
 `"status": "skipped"`, `"message": "No supported files changed."`, `"comments": []`는

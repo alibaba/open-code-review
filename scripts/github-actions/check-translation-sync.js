@@ -33,9 +33,9 @@ const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
 
-// The five localized README files. README.md (English) is the reference every
+// The README files, including localized versions. README.md (English) is the reference every
 // translation is compared against. The English entry point stays in the repo
-// root; the four translations live under docs/i18n/ to keep the root listing
+// root; the translations live under docs/i18n/ to keep the root listing
 // small (paths are relative to the repo root, joined with repoRoot below).
 const README_FILES = [
   "README.md",
@@ -43,12 +43,15 @@ const README_FILES = [
   "docs/i18n/README.ja-JP.md",
   "docs/i18n/README.ko-KR.md",
   "docs/i18n/README.ru-RU.md",
+  "docs/i18n/README.tr-TR.md",
+  "docs/i18n/README.fr-FR.md",
+  "docs/i18n/README.vi-VN.md",
 ];
 
 // Docs live under pages/src/content/docs/<locale>/**. English is authored under
 // en/; zh/, ja/, ru/, and ko/ mirror the exact same relative sub-paths.
 const DOCS_EN_PREFIX = "pages/src/content/docs/en/";
-const DOCS_LOCALES = ["zh", "ja", "ru", "ko"];
+const DOCS_LOCALES = ["zh", "ja", "ru", "ko", "tr"];
 
 // ---------------------------------------------------------------------------
 // Markdown heading parsing

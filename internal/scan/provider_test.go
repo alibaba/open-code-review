@@ -200,7 +200,7 @@ func TestProvider_Enumerate_NonGitDirectory(t *testing.T) {
 // per-iteration ctx.Err() check that was previously missing.
 func TestProvider_Enumerate_RespectsContextCancellation(t *testing.T) {
 	repo := initTestRepo(t)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		writeFile(t, repo, "pkg/"+strings.Repeat("a", i+1)+".go", []byte("package pkg\n"))
 	}
 	gitCommit(t, repo, "init")
@@ -238,9 +238,6 @@ func TestProvider_Enumerate_PathFilter(t *testing.T) {
 	}
 }
 
-// Regression for PR #1794: the .gitignore matcher must not let a trailing
-// /** or a root-relative slash-containing rule exclude unrelated subtrees
-// through ancestor directories. Expectations follow git check-ignore.
 func TestProvider_Enumerate_GitignoreAncestorRules(t *testing.T) {
 	repo := initTestRepo(t)
 	writeFile(t, repo, ".gitignore", []byte("src/**\n!src/*.go\ndocs/generated\n"))

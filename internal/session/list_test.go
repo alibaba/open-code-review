@@ -4,6 +4,7 @@
 package session
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
-func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {
+func TestListSessions_MissingDirReturnsEmptySlice(t *testing.T) {
 	tmpHome := t.TempDir()
 	setTestHome(t, tmpHome)
 
@@ -21,6 +22,15 @@ func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got %d entries", len(got))
+	}
+	// A nil slice marshals to JSON null, so a caller handing the result straight
+	// to an encoder could tell "no sessions directory" apart from "empty
+	// sessions directory" — the asymmetry this test exists to prevent.
+	if got == nil {
+		t.Error("expected a non-nil empty slice, got nil")
+	}
+	if b, err := json.Marshal(got); err != nil || string(b) != "[]" {
+		t.Errorf("json.Marshal = %s, %v; want [], nil", b, err)
 	}
 }
 
@@ -242,7 +252,7 @@ func writeTestSession(t *testing.T, repoDir, from, to string, comments []model.L
 		DiffFrom:   from,
 		DiffTo:     to,
 	})
-	for i := 0; i < doneCount; i++ {
+	for i := range doneCount {
 		filePath := filepath.Base(t.TempDir()) + ".go"
 		var perFile []model.LlmComment
 		if i < len(comments) {
@@ -250,7 +260,7 @@ func writeTestSession(t *testing.T, repoDir, from, to string, comments []model.L
 		}
 		sh.RecordReviewItemDone(filePath, filePath, filePath, "fp-"+filePath, perFile)
 	}
-	for i := 0; i < failedCount; i++ {
+	for range failedCount {
 		filePath := "failed-" + filepath.Base(t.TempDir()) + ".go"
 		sh.RecordReviewItemFailed(filePath, filePath, filePath, "fp-fail-"+filePath, "test error")
 	}

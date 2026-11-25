@@ -8,8 +8,10 @@ import { zh } from './zh';
 import { ja } from './ja';
 import { ko } from './ko';
 import { ru } from './ru';
+import { tr } from './tr';
+import { vi } from './vi';
 
-const translations: Record<Language, TranslationKeys> = { en, zh, ja, ko, ru };
+const translations: Record<Language, TranslationKeys> = { en, zh, ja, ko, ru, tr, vi };
 
 interface LanguageContextValue {
   language: Language;
@@ -21,7 +23,7 @@ const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 const STORAGE_KEY = 'ocr-lang';
 
-const SUPPORTED_LANGUAGES: Language[] = ['en', 'zh', 'ja', 'ko', 'ru'];
+const SUPPORTED_LANGUAGES: Language[] = ['en', 'zh', 'ja', 'ko', 'ru', 'tr', 'vi'];
 
 function detectBrowserLanguage(): Language | null {
   try {

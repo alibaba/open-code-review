@@ -155,6 +155,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".VY", true},
 		{".rego", true},
 		{".REGO", true},
+		{".cu", true},
+		{".CU", true},
+		{".cuh", true},
+		{".CUH", true},
+		{".hip", true},
+		{".HIP", true},
 		{".glsl", true},
 		{".GLSL", true},
 		{".hlsl", true},
@@ -169,6 +175,18 @@ func TestIsAllowedExt(t *testing.T) {
 		{".PSM1", true},
 		{".psd1", true},
 		{".PSD1", true},
+		{".clj", true},
+		{".CLJ", true},
+		{".cljs", true},
+		{".CLJS", true},
+		{".cljc", true},
+		{".CLJC", true},
+		{".edn", true},
+		{".EDN", true},
+		{".move", true},
+		{".MOVE", true},
+		{".dhall", true},
+		{".DHALL", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -231,7 +249,7 @@ func TestAllowlistKeepsEveryTestedExtension(t *testing.T) {
 		".haml", ".slim", ".erb",
 		".js", ".jsx", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".cs",
 		".rb", ".sh", ".bash", ".zsh", ".sql", ".css", ".scss", ".html", ".xml", ".yaml",
-		".yml", ".json", ".toml", ".lua", ".swift",
+		".yml", ".json", ".toml", ".lua", ".swift", ".cu", ".cuh", ".hip",
 	}
 	for _, ext := range tested {
 		if !allowed[ext] {
@@ -314,9 +332,23 @@ func TestIsExcludedPath(t *testing.T) {
 		{"ruby spec dir", "spec/models/user_spec.rb", true},
 		{"ruby non-spec", "app/models/user.rb", false},
 
-		// Rust test files
+		// Rust test and benchmark files
 		{"rust test file", "src/parser_test.rs", true},
+		{"rust tests suffix", "src/parser_tests.rs", true},
+		{"rust nested tests suffix", "crates/mcp/src/handler_tests.rs", true},
+		{"rust module tests.rs", "src/tests.rs", true},
+		{"rust nested module tests.rs", "crates/gateway/src/runner/tests.rs", true},
+		{"rust integration test at root", "tests/integration.rs", true},
+		{"rust integration test in crate", "crates/server/tests/webhook.rs", true},
+		{"rust integration test helper mod", "crates/server/tests/common/mod.rs", true},
+		{"rust bench at root", "benches/bench_main.rs", true},
+		{"rust bench in crate", "crates/core/benches/parse.rs", true},
 		{"rust non-test", "src/parser.rs", false},
+		{"rust tests prefix helper not excluded", "src/tests_helper.rs", false},
+		{"rust test_support not excluded", "src/test_support.rs", false},
+		{"rust contest not excluded", "src/contest.rs", false},
+		{"rust benches prefix not excluded", "src/benches_util.rs", false},
+		{"rust benchmark module not excluded", "src/benchmark.rs", false},
 
 		// Prisma schemas have no conventional default test-file exclusion.
 		{"prisma schema", "prisma/schema.prisma", false},
@@ -452,6 +484,28 @@ func TestIsExcludedPath(t *testing.T) {
 		{"capnp schema is reviewed", "schema/addressbook.capnp", false},
 		{"capnp in filename only", "src/capnp_helpers.go", false},
 
+		// Move build output and test files. The build/ pattern is deliberately
+		// scoped by extension: IsExcludedPath applies every pattern to every
+		// path with no language dispatch, so a bare "**/build/**" would also
+		// drop Java, Gradle, TypeScript and CMake output.
+		{"move build dir", "build/mypkg/sources/pool.move", true},
+		{"move build vendored dependency", "build/MyPkg/sources/dependencies/Sui/tx_context.move", true},
+		{"move tests dir", "tests/pool_tests.move", true},
+		{"move tests dir under sources", "sources/trading/tests/market/clearinghouse_test.move", true},
+		{"move _tests suffix", "sources/pool_tests.move", true},
+		// Singular _test.move is as common as the plural and often lives in
+		// sources/ rather than tests/, e.g. aptos-core's
+		// move-examples/hello_blockchain/sources/hello_blockchain_test.move.
+		{"move _test suffix", "sources/hello_blockchain_test.move", true},
+		{"move tests dir at root", "tests/coin.move", true},
+		{"move tests dir in nested package", "packages/app/tests/coin.move", true},
+		{"move non-test", "sources/pool.move", false},
+		{"move non-test in nested package", "packages/app/sources/coin.move", false},
+		{"move tests in filename", "sources/tests_helper.move", false},
+		{"move build pattern does not catch ts", "frontend/build/index.ts", false},
+		{"move build pattern does not catch java", "build/classes/com/example/Foo.java", false},
+		{"move build pattern does not catch go", "build/main.go", false},
+
 		// Jsonnet vendored dependencies (written by `jb install`, wiped by `rm -rf vendor`).
 		// This used to be extension-scoped to keep vendored Go and PHP sources reviewable.
 		// #1494 reversed that on purpose: vendor/ is a dependency directory whatever the
@@ -491,11 +545,34 @@ func TestIsExcludedPath(t *testing.T) {
 		{"vyper non-test", "src/token.vy", false},
 		{"vyper test in filename only", "src/test_helpers.vy", false},
 
+		// CUDA/HIP kernels have no conventional default test-file exclusion:
+		// PyTorch, CUTLASS and ROCm put kernels under both tests/ and test/,
+		// and many projects keep production kernels there too, so an
+		// extension-scoped pattern would drop real source. Generic fixture
+		// directories remain excluded.
+		{"cuda kernel in a tests directory", "tests/kernels/softmax.cu", false},
+		{"cuda header in a test directory", "kernels/test/attention.cuh", false},
+		{"hip kernel in a tests directory", "tests/kernels/hip_softmax.hip", false},
+		{"cuda kernel in testdata", "kernels/testdata/ref.cu", true},
+		{"cuda kernel under vendor", "third_party/cutlass/vendor/softmax.cu", true},
 		// Shader languages have no conventional default test-file exclusion.
 		{"glsl shader", "shaders/fragment.glsl", false},
 		{"hlsl shader", "shaders/lighting.hlsl", false},
 		{"wgsl shader", "shaders/compute.wgsl", false},
 		{"metal shader", "shaders/blur.metal", false},
+		// Clojure test files, compiler output and tool-owned cache directories
+		{"clojure test directory", "test/myapp/core_test.clj", true},
+		{"cljs nested test directory", "modules/ui/test/myapp/view_test.cljs", true},
+		{"cljc test suffix", "src/myapp/util_test.cljc", true},
+		{"cljs compiled bundle", "resources/public/js/compiled/app.js", true},
+		{"cljs compiled stdlib copy", "resources/public/js/compiled/out/cljs/core.cljs", true},
+		{"cljs analysis cache", "resources/public/js/compiled/out/cljs/core.cljs.cache.edn", true},
+		{"cljs compiled under a subproject", "example/resources/public/js/compiled/example.js", true},
+		{"clojure cpcache", ".cpcache/launchpad.edn", true},
+		{"shadow-cljs cache", ".shadow-cljs/builds/app/release/bundle-info.edn", true},
+		{"clojure non-test", "src/myapp/core.clj", false},
+		{"clojure test in filename prefix", "src/myapp/test_helpers.clj", false},
+		{"hand-written js beside the compiled output", "resources/public/js/app/analytics.js", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

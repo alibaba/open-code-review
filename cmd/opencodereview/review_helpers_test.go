@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -64,6 +65,36 @@ func TestRunPreviewJSONFormat(t *testing.T) {
 	if got.Entries[0].ExcludeReason != model.ExcludeExtension {
 		t.Errorf("exclude_reason = %q, want %q", got.Entries[0].ExcludeReason, model.ExcludeExtension)
 	}
+}
+
+func TestReviewPreviewReincludedDirectory(t *testing.T) {
+	freshOCRHome(t)
+	repo := initTestGitRepo(t)
+	gitCommitFile(t, repo, ".gitignore", "/*/\n!/src/\n", "ignore all directories except src")
+	for _, dir := range []string{"src", "other"} {
+		if err := os.Mkdir(filepath.Join(repo, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, dir, "a.go"), []byte("package fixture\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(t *testing.T, args ...string) {
+		t.Helper()
+		preview := previewJSON(t, repo, args...)
+		if len(preview.Entries) != 1 || preview.Entries[0].Path != "src/a.go" || !preview.Entries[0].WillReview {
+			t.Errorf("preview entries = %+v, want only src/a.go for review", preview.Entries)
+		}
+	}
+	t.Run("untracked", func(t *testing.T) { check(t) })
+	gitIn(t, repo, "add", "src/a.go")
+	gitIn(t, repo, "add", "-f", "other/a.go")
+	gitIn(t, repo, "commit", "-qm", "add both files")
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("*\n!*/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("commit", func(t *testing.T) { check(t, "--commit", "HEAD") })
+	t.Run("range", func(t *testing.T) { check(t, "--from", "HEAD~1", "--to", "HEAD") })
 }
 
 // TestRunPreviewJSON_ProviderDirectoryKeepsChangesetOrder pins issue #1236:
@@ -270,6 +301,7 @@ func TestRunPreviewCreatesNoSession(t *testing.T) {
 }
 
 func TestLoadReviewResumeState(t *testing.T) {
+	setTestHome(t, t.TempDir())
 	dir := initTestGitRepo(t)
 
 	t.Run("empty resume returns nil", func(t *testing.T) {
@@ -279,10 +311,14 @@ func TestLoadReviewResumeState(t *testing.T) {
 		}
 	})
 
-	t.Run("workspace resume rejected", func(t *testing.T) {
-		_, err := loadReviewResumeState(dir, reviewOptions{resume: "sess-1"})
-		if err == nil {
-			t.Fatal("expected error for workspace-mode resume")
+	t.Run("workspace resume loads session", func(t *testing.T) {
+		id := writeWorkspaceResumeSession(t, dir, "main.go")
+		state, err := loadReviewResumeState(dir, reviewOptions{resume: id})
+		if err != nil {
+			t.Fatalf("workspace resume must load, got: %v", err)
+		}
+		if state == nil || state.ReviewMode != session.ReviewModeWorkspace {
+			t.Fatalf("state = %+v, want a workspace session", state)
 		}
 	})
 

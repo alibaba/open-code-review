@@ -1,4 +1,6 @@
 const path = require('path');
+const { DefinePlugin } = require('webpack');
+const { docsRoot, readEnglishDocIdentifiers } = require('./english-doc-identifiers.cjs');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
 const isProduction = process.env.NODE_ENV === 'production';
@@ -95,6 +97,11 @@ module.exports = {
     }
   },
   plugins: [
+    new DefinePlugin({
+      __ENGLISH_DOC_IDENTIFIERS__: DefinePlugin.runtimeValue(
+        () => JSON.stringify(readEnglishDocIdentifiers()), { contextDependencies: [docsRoot] }
+      )
+    }),
     new HtmlWebpackPlugin({
       template: './index.html',
       inject: 'body'
