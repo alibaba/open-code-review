@@ -4,8 +4,12 @@ sidebar:
   order: 5
 ---
 
-The config file lives at `~/.opencodereview/config.json`. You have three ways
-to edit it:
+The config file defaults to `~/.opencodereview/config.json`. For CLI deployments on a
+persistent volume, set `OCR_HOME` to its absolute mount path (for example, `/data/ocr`).
+Use the same storage root for `ocr config`, `ocr review`, and `ocr viewer` so the viewer
+can read saved sessions. Custom storage is available through the CLI.
+
+You have three ways to edit the config:
 
 - **Interactive TUI** — `ocr config provider` / `ocr config model`, with guided menus.
 - **Command line** — `ocr config set <key> <value>`, ideal for scripts and CI.

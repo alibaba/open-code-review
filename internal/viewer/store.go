@@ -22,16 +22,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/ocrhome"
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
 // SessionsRoot returns the root directory where session JSONL files are stored.
 func SessionsRoot() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := ocrhome.Dir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
+		return "", fmt.Errorf("resolve OCR home: %w", err)
 	}
-	return filepath.Join(home, ".opencodereview", "sessions"), nil
+	return filepath.Join(home, "sessions"), nil
 }
 
 // RepoInfo represents a discovered repository from the sessions directory.
