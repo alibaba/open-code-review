@@ -55,10 +55,10 @@ GitLab은 `GITLAB_API_TOKEN`을 명시적으로 두기를 권장하지만, fork 
 
 ### 무엇을 하나 {#what-it-does}
 
-- `pull_request_target`(`opened`) 이벤트와 본문이 `/open-code-review` 또는
+- `pull_request_target`(`opened`, `synchronize`, `reopened`) 이벤트와 본문이 `/open-code-review` 또는
   `@open-code-review`로 시작하는 `issue_comment` 이벤트에서 트리거합니다. 후자
   덕분에 리뷰어가 PR에 코멘트를 남겨 OCR을 다시 돌릴 수 있습니다.
-  (`pull_request` 대신 `pull_request_target`을 쓰는 이유는 fork에서 올라온 PR에서도
+  (`pull_request` 대신 [`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target)을 쓰는 이유는 fork에서 올라온 PR에서도
   시크릿을 쓸 수 있게 하기 위해서입니다. OCR은 diff를 읽기만 하고 PR의 코드를
   실행하지 않습니다.)
 - `npm install -g @alibaba-group/open-code-review`로 OCR을 설치하고,
@@ -76,6 +76,13 @@ mkdir -p .github/workflows
 curl -o .github/workflows/ocr-review.yml \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
 ```
+
+[2026년 12월 2일](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/)부터 GitHub에서 호스팅하는 공개 저장소의 `pull_request_target` 이벤트가 기본적으로 차단됩니다. 적용되는 Actions 이벤트 정책에서 명시적으로 허용하면 이 이벤트를 사용할 수 있습니다. PR을 만들거나 업데이트하거나 다시 열 때 OCR을 계속 자동으로 실행해야 한다면 저장소의 **Settings → Actions → Policies**에서 [이 워크플로에 적용할 정책을 만들거나 업데이트하세요](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+
+- 새 정책을 만드는 경우 **Target workflows**에서 **Add target**을 클릭하고 `.github/workflows/ocr-review.yml`을 지정하세요.
+- **Restrict events**에서 자동 리뷰용 `pull_request_target`과 댓글로 리뷰를 다시 요청할 때 쓰는 `issue_comment`를 허용하세요.
+- **Enforcement status**를 **Active**로 설정하고 정책을 저장하세요.
+- 참고: 기존 정책을 업데이트하기 전에 `.github/workflows/ocr-review.yml`만 대상으로 하는지 확인하세요.
 
 ### 필요한 시크릿 {#required-secrets}
 
@@ -107,7 +114,7 @@ curl -o .github/workflows/ocr-review.yml \
 | 입력 | 기본값 | 설명 |
 |---|---|---|
 | `effort` | `''` | `ocr review --effort`로 전달되는 리뷰 강도 프리셋: `low`, `medium`, `high`(대소문자 무시). 비워 두면 CLI 기본값(설정된 값, 없으면 medium)을 따릅니다. OCR v1.10.0 이상이 필요하며, 더 낮은 버전에서는 액션이 명확한 오류와 함께 일찍 실패합니다. |
-| `max_tokens_budget` | `''` | `ocr review --max-tokens-budget`으로 전달되는 총 토큰(입력 + 출력) 상한. 비어 있거나 `'0'`이면 무제한입니다. LLM 라운드마다 먼저 확인하며, 이미 상한을 넘긴 하위 작업은 발견 사항을 제출할 마지막 라운드를 한 번 받고, 이후 하위 작업은 디스패치되지 않으며, 예산을 넘기거나 건너뛴 파일은 `failed(budget)`로 보고되고, 부분 결과는 그대로 게시되며, 리뷰는 0으로 종료합니다. |
+| `max_tokens_budget` | `''` | `ocr review --max-tokens-budget`으로 전달되는 총 토큰(입력 + 출력) 상한. 비어 있거나 `'0'`이면 무제한입니다. LLM 라운드마다 먼저 확인하며, 이미 상한을 넘긴 하위 작업은 발견 사항을 제출할 마지막 라운드를 한 번 받고, 이후 하위 작업은 디스패치되지 않으며, 예산을 넘기거나 건너뛴 파일은 `failed(budget)`로 보고됩니다. 예산만 소진되었고 일부 항목을 리뷰했다면 종료 코드는 0입니다. 시간 초과나 공급자 오류 등 실행 중 오류가 발생하거나 선택한 모든 항목이 실패하면(모두 예산 때문에 실패한 경우 포함) 종료 코드는 0이 아닙니다. CLI는 확보한 결과를 출력합니다. 종료 코드가 0이 아니면 Action은 설정에 따라 원본 출력을 아티팩트로 업로드할 수 있지만 PR 댓글 게시는 건너뜁니다. |
 | `llm_reasoning_effort` | `''` | `reasoning_effort` 요청 필드를 조절할 수 있는 모델(예: GLM-5.x, OpenAI reasoning 모델)의 추론 깊이: `minimal`, `low`, `medium`, `high`, `max`(대소문자 무시). `llm_extra_body`를 통해 요청 본문에 병합되므로 이미 배포된 모든 CLI 버전에서 동작합니다. `llm_extra_body` 안의 명시적 `reasoning_effort` 키가 이 입력보다 우선합니다. 비어 있으면(기본값) 아무것도 보내지 않습니다. OpenAI 호환 프로토콜 전용입니다 — Anthropic API는 알 수 없는 본문 필드를 거부하므로 해당 프로토콜에서는 액션이 즉시 실패합니다. Anthropic의 thinking 제어는 `llm_extra_body`의 명시적 키를 사용하세요. |
 | `stream_progress` | `'false'` | `'true'`로 설정하면 실행이 끝날 때까지 조용히 기다리는 대신 `[ocr]` 진행 라인을 워크플로 로그에 실시간으로 흘려보냅니다(stderr의 human audience). 표시 전용 토글이며 stderr는 여전히 파일에 캡처되어 아티팩트와 코멘트 게시에 사용됩니다. |
 

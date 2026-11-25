@@ -149,7 +149,7 @@ func (c *Client) diagnosticText(text string) string {
 				secrets = append(secrets, authority[:at])
 			}
 		}
-		for _, pair := range strings.Split(u.RawQuery, "&") {
+		for pair := range strings.SplitSeq(u.RawQuery, "&") {
 			rawName, rawValue, hasValue := strings.Cut(pair, "=")
 			name, _ := url.QueryUnescape(rawName)
 			if !hasValue || publicDiagnosticField(name) {

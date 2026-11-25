@@ -1,0 +1,37 @@
+/*
+SPDX-License-Identifier: Apache-2.0
+Copyright 2026 alibaba/open-code-review Contributors
+*/
+
+.footer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.footer-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  line-height: 20px;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.footer-action:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.footer-action:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 4px;
+}

@@ -952,6 +952,59 @@ func TestSetMCPServerValue_ExistingServer(t *testing.T) {
 	}
 }
 
+func TestSetMCPServerValue_DottedServerName(t *testing.T) {
+	cfg := &Config{}
+	// The last dot separates the field, so a dotted server name is
+	// addressable the way dotted provider names are (#1661), and stays
+	// deletable through `config unset mcp_servers.<name>`.
+	if err := setMCPServerValue(cfg, "mcp_servers.github.v2.type", "stdio"); err != nil {
+		t.Fatalf("setMCPServerValue dotted name: %v", err)
+	}
+	if err := setMCPServerValue(cfg, "mcp_servers.github.v2.command", "npx"); err != nil {
+		t.Fatalf("setMCPServerValue dotted name field: %v", err)
+	}
+	entry, exists := cfg.MCPServers["github.v2"]
+	if !exists {
+		t.Fatalf("dotted server name not stored: %+v", cfg.MCPServers)
+	}
+	if entry.Type != "stdio" || entry.Command != "npx" {
+		t.Errorf("entry = %+v, want type stdio and command npx", entry)
+	}
+
+	// Dot-free names keep their previous meaning.
+	if err := setMCPServerValue(cfg, "mcp_servers.docs.command", "npx"); err != nil {
+		t.Fatalf("setMCPServerValue dot-free name: %v", err)
+	}
+	if _, exists := cfg.MCPServers["docs"]; !exists {
+		t.Fatalf("dot-free server name not stored: %+v", cfg.MCPServers)
+	}
+	if _, exists := cfg.MCPServers["github"]; exists {
+		t.Errorf("dotted name leaked a prefix entry: %+v", cfg.MCPServers)
+	}
+}
+
+func TestSetMCPServerValue_DottedServerNameRejectsEmptySegments(t *testing.T) {
+	cfg := &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"keep": {Command: "cmd"},
+		},
+	}
+	for _, key := range []string{
+		"mcp_servers..command",
+		"mcp_servers.github..command",
+		"mcp_servers. .command",
+		"mcp_servers.type",
+		"mcp_servers.docs.",
+	} {
+		if err := setMCPServerValue(cfg, key, "val"); err == nil {
+			t.Errorf("key %q: expected error", key)
+		}
+	}
+	if len(cfg.MCPServers) != 1 || cfg.MCPServers["keep"].Command != "cmd" {
+		t.Fatalf("rejected writes mutated config: %+v", cfg.MCPServers)
+	}
+}
+
 func TestUnsetMCPServer(t *testing.T) {
 	dir := t.TempDir()
 	configPath := dir + "/config.json"
@@ -1073,6 +1126,43 @@ func TestSetConfigValueLlmURL(t *testing.T) {
 	}
 	if cfg.Llm.URL != "https://example.com/v1" {
 		t.Errorf("URL = %q", cfg.Llm.URL)
+	}
+}
+
+func TestSetConfigValueLlmURLTrimsAndValidates(t *testing.T) {
+	t.Run("trims a valid URL before storing", func(t *testing.T) {
+		cfg := &Config{}
+
+		if err := setConfigValue(cfg, "llm.url", "  https://gateway.internal:8000/v1  "); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+		if got := cfg.Llm.URL; got != "https://gateway.internal:8000/v1" {
+			t.Errorf("URL = %q, want trimmed URL", got)
+		}
+	})
+
+	t.Run("clears with an empty value", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Llm.URL = "https://old.example/v1"
+
+		if err := setConfigValue(cfg, "llm.url", ""); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+		if cfg.Llm.URL != "" {
+			t.Errorf("URL = %q, want empty to clear the key", cfg.Llm.URL)
+		}
+	})
+
+	for _, value := range []string{"api.example.com/v1", "ftp://gateway.internal/v1", "://bad"} {
+		t.Run("rejects "+value, func(t *testing.T) {
+			cfg := &Config{}
+			if err := setConfigValue(cfg, "llm.url", value); err == nil {
+				t.Fatalf("setConfigValue accepted invalid URL %q", value)
+			}
+			if cfg.Llm.URL != "" {
+				t.Errorf("URL = %q, want the rejected value left unset", cfg.Llm.URL)
+			}
+		})
 	}
 }
 
@@ -1246,6 +1336,28 @@ func TestSetConfigValueUnknownKey(t *testing.T) {
 	cfg := &Config{}
 	if err := setConfigValue(cfg, "unknown.key", "val"); err == nil {
 		t.Fatal("expected error for unknown key")
+	}
+}
+
+func TestConfigSetHelpListsKeysAndValueFormats(t *testing.T) {
+	for _, text := range []string{
+		strings.Join(supportedConfigKeys, ", "),
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models",
+		"MCP server fields: type, command, args, env, url, headers, tools, setup",
+		"args, env and tools use JSON arrays",
+		"headers use JSON objects",
+	} {
+		if !strings.Contains(configSetCmd.Long, text) {
+			t.Errorf("config set help does not contain %q", text)
+		}
+	}
+}
+
+func TestConfigUnsetHelpListsAllSupportedKeys(t *testing.T) {
+	for _, key := range []string{"provider", "max_tokens", "effort", "custom_providers.<name>", "mcp_servers.<name>"} {
+		if !strings.Contains(configUnsetCmd.Long, key) {
+			t.Errorf("config unset help does not contain %q", key)
+		}
 	}
 }
 

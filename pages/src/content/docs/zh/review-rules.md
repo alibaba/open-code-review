@@ -46,11 +46,23 @@ OCR 用一条**四层优先级链**解析规则。对每个文件路径，按序
 三个独立字段：
 
 - `include`——可选。glob 模式，用于*绕过*内置的默认排除模式（测试文件排除——见
-  下文）。它不是白名单：不匹配任何 `include` 模式的文件仍会经过
-  `unsupported_ext` 和 `default_path` 检查，可能仍被评审。
+  下文）**以及扩展名允许列表**。它不是白名单：不匹配任何 `include` 模式的
+  文件仍会经过 `unsupported_ext` 和 `default_path` 检查，可能仍被评审。
 - `exclude`——可选。OCR 不予评审的文件 glob 模式。在用户配置的过滤规则中优先级最高。
 - `rules`——`{path, rule}` 条目数组，按**声明顺序**求值。第一个 `path` glob
   匹配该文件的条目，决定 OCR 发给模型的 prompt。
+
+`include` 也是评审内置允许列表之外的扩展名的方式——例如与代码一起变更的
+Markdown 契约文档：
+
+```json
+{
+  "include": ["**/*.md"]
+}
+```
+
+匹配该模式的文件会跳过 `unsupported_ext` 闸门；不在模式内的文件仍走正常检查。
+`rules[].path` 不是文件纳入过滤器——它只决定某个文件适用哪段规则文本。
 
 每个 `rules` 条目还接受一个可选的第三个字段：
 
@@ -184,6 +196,10 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -252,7 +268,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 `include` 规则重新纳入评审。
 
 要**评审**一个匹配上述任一模式的文件，把它加入用户 `include` 列表——那会
-覆盖 default-path 门。
+覆盖 default-path 门（如果扩展名不在内置允许列表中，也会覆盖 `unsupported_ext` 门）。
 
 ## 每文件的规则解析
 
@@ -263,60 +279,82 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 3. 按声明顺序试 `~/.opencodereview/rule.json`。
 4. 回退到内嵌系统规则层。
 
-以下是内嵌 `system_rules.json` 的部分模式，按相对匹配顺序排列：
+以下列出内嵌 `system_rules.json` 的全部模式，按相对匹配顺序排列：
 
-| 模式                                | 规则文档                                                              |
-| ----------------------------------- | --------------------------------------------------------------------- |
-| `**/*.properties`                   | `properties.md`——i18n / 配置文件。                                    |
-| `**/*{mapper,dao}*.xml`             | `mapper_dao_xml.md`——MyBatis 风格 mapper SQL。                        |
-| `**/pom.xml`                        | `pom_xml.md`——Maven 依赖。                                            |
-| `**/build.gradle`                   | `build_gradle.md`——Gradle 依赖。                                      |
-| `**/package.json`                   | `package_json.md`——NPM 依赖 / 脚本。                                  |
-| `**/Cargo.toml`                     | `cargo_toml.md`——Rust manifest。                                      |
-| `**/composer.json`                  | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。     |
-| `**/*.{json,json5}`                 | `json.md`——通用 JSON（也匹配 `.json5`）。                             |
-| `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md`——GitHub Actions 工作流 YAML。                   |
-| `.github/**/*.{yaml,yml}`           | `github_config.md`——其他 `.github` 配置 YAML。                        |
-| `**/*.{yaml,yml}`                   | `yaml.md`                                                             |
-| `**/*.java`                         | `java.md`                                                             |
-| `**/*.go`                           | `go.md`——Go 源代码。                                                  |
-| `**/*.{ftl,ftlh,ftlx}`              | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。          |
-| `**/*.{hbs,mustache}`               | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。               |
-| `**/*.{jinja2,j2}`                  | `jinja.md`——Jinja 模板                                              |
-| `**/*.ets`                          | `arkts.md`——ArkTS / HarmonyOS。                                       |
-| `**/*.astro`                        | `astro.md`——Astro 组件与 islands。                                    |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`      | `ts_js_tsx_jsx.md`                                                    |
-| `**/*.{kt,kts}`                     | `kotlin.md`                                                           |
-| `**/*.{fs,fsi,fsx}`                 | `fsharp.md`——F# 实现、签名和脚本文件。                                |
-| `**/*.rs`                           | `rust.md`                                                             |
-| `**/*.R`                            | `r.md`                                                                |
-| `**/*.{cpp,cc,cxx,hpp,hxx}`         | `cpp.md`                                                              |
-| `**/*.c`                            | `c.md`                                                                |
-| `**/*.{py,pyi,ipynb}`               | `python.md`——Python 源代码。                                          |
-| `**/*.{php,phtml}`                  | `php.md`——PHP 源代码和 PHP 模板。                                     |
-| `**/*.proto`                        | `protobuf.md`——Protocol Buffers 线协议兼容性。                        |
-| `**/*.po`                           | `po.md`——gettext 翻译源目录。                                         |
-| `**/*.pot`                          | `pot.md`——gettext 模板文件。                                          |
-| `**/*.{graphql,gql}`                | `graphql.md`——GraphQL schema 与操作。                                 |
-| `**/*.prisma`                       | `prisma.md`——Prisma schema。                                          |
-| `**/*.jl`                           | `julia.md`——Julia 源代码。                                            |
-| `**/*.{tf,tofu,hcl,tfvars}`         | `terraform.md`——Terraform / HCL。                                     |
-| `**/*.bicep`                        | `bicep.md`——Bicep（Azure）模板。                                      |
-| `**/*.nu`                           | `nushell.md`——Nushell 脚本。                                          |
-| `**/*.elm`                          | `elm.md` - Elm 源代码。                                               |
-| `**/*.{jsonnet,libsonnet}`          | `jsonnet.md`——Jsonnet 配置模板与库。                                  |
-| `**/*.thrift`                       | `thrift.md`——Apache Thrift IDL 线协议兼容性。                         |
-| `**/*.capnp`                        | `capnp.md`——Cap'n Proto schema 线协议兼容性。                         |
-| `**/*.{glsl,hlsl,wgsl,metal}`       | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。                               |
-| `**/*.{v,sv,vh}`                    | `verilog.md`——Verilog 与 SystemVerilog RTL。                          |
-| `**/*.{vhd,vhdl}`                   | `vhdl.md`——VHDL RTL。                                                 |
-| `**/*.m`                            | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
-| `**/*.mm`                           | `objc.md`——Objective-C++ 源代码。                                     |
-| `**/*.sol`                          | `solidity.md`——Solidity 智能合约。                                    |
-| `**/*.vy`                           | `vyper.md`——Vyper 智能合约。                                          |
-| `**/*.rego`                         | `rego.md`——Rego 策略（OPA）。                                         |
-| `**/*.{ps1,psm1,psd1}` | `powershell.md`——PowerShell 脚本、模块和数据/清单文件。 |
-| _(fallback)_                        | `default.md`                                                          |
+| 模式                                            | 规则文档                                                              |
+| ----------------------------------------------- | --------------------------------------------------------------------- |
+| `**/*.properties`                               | `properties.md`——i18n / 配置文件。                                    |
+| `**/*{mapper,dao}*.xml`                         | `mapper_dao_xml.md`——MyBatis 风格 mapper SQL。                        |
+| `**/pom.xml`                                    | `pom_xml.md`——Maven 依赖。                                            |
+| `**/build.gradle`                               | `build_gradle.md`——Gradle 依赖。                                      |
+| `**/package.json`                               | `package_json.md`——NPM 依赖 / 脚本。                                  |
+| `**/Cargo.toml`                                 | `cargo_toml.md`——Rust manifest。                                      |
+| `**/Move.toml` | `move_toml.md`——Move package manifest。 |
+| `**/*.move` | `move.md`——Move 源代码。 |
+| `**/composer.json`                              | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。     |
+| `**/*.{json,json5,jsonc}`                       | `json.md`——通用 JSON（也匹配 `.json5` 和 `.jsonc`）。 |
+| `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md`——GitHub Actions 工作流 YAML。                   |
+| `.github/**/*.{yaml,yml}`                       | `github_config.md`——其他 `.github` 配置 YAML。                        |
+| `**/*.{yaml,yml}`                               | `yaml.md`                                                             |
+| `**/*.java`                                     | `java.md`                                                             |
+| `**/*.go`                                       | `go.md`——Go 源代码。                                                  |
+| `**/*.{ftl,ftlh,ftlx}`                          | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。          |
+| `**/*.{hbs,mustache}`                           | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。               |
+| `**/*.{jinja2,j2}`                              | `jinja.md`——Jinja 模板                                                |
+| `**/*.pug`                          | `pug.md`——Pug 模板。                                                 |
+| `**/*.{ejs,liquid,njk}`                         | `ejs_liquid_njk.md`——EJS、Liquid 与 Nunjucks 模板（SSTI / XSS / 转义）。 |
+| `**/*.{haml,slim}`                              | `haml_slim.md`——HAML 与 Slim 模板（SSTI / XSS / 转义 / 缩进语义）。 |
+| `**/*.erb`                                      | `erb.md`——ERB 模板（SSTI / XSS / 转义 / 空白与输出结构）。 |
+| `**/*.ets`                                      | `arkts.md`——ArkTS / HarmonyOS。                                       |
+| `**/*.astro`                                    | `astro.md`——Astro 组件与 islands。                                    |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                    |
+| `**/*.{kt,kts}`                                 | `kotlin.md`                                                           |
+| `**/*.scala`                                    | `scala.md` |
+| `**/*.{fs,fsi,fsx}`                             | `fsharp.md`——F# 实现、签名和脚本文件。                                |
+| `**/*.cs`                                       | `csharp.md`——C# 源文件。 |
+| `**/*.rs`                                       | `rust.md`                                                             |
+| `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                              |
+| `**/*.c`                                        | `c.md`                                                                |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md`——CUDA 内核与头文件。                                    |
+| `**/*.hip`                                      | `cuda_hip.md`——HIP（AMD ROCm）内核。                                  |
+| `**/*.{py,pyi,ipynb}`                           | `python.md`——Python 源代码。                                          |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md`——Ruby 源文件、Rake 任务、gemspec、Gemfile 和 Rakefile。 |
+| `**/*.{php,phtml}`                              | `php.md`——PHP 源代码和 PHP 模板。                                     |
+| `**/*.proto`                                    | `protobuf.md`——Protocol Buffers 线协议兼容性。                        |
+| `**/*.po`                                       | `po.md`——gettext 翻译源目录。                                         |
+| `**/*.pot`                                      | `pot.md`——gettext 模板文件。                                          |
+| `**/*.{graphql,gql}`                            | `graphql.md`——GraphQL schema 与操作。                                 |
+| `**/*.prisma`                                   | `prisma.md`——Prisma schema。                                          |
+| `**/*.jl`                                       | `julia.md`——Julia 源代码。                                            |
+| `**/*.R`                                        | `r.md`                                                                |
+| `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md`——Terraform / HCL。                                     |
+| `**/*.bicep`                                    | `bicep.md`——Bicep（Azure）模板。                                      |
+| `**/*.dhall` | `dhall.md`——Dhall 配置语言。 |
+| `**/*.nix`                          | `nix.md`——Nix 表达式与 flake。                                         |
+| `**/*.{hs,lhs}`                     | `haskell.md`——Haskell 源代码。                                        |
+| `**/*.{nim,nims,nimble}`            | `nim.md`——Nim 源代码与包清单。                                            |
+| `**/*.swift`                        | `swift.md`——Swift 源代码。                                            |
+| `**/*.nu`                                       | `nushell.md`——Nushell 脚本。                                          |
+| `**/*.elm`                                      | `elm.md` - Elm 源代码。                                               |
+| `**/*.{jsonnet,libsonnet}`                      | `jsonnet.md`——Jsonnet 配置模板与库。                                  |
+| `**/*.zig`                          | `zig.md`——Zig 源代码。                                                |
+| `**/*.thrift`                                   | `thrift.md`——Apache Thrift IDL 线协议兼容性。                         |
+| `**/*.{bzl,bazel,star}`, `**/{BUILD,WORKSPACE}` | `starlark.md`——Starlark 和 Bazel 构建、宏与规则设计。                 |
+| `**/*.capnp`                                    | `capnp.md`——Cap'n Proto schema 线协议兼容性。                         |
+| `**/*.{ml,mli}`                     | `ocaml.md`——OCaml 源代码。                                            |
+| `**/*.{re,rei}`                     | `ocaml.md`——ReasonML 源代码。                                         |
+| `**/*.{v,sv,vh}`                                | `verilog.md`——Verilog 与 SystemVerilog RTL。                          |
+| `**/*.{vhd,vhdl}`                               | `vhdl.md`——VHDL RTL。                                                 |
+| `**/*.m`                                        | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
+| `**/*.mm`                                       | `objc.md`——Objective-C++ 源代码。                                     |
+| `**/*.sol`                                      | `solidity.md`——Solidity 智能合约。                                    |
+| `**/*.vy`                                       | `vyper.md`——Vyper 智能合约。                                          |
+| `**/*.rego`                                     | `rego.md`——Rego 策略（OPA）。                                         |
+| `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。                        |
+| `**/*.{ps1,psm1,psd1}`                          | `powershell.md`——PowerShell 脚本、模块和数据/清单文件。               |
+| `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md`——Clojure / ClojureScript 源代码和 EDN 数据。 |
+| `**/*.sql`                                      | `sql.md`——SQL 迁移与查询。 |
+| _(fallback)_                                    | `default.md`                                                          |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。
 

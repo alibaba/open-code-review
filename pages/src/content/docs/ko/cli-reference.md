@@ -92,6 +92,10 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 핵심 명령입니다. Git diff를 해석하고, 변경된 파일을 의미 단위로 묶고, 그룹마다 서브
 Agent를 하나씩 붙여 리뷰 코멘트를 모아 출력합니다.
+`review`와 `scan`의 최종 보고서는 텍스트, JSON, SARIF 형식 모두에서 지적 사항을
+심각도가 낮은 순서(`low`, `medium`, `high`, `critical`)로 나열합니다. 심각도가 없거나
+그 값을 인식할 수 없는 지적 사항은 `low`보다 앞에 표시됩니다. 심각도가 같으면 수집된
+순서를 유지하지만, 병렬 처리로 인해 이 순서는 실행할 때마다 달라질 수 있습니다.
 
 ### 명령 형식 {#synopsis}
 
@@ -110,11 +114,11 @@ ocr r      [flags]   (alias)
 |---|---|---|---|
 | `--repo <path>` | — | 현재 디렉터리 | Git 저장소 루트. |
 | `--from <ref>` | — | — | diff를 시작할 원본 ref(예: `main`). |
-| `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. |
+| `--to <ref>` | — | — | diff가 끝나는 대상 ref(예: `feature-branch`). 지정하면 OCR이 `merge-base(from, to)..to`를 계산합니다. `--from`만 지정하고 `--to`를 생략하면 `HEAD`가 기본값이 됩니다(커밋된 변경만 리뷰, `git diff <from>...HEAD`와 동일). |
 | `--commit <sha>` | `-c` | — | 리뷰할 단일 커밋(부모 커밋과의 diff). |
 | `--preview` | `-p` | `false` | 필터 파이프라인만 돌리고 LLM은 호출하지 않습니다. 파일 목록과 제외 사유를 출력합니다. `--format json`은 지원하지만 `--format sarif`는 지원하지 않습니다(미리 보기에는 내보낼 완료된 지적이 없습니다). |
 | `--no-filter` | — | `false` | 리뷰 코멘트를 모두 남기고 서브태스크 단위 `REVIEW_FILTER_TASK` LLM 후처리 호출을 건너뜁니다. 서브태스크는 파일 하나 또는 관련된 파일 묶음을 리뷰합니다. |
-| `--resume <session-id>` | — | — | 호환되는 이전 range 또는 commit 리뷰 세션에서 이어서 실행합니다. |
+| `--resume <session-id>` | — | — | 호환되는 이전 range, commit 또는 워크스페이스 리뷰 세션에서 이어서 실행합니다. |
 | `--format <fmt>` | `-f` | `text` | `text`(사람이 읽는 형식), `json`(기계가 읽는 코멘트 배열), `sarif`(GitHub Code Scanning용 SARIF 2.1.0 리포트). |
 | `--output <path>` | `-o` | stdout | 리뷰 결과를 UTF-8 파일로 씁니다(`-`는 stdout). 첫 쓰기 시점에 파일을 만들므로 실패한 실행은 기존 파일을 건드리지 않습니다. text 형식에서는 ANSI 색 코드를 자동으로 제거합니다. |
 | `--audience <who>` | — | `human` | `human`은 진행 상황을 흘려보냅니다(`--format`이 `json`/`sarif`이면 stderr로 보내 stdout이 파싱 가능한 문서 하나로 유지됩니다). `agent`는 진행 상황을 아예 끄고 최종 요약이나 JSON만 출력합니다. |
@@ -125,17 +129,18 @@ ocr r      [flags]   (alias)
 | `--timeout <minutes>` | — | `15` | LLM 호출, 도구 실행, 재시도 대기를 포함한 서브태스크별 시간 예산. `0`이면 태스크 기한을 비활성화하지만 요청 타임아웃은 끄지 않습니다. 개별 요청 타임아웃은 `OCR_LLM_TIMEOUT` 또는 프로바이더의 `timeout_sec`로 독립적으로 설정하며 초 단위입니다(기본값 `300`). effort의 리뷰 라운드 수에 비례해 선형 확장됩니다(예: low/medium/high에서 15/30/45분). |
 | `--effort <level>` | — | `medium` | 리뷰 강도 프리셋: `low`(라운드 1회), `medium`(2회), `high`(3회). 라운드를 늘리면 놓치는 지적이 줄지만 비용도 그만큼 늘어납니다. 이 실행에 한해 저장된 `effort` 설정을 덮어씁니다. |
 | `--rule <path>` | — | — | 커스텀 JSON 리뷰 규칙 파일 경로. 프로젝트 수준과 전역 `rule.json`을 덮어씁니다. |
-| `--max-tools <n>` | — | 템플릿 기본값 | 서브태스크당 최대 도구 호출 라운드 수. `0`이면 템플릿 기본값(`100`)을 쓰고, 1~49는 `50`으로 올려 맞춥니다. 이 플래그는 상한을 *올리기만* 합니다. 템플릿 기본값보다 낮은 값은 무시됩니다. |
-| `--max-tokens <n>` | — | 설정 또는 템플릿 기본값 | 서브태스크당 프롬프트(입력) 토큰 상한이며 템플릿 기본값은 `200000`입니다. 이 실행에 한해 저장된 `max_tokens` 설정을 덮어씁니다. 출력 상한은 바뀌지 않습니다. `MAX_COMPLETION_TOKENS`를 참고하세요. |
+| `--max-tools <n>` | — | 템플릿 기본값 | 서브태스크당 최대 도구 호출 라운드 수. `0`이면 템플릿 기본값(`100`)을 쓰고, 1~49는 `50`으로 올려 맞춥니다. 검증된 양수 값은 상한으로 정확히 적용됩니다. |
+| `--max-tokens <n>` | — | 설정 또는 템플릿 기본값 | Review와 Analysis 모두에 적용되는 서브태스크당 프롬프트(입력) 토큰 상한입니다. 템플릿 기본값은 `200000`입니다. 이번 실행에 한해 저장된 `max_tokens` 설정을 덮어씁니다. 출력 상한은 바뀌지 않습니다. `MAX_COMPLETION_TOKENS`를 참고하세요. |
+| `--analysis` | — | 꺼짐 | 단일 커밋이나 커밋 범위를 리뷰할 때(`--commit` 또는 `--from`) 동작 변화와 그 영향을 별도로 분석합니다. `text`와 `json` 출력만 지원합니다. 워크스페이스의 미커밋 변경을 리뷰할 때는 사용할 수 없으며, `--preview`나 `--resume`과도 함께 쓸 수 없습니다. Analysis는 `--max-tools`와 관계없이 최대 300라운드까지 조사합니다. 예산을 소진하면 보고서 제출만을 위해 최대 한 라운드를 더 쓸 수 있습니다. Analysis가 실패하거나 건너뛰더라도 Review의 종료 상태는 바뀌지 않습니다. |
+| `--analysis-max-tokens-budget <n>` | — | `0`(무제한) | Analysis에만 적용되는 소프트 한도로, 입력과 출력 토큰 수의 합계를 기준으로 합니다. Analysis는 Review와 동시에 모델 요청을 한 건 더 실행할 수 있습니다. JSON 출력의 `analysis_meta.usage`와 `analysis_meta.execution_status`에서 사용량과 실행 상태를 확인하세요. |
 | `--max-tokens-budget <n>` | — | `0`(무제한) | 리뷰 전체의 입력+출력 토큰 사용량을 제한합니다. LLM 라운드마다 먼저 확인하며, 이미 예산을 넘긴 하위 작업은 발견 사항을 제출할 마지막 라운드를 한 번 받고 `failed(budget)`로 보고됩니다. 이후 하위 작업은 전달되지 않지만 그때까지의 결과는 그대로 내보냅니다. |
 | `--provider <name>` | — | — | 이 실행에 쓸 프로바이더를 고릅니다. `providers`와 `custom_providers` 양쪽의 이름을 모두 받습니다. |
 | `--model <name>` | — | — | 이 실행에 한해 해석된 LLM 모델을 덮어씁니다(예: `claude-opus-4-6`). |
-| `--max-git-procs <n>` | — | `16` | 동시에 띄울 git 서브프로세스의 최대 개수. |
-| `--tools <path>` | — | 내장 | 커스텀 JSON 도구 설정 파일 경로. 내장 도구 정의를 덮어씁니다. |
+| `--max-git-procs <n>` | — | `16` | Review와 Analysis를 합쳐 동시에 실행할 수 있는 Git 서브프로세스의 최대 개수. |
 
 > 모드 플래그는 함께 쓸 수 없습니다. `--from`/`--to`, `--commit`, 아무것도 주지
 > 않기(워크스페이스 모드) 중 하나만 고르세요. 섞어 쓰면 오류로 중단됩니다.
-> `--resume`은 range와 commit 리뷰만 지원하며 `--preview`와 함께 쓸 수 없습니다.
+> `--resume`은 range, commit, 워크스페이스 리뷰를 지원하며 `--preview`와 함께 쓸 수 없습니다.
 
 ### 실행 단위 LLM 선택 {#per-run-llm-selection}
 
@@ -195,12 +200,18 @@ ocr review -c abc123
 
 `git show abc123`이 만드는 diff, 즉 그 커밋 하나가 도입한 변경을 리뷰합니다.
 
+단일 커밋이나 커밋 범위를 리뷰할 때 Review와 Analysis는 모두 대상 커밋(`--commit`으로 지정한 커밋 또는 `--to`가 가리키는 커밋)의 루트에 있는 `.gitignore`를 기준으로 변경 목록을 거릅니다. 현재 작업 트리의 규칙은 사용하지 않습니다. Analysis는 목록에서 제외한 파일도 맥락을 파악하기 위해 읽을 수 있습니다. 읽기까지 막으려면 `--exclude`를 사용하세요.
+
+`--analysis`를 사용하면 `ocr viewer`에서 하나의 세션 ID로 보고서 하나를 열고 **Review** 탭과 **Analysis** 탭을 전환할 수 있습니다. **Analysis** 탭에는 실행 상태, 분석 범위에 포함된 변경 파일 수(읽은 파일 수가 아님), 모델의 자체 평가, 인용한 근거가 표시됩니다. 본문의 인용 번호를 선택하면 해당 근거를 볼 수 있습니다. **Evidence**를 펼치면 인용 여부에 관계없이 모든 조사 기록을 확인할 수 있습니다.
+
+**Conversations**를 펼치면 기록된 Analysis 요청별로 모델 응답, 도구 호출과 그 결과를 확인할 수 있습니다. 이 대화 기록은 HTML 내보내기에 포함되지 않습니다. 보고서의 Markdown, 결과 메타데이터, 근거, 실행 로그는 `~/.opencodereview/sessions/<encoded-repo>/<session-id>/analysis/` 아래에 저장됩니다. 근거와 로그에는 소스 코드가 포함될 수 있습니다. 분석이 끝나지 않았다면 최종 상태가 기록되지 않았을 수 있습니다.
+
 ### 중단된 리뷰 이어서 하기 {#resuming-interrupted-reviews}
 
 `ocr review`는 실행할 때마다 세션 로그를 `~/.opencodereview/sessions/` 아래에
 남깁니다. 텍스트 출력이 정상적으로 끝나면 리뷰 결과에만 집중하도록 세션 ID를 찍지
 않습니다. 저장된 세션을 찾으려면 `ocr session list/show`를 쓰거나, `--format json`으로
-기계가 읽는 출력에 `session_id`를 포함시키세요. range나 commit 리뷰가 중간에 끊겼다면
+기계가 읽는 출력에 `session_id`를 포함시키세요. 리뷰가 중간에 끊겼다면
 저장된 세션을 나열한 뒤 같은 리뷰 대상을 가진 세션에서 이어서 실행합니다:
 
 ```bash
@@ -209,12 +220,18 @@ ocr session show <session-id>
 ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
+ocr review --resume <session-id>   # 워크스페이스(모드 플래그 없음)
 ```
 
 이어서 하기는 의도적으로 엄격합니다. 이어받은 실행이 원래 실행과 똑같은 대상을 리뷰할
 때만 체크포인트를 재사용합니다.
 
-- 워크스페이스 리뷰는 이어서 할 수 없습니다.
+- 워크스페이스 리뷰는 리뷰 대상 워크트리가 그대로일 때만 이어서 할 수 있습니다.
+  기준 commit과 커밋되지 않은 변경이 모두 같아야 합니다. range나 commit 리뷰와 달리
+  고정할 commit이 없으므로, 이어서 실행하는 동안의 편집은 보호되지 않습니다.
+  동일성은 선택·파싱된 diff로 판단하며 워크트리의 바이트 단위 스냅샷이 아닙니다.
+  추적되지 않은 파일의 마지막 개행 추가·제거나 LF/CRLF 줄바꿈 변경만으로는 같은
+  diff로 정규화되어 이어서 할 수 있고, 실질적인 내용 수정은 diff가 달라져 거부됩니다.
 - 리뷰 모드가 같아야 합니다. range 세션을 commit 리뷰로 이어받을 수 없습니다.
 - 해석된 입력이 같아야 합니다. ref를 *어떻게 적었는지*는 따지지 않습니다. `abc1234`와
   `abc1234def`는 같은 커밋을 가리킵니다. 다만 같은 ref가 지금은 다른 diff로
@@ -324,7 +341,7 @@ ocr review --format json | jq .summary   # stdout은 JSON 문서 하나입니다
 | `summary` | 선택. 실행 집계입니다: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens`(omitempty), `cache_write_tokens`(omitempty), `elapsed`. `skipped` 실행에서는 나오지 않습니다. |
 | `comments` | 항상 있으며 비어 있을 수 있습니다. 코멘트별 필드는 위 예시와 같습니다. |
 | `warnings` | 선택. 서브 Agent가 하나 이상 실패했을 때 나오며, 각 항목이 해당 파일과 오류를 설명합니다. |
-| `session_id` | 선택. 세션을 남긴 실행에 나옵니다. 호환되는 range나 commit 리뷰를 다시 시도할 때 `ocr review --resume <session-id>`에 넘기세요. |
+| `session_id` | 선택. 세션을 남긴 실행에 나옵니다. 호환되는 리뷰를 다시 시도할 때 `ocr review --resume <session-id>`에 넘기세요. |
 | `resume` | 선택. 이어서 한 실행에 나오며 `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, `current_model`을 담습니다. |
 
 리뷰 대상 파일이 하나도 없으면 JSON 모드는 대신 `skipped` 응답을 내보냅니다. 호출한
@@ -346,11 +363,11 @@ ocr review --format json | jq .summary   # stdout은 JSON 문서 하나입니다
 
 | 코드 | 뜻 |
 |---|---|
-| `0` | 리뷰가 끝났습니다(코멘트가 0건일 수도, 치명적이지 않은 경고가 있을 수도 있습니다). |
-| `1` | 치명적 오류입니다. 잘못된 플래그, LLM 엔드포인트 해석 실패, 그룹별 서브 Agent 전멸 등이며 오류 내용은 stderr에 출력됩니다. |
+| `0` | 리뷰가 완료되었거나 건너뛰었습니다(코멘트가 없거나 치명적이지 않은 경고가 있을 수 있습니다). 설정된 예산 한도만으로 중단된 부분 리뷰도 `0`으로 종료됩니다. |
+| `1` | 치명적 오류 또는 시간 초과, 프로바이더 오류, 잘못된 설정과 같은 그룹별 실행 실패입니다. 오류를 반환하기 전에 부분 결과를 출력합니다. |
 
-치명적이지 않은 경고(서브 Agent 하나 실패, 파일이 토큰 한계 초과 등)는 실행 중간에
-출력되고, JSON 모드에서는 `warnings` 배열에 담깁니다.
+경고는 실행 중에 출력되며 JSON 모드에서는 `warnings` 배열에 추가됩니다.
+실패한 파일과 실패 유형은 `manifest.coverage.failed`에서 확인할 수 있습니다.
 
 ## `ocr scan` {#ocr-scan}
 
@@ -415,18 +432,28 @@ ocr session list --json
 
 ### `ocr session show` {#ocr-session-show}
 
+기본적으로 저장된 모든 저장소의 세션에서 ID를 검색합니다. `--repo .`을 지정하면
+기존처럼 현재 디렉터리 범위로 검색을 제한할 수 있습니다.
+
+기본 전역 검색에서는 ID가 유일하면 worktree를 전환하거나 원래 체크아웃을 삭제한 후에도
+세션을 확인할 수 있습니다. 여러 저장소에 같은 ID가 저장되어 있으면 후보 저장소를 나열하며,
+`--repo`로 하나를 선택해야 합니다. 현재 `--repo`에는 실제로 존재하는 저장소 디렉터리를
+지정해야 하므로, ID가 중복되고 확인하려는 세션의 원래 체크아웃이 삭제된 경우에는
+해당 세션을 선택할 수 없습니다.
+
 이어서 한 실행이라면 어떤 실행을 이어받았는지, 그 과정에서 프로바이더나 모델이 바뀌었다면
 무엇에서 무엇으로 바뀌었는지도 함께 출력합니다.
 
 ```bash
 ocr session show <session-id>
 ocr session show --json <session-id>
+ocr session show --repo . <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
 | 플래그 | 기본값 | 설명 |
 |---|---|---|
-| `--repo <path>` | 현재 디렉터리 | 살펴볼 세션이 속한 저장소. |
+| `--repo <path>` | 모든 저장소 | 세션 검색 범위를 지정한 저장소 디렉터리로 제한합니다. 해당 디렉터리는 실제로 존재해야 합니다. |
 | `--json` | `false` | 세션 메타데이터와 파일별 항목을 JSON으로 출력합니다. |
 
 ### `ocr session comments` {#ocr-session-comments}
@@ -497,7 +524,7 @@ ocr session export 20250601-100000-abc123 -o review.html
 
 ### `ocr session rm` {#ocr-session-rm}
 
-`~/.opencodereview/sessions/`에 저장된 세션 하나를 삭제합니다.
+`~/.opencodereview/sessions/`에 저장된 세션 하나를 삭제합니다. 세션에 Analysis 보고서가 있으면 해당 보고서와 근거, 로그도 함께 삭제됩니다.
 
 ```bash
 ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b

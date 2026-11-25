@@ -15,13 +15,15 @@ type Tool struct {
 }
 
 var (
-	Unknown      = Tool{name: "unknown"}
-	TaskDone     = Tool{name: "task_done"}
-	CodeComment  = Tool{name: "code_comment"}
-	FileRead     = Tool{name: "file_read"}
-	FileFind     = Tool{name: "file_find"}
-	FileReadDiff = Tool{name: "file_read_diff"}
-	CodeSearch   = Tool{name: "code_search"}
+	Unknown        = Tool{name: "unknown"}
+	TaskDone       = Tool{name: "task_done"}
+	CodeComment    = Tool{name: "code_comment"}
+	FileRead       = Tool{name: "file_read"}
+	FileFind       = Tool{name: "file_find"}
+	FileReadDiff   = Tool{name: "file_read_diff"}
+	CodeSearch     = Tool{name: "code_search"}
+	ContextRead    = Tool{name: "context_read"}
+	SubmitAnalysis = Tool{name: "submit_analysis"}
 )
 
 func OfName(name string) Tool {
@@ -34,11 +36,14 @@ func OfName(name string) Tool {
 }
 
 func allTools() []Tool {
-	return []Tool{Unknown, TaskDone, CodeComment, FileRead, FileFind, FileReadDiff, CodeSearch}
+	return []Tool{Unknown, TaskDone, CodeComment, FileRead, FileFind, FileReadDiff, CodeSearch, ContextRead, SubmitAnalysis}
 }
 
-// IsReserved reports whether name matches any built-in tool name (including Unknown).
+// IsReserved reports whether a name is unavailable to Review MCP providers.
 func IsReserved(name string) bool {
+	if name == ContextRead.name || name == SubmitAnalysis.name {
+		return false
+	}
 	for _, t := range allTools() {
 		if t.name == name {
 			return true

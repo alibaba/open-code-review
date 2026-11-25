@@ -11,8 +11,10 @@ import (
 	"syscall"
 )
 
-func waitForInterrupt() {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	<-ch
+func waitForInterrupt(ready func()) {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	ready()
+	<-signals
 }

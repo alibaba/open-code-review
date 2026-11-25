@@ -2,7 +2,7 @@
 
 感谢你对 OpenCodeReview 的关注！无论是修复拼写错误、报告 Bug，还是实现新功能，每一份贡献都很有价值。
 
-[English version](../../CONTRIBUTING.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md)
+[English version](../../CONTRIBUTING.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md) | [Türkçe](CONTRIBUTING.tr-TR.md) | [Tiếng Việt](CONTRIBUTING.vi-VN.md)
 
 ## 行为准则
 
@@ -22,7 +22,7 @@
 
 ### 前置条件
 
-- [Go 1.26.9+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -85,7 +85,7 @@ git checkout -b feat/your-feature-name
 示例：
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
@@ -189,7 +189,7 @@ make build
 - 完善表述不清的说明或补充缺失的上下文
 - 为命令或配置项添加使用示例
 - 更新过时的内容（例如功能变更后的文档同步）
-- 翻译或改进中英文文档（`docs/i18n/README.zh-CN.md`、`docs/i18n/CONTRIBUTING.zh-CN.md`）
+- 翻译 `docs/i18n/` 下的 README 和贡献指南，或改进已有译文
 
 ### 文档贡献流程
 
@@ -203,8 +203,11 @@ make build
 | --------------------------------- | ------------------ |
 | `README.md`                       | 项目主文档（英文） |
 | `docs/i18n/README.zh-CN.md`       | 中文翻译           |
+| `docs/i18n/README.tr-TR.md`       | 土耳其语翻译       |
+| `docs/i18n/README.fr-FR.md`       | 法语翻译           |
 | `CONTRIBUTING.md`                 | 贡献指南（英文）   |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | 贡献指南（中文）   |
+| `docs/i18n/CONTRIBUTING.tr-TR.md` | 贡献指南（土耳其语） |
 
 ## 提交变更
 
@@ -233,7 +236,7 @@ make build
 使用与 commit message 相同的 Conventional Commits 格式：
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### 审查流程

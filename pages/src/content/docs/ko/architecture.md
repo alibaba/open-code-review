@@ -24,11 +24,11 @@ flowchart TD
 ```
 
 전체 흐름을 지휘하는 코드는
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 패키지에 있습니다. 주요 파일은 `agent.go`(디스패치와 그룹별 오케스트레이션),
 `grouping.go`(의미 기반 파일 그룹화), `selection.go`(파일 필터),
 `preview.go`(`--preview` 보고서), `util.go`(헬퍼)입니다. 도구 호출 루프와 메모리 압축은 그 옆의
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)에
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/)에
 있습니다. 진입점은 두 개가 중요합니다. `Agent.Run`(파이프라인 최상단)과
 `Agent.dispatchSubtasks`(그룹별 팬아웃)입니다.
 
@@ -150,8 +150,8 @@ if fileCount >= 2 && total >= PlanModeGroupLineThreshold { plan }  // several mo
 작은 변경에서는 plan이 값어치 없이 시간만 잡아먹으므로 조용히 건너뛰고 곧장
 main 루프로 갑니다. 그 외에는 `PLAN_TASK` LLM 호출을 **한 번** 합니다. 이때
 `Tools` 필드를 보내지 않으므로 모델은 계획 중에 도구를 부를 수 없습니다.
-읽기 전용 도구 세 가지(`code_search`, `file_read_diff`, `file_find` —
-`tools.json`에서 `plan_task` 플래그가 `true`인 도구들)는 `{{plan_tools}}`
+읽기 전용 도구 네 가지(`code_search`, `file_read`, `file_read_diff`, `file_find` —
+`task_template.json`의 `PLAN_TASK.tool_references`로 선택)는 `{{plan_tools}}`
 자리에 평문으로 박아 넣어(`formatToolDefs`가 렌더링) 나중에 무엇을 쓸 수
 있는지 모델이 알게 합니다. 모델이 돌려준 체크리스트는 main 프롬프트의
 `{{plan_guidance}}`가 됩니다.
@@ -159,8 +159,8 @@ main 루프로 갑니다. 그 외에는 `PLAN_TASK` LLM 호출을 **한 번** �
 ### 2단계 — main 루프 {#phase-2-main-loop}
 
 main 루프는 `MAIN_TASK` 프롬프트를 조립해 모델과 도구 호출 대화를 진행합니다.
-전체 도구 세트에는 plan 단계 도구에 더해 **`task_done`**, **`code_comment`**,
-**`file_read`**가 들어갑니다. 전체 목록은 [도구](../tools/)를 참고하세요.
+전체 도구 세트에는 plan 단계 도구 참조에 더해 **`task_done`**과 **`code_comment`**가
+들어갑니다. 전체 목록은 [도구](../tools/)를 참고하세요.
 
 ```
 loop up to MAX_TOOL_REQUEST_TIMES (default 100):
@@ -218,12 +218,19 @@ main 루프는 한 번만 도는 게 아니라 그룹마다 최대 `MAX_REVIEW_R
 
 > **`MAX_TOKENS`는 *입력* 상한입니다.** 프롬프트, 즉 메시지 버퍼를 압축할 때
 > 기준이 되는 컨텍스트 윈도 예산만 제한할 뿐 그 밖에는 관여하지 않습니다.
-> 모델의 *출력* 상한은 별도의 손잡이인 `MAX_COMPLETION_TOKENS = 16384`이고,
-> 매 요청에 `max_completion_tokens`로 실려 갑니다
-> (`Template.CompletionTokenLimit()`). 둘을 떼어 놓은 덕분에, 컨텍스트가 큰
+> 모델의 *출력* 상한은 별도의 설정인 `MAX_COMPLETION_TOKENS = 16384`로
+> 정합니다 (`Template.CompletionTokenLimit()`). 둘을 떼어 놓은 덕분에, 컨텍스트가 큰
 > 모델을 쓰려고 `--max-tokens`로 프롬프트 상한을 올려도 출력 예산이 몰래
 > 부풀지 않습니다. `MAX_COMPLETION_TOKENS`가 설정돼 있지 않으면 하위 호환을
 > 위해 `MAX_TOKENS`를 출력 상한으로 씁니다.
+
+활성 구역에 남길 라운드를 고르기 전에 요약 본문을 위한 공간을 예약합니다.
+예약량은 설정된 출력 한도, 컨텍스트 윈도의 20%, 고정 프롬프트와 래퍼를 제외한
+공간 중 최솟값입니다. 일부 제공자는 추론 토큰도 출력에 포함합니다. 압축 요청 자체에
+80% 경고 임계값까지 여유가 있으면 설정된 출력 한도 안에서 생성 예산을 늘리고,
+모델에 요약 본문은 예약량 안에 맞추도록 요청합니다. 재구성된 대화의 크기는 여전히 검사합니다. 대화별 제한은 누적 예산인
+`--max-tokens-budget`과 독립적이므로, 누적 예산을 0으로 설정해도 컨텍스트
+압축은 비활성화되지 않습니다.
 
 ### 세 구역 {#the-three-zones}
 
@@ -240,29 +247,23 @@ flowchart LR
 
 여기서 "라운드"란 assistant 메시지 하나와 그 뒤에 따라온 도구 결과 메시지
 묶음을 말합니다. `partitionMessages`는 끝에서부터 라운드를 훑으며
-`(0.80 × MAX_TOKENS) - reservedTokens` 안에 들어가는 만큼을 남깁니다. 그보다
-오래된 것은 모두 **압축 구역**이 됩니다.
+토큰 수가 `(0.80 × MAX_TOKENS) - reservedTokens`보다 엄격히 작은 범위에서
+최대한 많은 라운드를 남깁니다. 예약 예산에는 첫 두 메시지(이전 요약 포함),
+새 요약 본문에 예약한 공간, 요약 래퍼가 포함됩니다. 그보다 오래된 것은 모두
+**압축 구역**이 됩니다. 압축 구역이 비어 있으면 대화는 바뀌지 않습니다.
+원래 대화가 아직 경고 임계값 아래에 있다면, 백그라운드 압축은 고정 접두부
+뒤의 모든 라운드를 통째로 요약하지 않습니다.
 
 압축 구역은 XML로 렌더링해 `MEMORY_COMPRESSION_TASK` 프롬프트와 함께 모델에
 보냅니다. 돌아온 요약은 `<previous_review_summary>` 태그에 담겨 원래의 user
 메시지 뒤에 붙습니다.
 
-압축이 끝나면 `messages = frozen[2] + compressed_user_msg + active`가 됩니다.
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … call MEMORY_COMPRESSION_TASK …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+압축이 끝나면 `messages = system + (original_user + summary) + active`가 됩니다.
+재구성한 대화는 동일한 로컬 토큰 추정 방식으로 검사하며, 원래 대화보다
+작아야 합니다. 압축 템플릿이 없거나 요약이 비어 있거나 결과가 작아지지
+않으면 원래 이력을 그대로 유지합니다. 요약 템플릿을 사용할 수 없거나
+재구성한 결과가 한도를 넘으면, 원래 메시지를 하나도 버리지 않고 오류를
+반환합니다.
 
 ### 비동기와 동기 {#async-vs-sync}
 
@@ -270,7 +271,11 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 호출합니다. 다음번 토큰 검사 때 준비된 요약이 있으면
 `tryApplyPendingCompression`이 갈아 끼웁니다. 비동기 작업이 끝나기 전에
 비율이 경고 임계값을 넘으면 루프를 멈추고 `runCompression`을 동기로 돌립니다.
-다음 요청이 반드시 들어맞도록 보장하는 장치입니다.
+백그라운드 스냅샷을 만든 뒤에 추가된 메시지도 요약을 적용할 때 유지합니다.
+그래도 대화의 토큰 수가 로컬 경고 임계값보다 엄격히 작아질 수 없다면,
+압축하지 않은 이력을 조용히 버리는 대신 `StopCompression`으로 루프를
+멈춥니다. 이 추정치는 제공자의 실제 컨텍스트 윈도 용량에 맞는다는 보장이
+아닙니다.
 
 ## 코멘트 처리 파이프라인 {#comment-processing-pipeline}
 
@@ -356,9 +361,9 @@ OCR은 이 검사로 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go)에
 있습니다. 템플릿 자체는 CLI로 덮어쓸 수 없습니다. 프롬프트를 바꾸려면
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)을
-고치고 다시 빌드해야 합니다. `--tools` 플래그는 *도구 레지스트리*를 덮어쓰는
-것이지(`internal/config/toolsconfig`가 읽는 JSON을 갈아 끼웁니다) 템플릿을
-덮어쓰는 게 아닙니다. [도구](../tools/#customizing-tools)를 참고하세요.
+고치고 다시 빌드해야 합니다. 내장 도구 정의도 실행 시점에 덮어쓸 수 없습니다.
+프로젝트 지침에는 리뷰 규칙과 배경 정보를, 외부 업무 맥락에는 MCP를 사용하세요.
+[도구](../tools/#customizing-tools)를 참고하세요.
 
 > **플레이스홀더 문법 주의.** 위의 플레이스홀더는 모두 중괄호 두 개
 > `{{…}}` 문법을 쓰지만 `RE_LOCATION_TASK`만 예외입니다. 여기서는 중괄호

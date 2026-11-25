@@ -46,12 +46,12 @@ jobs:
   action-contract:
     runs-on: self-hosted
     timeout-minutes: 10
-    # node:24 fixes the Node major and is Debian-based, so /bin/bash and npm are
+    # The pinned Node image is Debian-based, so /bin/bash and npm are
     # both present: the contract harness spawns /bin/bash directly. No
     # `npm install` step — these tests use only Node built-ins, and installing
     # would trigger the postinstall binary download for no benefit.
     container:
-      image: node:24
+      image: node:24.22.1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

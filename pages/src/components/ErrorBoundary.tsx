@@ -5,7 +5,7 @@ import React from 'react';
 
 const CHUNK_RELOAD_STORAGE_KEY = 'ocr-chunk-reload-attempted';
 
-type FallbackRender = (error: Error, reset: () => void) => React.ReactNode;
+export type FallbackRender = (error: Error, reset: () => void) => React.ReactNode;
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -17,12 +17,25 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-function isChunkLoadError(error: Error): boolean {
+/** Identify webpack and browser dynamic-import failures without reloading ordinary errors. */
+export function isChunkLoadError(error: Error): boolean {
   return (
     error.name === 'ChunkLoadError' ||
     /Loading( CSS)? chunk .* failed/i.test(error.message) ||
     /failed to fetch dynamically imported module/i.test(error.message)
   );
+}
+
+/**
+ * Reload after a user confirms a persistent chunk failure. Clearing the
+ * automatic-reload guard lets the new runtime make one guarded recovery
+ * attempt, while the boundary still prevents an endless reload loop.
+ */
+export function reloadAfterChunkError(): void {
+  try {
+    window.sessionStorage.removeItem(CHUNK_RELOAD_STORAGE_KEY);
+  } catch {}
+  window.location.reload();
 }
 
 export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -50,10 +63,7 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
   }
 
   private reset = (): void => {
-    try {
-      window.sessionStorage.removeItem(CHUNK_RELOAD_STORAGE_KEY);
-    } catch {}
-    window.location.reload();
+    reloadAfterChunkError();
   };
 
   render(): React.ReactNode {

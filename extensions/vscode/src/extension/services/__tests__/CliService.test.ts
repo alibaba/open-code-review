@@ -3,7 +3,12 @@
 
 // src/extension/services/__tests__/CliService.test.ts
 process.env.OCR_SKIP_SHELL_RESOLVE = '1';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { ReviewMode } from '@shared/types';
 import { CliService } from '../CliService';
+import { ReviewSession } from '../ReviewSession';
 
 describe('CliService.isAvailable', () => {
   it('returns true for the available node command', async () => {
@@ -91,6 +96,47 @@ describe('CliService.runRaw', () => {
       ['-e', 'process.stderr.write("Error: bad api key\\n"); process.exit(1)'],
       '.', () => {},
     )).rejects.toThrow('bad api key');
+  });
+});
+
+describe('nonzero review exits', () => {
+  const finding = { path: 'a.ts', content: 'Missing return', start_line: 2, end_line: 2 };
+
+  async function run(stdout: string, exitCode = 1) {
+    const cwd = mkdtempSync(join(tmpdir(), 'ocr-review-'));
+    try {
+      // Node treats the CLI's first argument ("review") as the script to run.
+      writeFileSync(join(cwd, 'review'), [
+        'process.stdout.write(' + JSON.stringify(stdout) + ');',
+        'console.error("Error: provider timed out");',
+        'process.exitCode = ' + exitCode + ';',
+      ].join('\n'));
+      const callbacks = { onState: jest.fn(), onLog: jest.fn(), onDone: jest.fn() };
+      await new ReviewSession(new CliService(process.execPath), cwd)
+        .run({ mode: ReviewMode.Workspace }, callbacks);
+      return callbacks;
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  it('reports failure and delivers findings from a partial review', async () => {
+    const { onState, onDone } = await run(JSON.stringify({ status: 'partial', comments: [finding] }));
+    expect(onState).toHaveBeenLastCalledWith('failed', 'provider timed out');
+    expect(onDone.mock.calls[0][0]).toMatchObject({
+      status: 'partial', comments: [{ path: 'a.ts', content: 'Missing return', startLine: 2 }],
+    });
+  });
+
+  it.each([
+    ['', 1], ['invalid JSON', 1], ['{"status":"partial"}', 1],
+    ['{"status":"partial","comments":[{}]}', 1],
+    [JSON.stringify({ status: 'success', comments: [finding] }), 1],
+    [JSON.stringify({ status: 'partial', comments: [finding] }), 2],
+  ] as const)('retains the CLI error for %s (exit %i)', async (stdout, code) => {
+    const { onState, onDone } = await run(stdout, code);
+    expect(onState).toHaveBeenLastCalledWith('failed', 'provider timed out');
+    expect(onDone).not.toHaveBeenCalled();
   });
 });
 

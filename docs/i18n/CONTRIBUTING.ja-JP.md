@@ -2,7 +2,7 @@
 
 OpenCodeReviewへのコントリビューションに興味を持っていただきありがとうございます！タイポの修正、バグ報告、新機能の実装など、あらゆる貢献が重要です。
 
-[English Version](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md)
+[English Version](../../CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md) | [Türkçe](CONTRIBUTING.tr-TR.md) | [Tiếng Việt](CONTRIBUTING.vi-VN.md)
 
 ## 行動規範
 
@@ -22,7 +22,7 @@ OpenCodeReviewへのコントリビューションに興味を持っていただ
 
 ### 前提条件
 
-- [Go 1.26.9+](https://go.dev/dl/)
+- [Go 1.26.10+](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -85,7 +85,7 @@ git checkout -b feat/your-feature-name
 例：
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
@@ -190,7 +190,7 @@ AI を開発に使った場合は、下記のルールに従ってください�
 - 分かりにくい説明の明確化や不足しているコンテキストの追加
 - コマンドや設定オプションの使用例の追加
 - 古くなった内容の更新（機能変更後など）
-- 中国語ドキュメント（`docs/i18n/README.zh-CN.md`、`docs/i18n/CONTRIBUTING.zh-CN.md`）の翻訳や改善
+- `docs/i18n/` にある README やコントリビューションガイドの翻訳・改善
 
 ### ドキュメントのワークフロー
 
@@ -204,8 +204,11 @@ AI を開発に使った場合は、下記のルールに従ってください�
 | --------------------------------- | ---------------------------------------- |
 | `README.md`                       | メインのプロジェクトドキュメント（英語） |
 | `docs/i18n/README.zh-CN.md`       | 中国語訳                                 |
+| `docs/i18n/README.tr-TR.md`       | トルコ語訳                               |
+| `docs/i18n/README.fr-FR.md`       | フランス語訳                             |
 | `CONTRIBUTING.md`                 | コントリビューションガイド（英語）       |
 | `docs/i18n/CONTRIBUTING.zh-CN.md` | コントリビューションガイド（中国語）     |
+| `docs/i18n/CONTRIBUTING.tr-TR.md` | コントリビューションガイド（トルコ語）   |
 
 ## 変更の提出
 
@@ -234,7 +237,7 @@ AI を開発に使った場合は、下記のルールに従ってください�
 コミットメッセージと同じConventional Commits形式を使用してください：
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 ```
 
 ### レビュープロセス
