@@ -792,34 +792,16 @@ dispatchLoop:
 			}
 			if !completed {
 				if stop != nil {
-					// A group that stopped short of task_done may still have produced
-					// usable output for some of its files before the round/token
-					// budget ran out. Classify per file rather than per group so a
-					// file that already has comments lands in Completed instead of
-					// Failed — otherwise a single stuck file drags its whole group
-					// (and, when nothing else was dispatched, the whole run) down to
-					// terminal_state=failed even though real coverage exists.
-					var failedCount int64
+					hasComments := false
 					for _, d := range g.Diffs {
 						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
-							a.markCompleted(d)
-							a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
-							continue
-						}
-						a.markFailed(d, stop.class, stop.reason)
-						if stop.checkpoint != "" {
-							a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, stop.checkpoint)
-						}
-						failedCount++
+						comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
+						hasComments = hasComments || len(comments) > 0
+						a.markFailed(d, stop.class, stop.reason, comments...)
+						a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, stop.checkpoint, comments...)
 					}
-					// subtaskFailed must count only the files actually marked failed
-					// above, not the whole group — a group can mix Completed and
-					// Failed files, and reportAsError itself is a group-level signal
-					// (any file with comments suppresses it) that must not be assumed
-					// to imply failedCount == len(g.Diffs).
-					if stop.reportAsError && failedCount > 0 {
-						atomic.AddInt64(&a.subtaskFailed, failedCount)
+					if stop.reportEmptyAsError && !hasComments {
+						atomic.AddInt64(&a.subtaskFailed, int64(len(g.Diffs)))
 						stopErr := errors.New(stop.checkpoint)
 						fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for group %q: %v\n", g.Label, stopErr)
 						telemetry.ErrorEvent(groupCtx, "subtask.error", stopErr,
@@ -1202,12 +1184,12 @@ func (a *Agent) markReused(d model.Diff) {
 	}
 }
 
-func (a *Agent) markFailed(d model.Diff, class session.FailureClass, reason string) {
+func (a *Agent) markFailed(d model.Diff, class session.FailureClass, reason string, comments ...model.LlmComment) {
 	b := a.session.Manifest()
 	if b == nil {
 		return
 	}
-	if err := b.MarkFailed(a.manifestItemID(d), class, reason); err != nil {
+	if err := b.MarkFailed(a.manifestItemID(d), class, reason, comments...); err != nil {
 		a.recordWarning("manifest_error", d.NewPath, err.Error())
 	}
 }
@@ -1258,17 +1240,16 @@ func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, stri
 	return session.FailureUnknown, stop.Reason()
 }
 
-// subtaskStop is the structured, non-error reason a single-file review stopped
+// subtaskStop is the structured, non-error reason a group review stopped
 // short of task_done. It lets the dispatcher classify manifest coverage from an
 // explicit cause recorded at the trigger point, instead of re-parsing free text
 // or ctx state. class + reason feed the manifest MarkFailed; checkpoint is the
-// detailed human-facing text preserved for the legacy RecordReviewItemFailed
-// resume record (unchanged behavior).
+// detailed human-facing text for the failure record.
 type subtaskStop struct {
-	class         session.FailureClass
-	reason        string
-	checkpoint    string
-	reportAsError bool
+	class              session.FailureClass
+	reason             string
+	checkpoint         string
+	reportEmptyAsError bool
 }
 
 // registerCoverage freezes the coverage denominator before any reuse or
@@ -1423,16 +1404,6 @@ func (a *Agent) checkPromptBudget(ctx context.Context, messages []llm.Message, g
 		reason:     "prompt exceeded the configured token budget",
 		checkpoint: msg,
 	}
-}
-
-// groupHasComments reports whether any file in the group has comments.
-func (a *Agent) groupHasComments(g FileGroup) bool {
-	for _, d := range g.Diffs {
-		if len(a.args.CommentCollector.CommentsForPath(d.NewPath)) > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // diffsChurn returns the set's aggregate churn and its largest single-file
@@ -1611,10 +1582,10 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			}
 			class, reason := classifyMainLoopStop(mainStop)
 			lastStop = &subtaskStop{
-				class:         class,
-				reason:        reason,
-				checkpoint:    fmt.Sprintf("main_task did not complete before stopping (round %d/%d)", round, maxRounds),
-				reportAsError: !a.groupHasComments(g),
+				class:              class,
+				reason:             reason,
+				checkpoint:         fmt.Sprintf("main_task did not complete before stopping (round %d/%d)", round, maxRounds),
+				reportEmptyAsError: true,
 			}
 			break
 		}

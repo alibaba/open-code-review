@@ -247,13 +247,14 @@ func retryTestGit(t *testing.T, dir string, args ...string) {
 // one group per file.
 func retryTestRepo(t *testing.T) string {
 	t.Helper()
-	names := make([]string, 0, len(markers))
-	for _, name := range markers {
-		names = append(names, name)
-	}
+	return retryTestRepoWithFiles(t, markers)
+}
+
+func retryTestRepoWithFiles(t *testing.T, fileMarkers map[string]string) string {
+	t.Helper()
 	dir := t.TempDir()
 	retryTestGit(t, dir, "init", "-q", "-b", "main")
-	for _, name := range names {
+	for _, name := range fileMarkers {
 		body := fmt.Sprintf("package p\n\nfunc %s() int { return 1 }\n", strings.TrimSuffix(name, ".go"))
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
@@ -261,7 +262,7 @@ func retryTestRepo(t *testing.T) string {
 	}
 	retryTestGit(t, dir, "add", ".")
 	retryTestGit(t, dir, "commit", "-q", "-m", "base")
-	for marker, name := range markers {
+	for marker, name := range fileMarkers {
 		body := fmt.Sprintf("package p\n\n// changed %s\nfunc %s() int {\n\treturn 2\n}\n",
 			marker, strings.TrimSuffix(name, ".go"))
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {

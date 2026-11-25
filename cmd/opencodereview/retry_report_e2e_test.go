@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
@@ -84,6 +86,134 @@ func TestReviewE2E_LocalBudgetGraceFailureKeepsSuccessfulExit(t *testing.T) {
 	}
 	if got.RetryReport == nil || got.RetryReport.FailedRequests != 1 {
 		t.Errorf("final request failure missing from retry report: %+v", got.RetryReport)
+	}
+}
+
+func TestReviewE2E_BudgetGraceCompletionControlsResume(t *testing.T) {
+	const parentFinding = "parent finding"
+	const commentCall = `{"type":"tool_use","id":"comment","name":"code_comment","input":{"comments":[{"path":"a.go","content":"parent finding","severity":"medium","category":"bug"}]}}`
+	const doneCall = `{"type":"tool_use","id":"done","name":"task_done","input":{"state":"DONE"}}`
+	const failedCall = `{"type":"tool_use","id":"failed","name":"task_done","input":{"state":"FAILED"}}`
+	for _, tc := range []struct {
+		name           string
+		commentInGrace bool
+		graceCalls     string
+		complete       bool
+	}{
+		{name: "comments_only", commentInGrace: true, graceCalls: commentCall},
+		{name: "empty"},
+		{name: "explicit_failure", graceCalls: failedCall},
+		{name: "done", graceCalls: doneCall, complete: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, err := resolveRepoDir(retryTestRepoWithFiles(t, map[string]string{"MARKER_ALPHA": "a.go"}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := newFakeLLM()
+			var mainCalls, requests atomic.Int32
+			startFakeLLM(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if bytes.Contains(body, []byte(`"tools"`)) {
+					round := mainCalls.Add(1)
+					calls, stopReason, tokens := "", "tool_use", 10
+					switch round {
+					case 1:
+						calls, tokens = commentCall, 100001
+						if tc.commentInGrace {
+							calls, stopReason = `{"type":"text","text":"Still reviewing"}`, "end_turn"
+						}
+					case 2:
+						calls = tc.graceCalls
+						if calls == "" {
+							stopReason = "end_turn"
+						}
+					}
+					if round <= 2 {
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = fmt.Fprintf(w, `{"id":"msg_budget","type":"message","role":"assistant","model":"claude-test",
+							"content":[%s],"stop_reason":%q,"usage":{"input_tokens":%d,"output_tokens":5}}`, calls, stopReason, tokens)
+						return
+					}
+				}
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				server.ServeHTTP(w, r)
+			}))
+
+			args := []string{"--effort", "low", "--no-filter", "--max-tokens-budget", "100000"}
+			out, stderr, err := runReviewCapturingBoth(t, repo, "json", args...)
+			if err != nil {
+				t.Fatalf("parent review: %v\n%s\n%s", err, stderr, out)
+			}
+			var parent jsonOutput
+			if err := json.Unmarshal([]byte(out), &parent); err != nil {
+				t.Fatal(err)
+			}
+			wantState, wantReused, wantRerun := session.StatePartial, int64(0), int64(1)
+			if tc.complete {
+				wantState, wantReused, wantRerun = session.StateComplete, 1, 0
+			}
+			if mainCalls.Load() != 2 || parent.Status != string(wantState) || parent.Manifest == nil ||
+				parent.Manifest.TerminalState != wantState || len(parent.Comments) != 1 || parent.Comments[0].Content != parentFinding {
+				t.Fatalf("parent after %d main requests, want %s and one finding: %s", mainCalls.Load(), wantState, out)
+			}
+			saved, err := session.LoadSummary(repo, parent.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(saved.RunManifest, parent.Manifest) {
+				t.Fatalf("persisted manifest = %+v, want %+v", saved.RunManifest, parent.Manifest)
+			}
+			if !tc.complete {
+				coverage := saved.RunManifest.Coverage
+				if len(coverage.Completed) != 0 || len(coverage.Failed) != 1 ||
+					coverage.Failed[0].Path != "a.go" || coverage.Failed[0].Classification != session.FailureBudget {
+					t.Fatalf("parent coverage = %+v, want a.go failed by budget", coverage)
+				}
+			}
+			stored := captureStdout(t, func() {
+				if err := runSessionCommentsCompat([]string{"--repo", repo, "--json", parent.SessionID}); err != nil {
+					t.Fatal(err)
+				}
+			})
+			var comments []model.LlmComment
+			if err := json.Unmarshal([]byte(stored), &comments); err != nil {
+				t.Fatal(err)
+			}
+			if len(comments) != 1 || comments[0].Path != "a.go" || comments[0].Content != parentFinding {
+				t.Fatalf("session comments = %s, want parent finding on a.go", stored)
+			}
+
+			beforeRequests, beforeFile := requests.Load(), server.attemptCounts()["a.go"]
+			out, stderr, err = runReviewCapturingBoth(t, repo, "json", append(args, "--resume", parent.SessionID)...)
+			if err != nil {
+				t.Fatalf("resumed review: %v\n%s\n%s", err, stderr, out)
+			}
+			var child jsonOutput
+			if err := json.Unmarshal([]byte(out), &child); err != nil {
+				t.Fatal(err)
+			}
+			if child.Resume == nil || child.Resume.ReusedFiles != wantReused || child.Resume.RerunFiles != wantRerun {
+				t.Fatalf("resume = %+v, want reused=%d rerun=%d", child.Resume, wantReused, wantRerun)
+			}
+			if int64(mainCalls.Load()-2) != wantRerun {
+				t.Fatalf("resumed main requests = %d, want %d", mainCalls.Load()-2, wantRerun)
+			}
+			if tc.complete && requests.Load() != beforeRequests {
+				t.Fatalf("full reuse made %d model requests", requests.Load()-beforeRequests)
+			}
+			if !tc.complete && server.attemptCounts()["a.go"] <= beforeFile {
+				t.Fatal("resumed review did not send a.go to the model")
+			}
+			if len(child.Comments) != int(wantReused) || (tc.complete && child.Comments[0].Content != parentFinding) {
+				t.Fatalf("child comments = %+v, want %d parent findings", child.Comments, wantReused)
+			}
+		})
 	}
 }
 
