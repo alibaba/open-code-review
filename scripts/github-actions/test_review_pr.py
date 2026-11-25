@@ -93,7 +93,7 @@ class InstalledHelper(unittest.TestCase):
             executable.write_text(f"#!{sys.executable}\n" + program)
             executable.chmod(0o755)
         self.env = dict(os.environ, HOME=str(self.root), PATH=str(tools) + os.pathsep + os.environ['PATH'],
-                        SOURCE=str(self.source), XDG_CONFIG_HOME=str(self.root / "config"), GIT_CONFIG_NOSYSTEM="1")
+                        OCR_HOME="", SOURCE=str(self.source), XDG_CONFIG_HOME=str(self.root / "config"), GIT_CONFIG_NOSYSTEM="1")
         self.git("init", "-q", "-b", "release")
         self.git("config", "user.name", "Test")
         self.git("config", "user.email", "test@example.com")
@@ -291,6 +291,23 @@ class Standalone(InstalledHelper):
                 self.assertIn("MCP", run["error"])
                 self.assertFalse((folder / "calls.jsonl").exists())
                 self.assertEqual(json.loads(config.read_text()), data)
+
+    def test_selected_storage_controls_mcp_policy(self):
+        default_root = self.root / ".opencodereview"
+        selected_root = self.root / "custom storage"
+        default_root.mkdir()
+        selected_root.mkdir()
+        blocked = {"mcp_servers": {"example": {"command": "not-installed"}}}
+        for selected_blocks in (True, False):
+            with self.subTest(selected_blocks=selected_blocks):
+                (default_root / "config.json").write_text(json.dumps({} if selected_blocks else blocked))
+                (selected_root / "config.json").write_text(json.dumps(blocked if selected_blocks else {}))
+                folder, run = self.finish(self.start("42", OCR_HOME=str(selected_root / "unused" / "..")),
+                                          code=int(selected_blocks))
+                self.assertEqual((folder / "calls.jsonl").exists(), not selected_blocks)
+                if selected_blocks:
+                    self.assertEqual(run["failed_step"], "policy")
+                    self.assertIn("MCP", run["error"])
 
     def test_changed_git_policy_requires_independent_review(self):
         self.git("switch", "-q", "topic")

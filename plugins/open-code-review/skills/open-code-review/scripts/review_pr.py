@@ -125,7 +125,14 @@ def release(folder, env):
 
 
 def prepare_review_policy(tree, base, head, env):
-    config = Path.home() / ".opencodereview" / "config.json"
+    root = env.get("OCR_HOME")
+    if root and not Path(root).is_absolute():
+        raise ValueError("OCR_HOME must be an absolute path")
+    home = env.get("USERPROFILE" if os.name == "nt" else "HOME")
+    if not root and not home:
+        raise ValueError("cannot determine OCR home")
+    directory = root or os.path.join(home, ".opencodereview")
+    config = tree.parent / os.path.normpath(os.path.join(directory, "config.json"))
     try:
         settings = json.loads(config.read_bytes(), object_pairs_hook=tuple)
     except FileNotFoundError:
