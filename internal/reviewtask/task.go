@@ -5,6 +5,7 @@ package reviewtask
 
 import (
 	"context"
+
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
@@ -121,6 +122,15 @@ func (r *Runner) RunMainTask(ctx context.Context, messages []llm.Message, taskKe
 		r.recordGraceRoundLimit(taskKey, result.StopReason, result.Completed)
 	}
 	return result.Completed, result.StopReason, err
+}
+
+type relocatedCommentReceiverKey struct{}
+
+// WithRelocatedCommentReceiver scopes a receiver to a main task and its comment
+// workers. Workers may call receive concurrently, even after RunMainTask returns.
+// Returning true takes ownership of the relocated comment.
+func WithRelocatedCommentReceiver(ctx context.Context, receive func(model.LlmComment) bool) context.Context {
+	return context.WithValue(ctx, relocatedCommentReceiverKey{}, receive)
 }
 
 // CollectPendingComments awaits any async comment-processing workers and

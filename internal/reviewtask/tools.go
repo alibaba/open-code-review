@@ -108,6 +108,7 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 		}
 
 		resolveAndCollect := func(rctx context.Context) {
+			receive, _ := rctx.Value(relocatedCommentReceiverKey{}).(func(model.LlmComment) bool)
 			for i := range comments {
 				cm := &comments[i]
 				var d *model.Diff
@@ -127,6 +128,9 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 						located = true
 						r.RecordWarning("comment_refiled", to, fmt.Sprintf(
 							"comment filed against %s describes code in %s; re-filed", from, to))
+						if receive != nil && receive(*cm) {
+							continue
+						}
 					}
 				}
 				if d != nil {

@@ -5,10 +5,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -74,7 +76,11 @@ func newManifestFlowAgent(t *testing.T, diffs []model.Diff, resume *session.Resu
 func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *session.ResumeState, client llm.LLMClient) *Agent {
 	t.Helper()
 	setTestHome(t, t.TempDir())
-	repoDir := t.TempDir()
+	return newManifestFlowAgentInRepo(t, t.TempDir(), diffs, resume, client, nil)
+}
+
+func newManifestFlowAgentInRepo(t *testing.T, repoDir string, diffs []model.Diff, resume *session.ResumeState, client llm.LLMClient, configure func(*Args)) *Agent {
+	t.Helper()
 	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
 		ReviewMode:  session.ReviewModeRange,
 		DiffFrom:    "main",
@@ -83,7 +89,7 @@ func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *se
 		Operation:   session.OperationReview,
 	})
 	t.Cleanup(func() { _ = sh.Finalize() })
-	a := New(Args{
+	args := Args{
 		RepoDir:    repoDir,
 		From:       "main",
 		To:         "feature",
@@ -106,12 +112,394 @@ func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *se
 				Description: "finish the review",
 			},
 		}},
-	})
+	}
+	if configure != nil {
+		configure(&args)
+	}
+	a := New(args)
 	a.diffs = diffs
 	a.inputResolution.ResolvedBase = "base-parent"
 	a.inputResolution.ResolvedHead = "head-parent"
 	a.currentDate = "2026-07-26 12:00"
 	return a
+}
+
+type relocationReviewClient func(context.Context, llm.RequestMeta, llm.ChatRequest) (*llm.ChatResponse, error)
+
+func (f relocationReviewClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	meta, _ := llm.RequestMetaFromContext(ctx)
+	return f(ctx, meta, req)
+}
+
+func relocationReviewToolResponse(name, args string) *llm.ChatResponse {
+	return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{
+		ToolCalls: []llm.ToolCall{{
+			ID: "call_" + name, Type: "function",
+			Function: llm.FunctionCall{Name: name, Arguments: args},
+		}},
+	}}}}
+}
+
+func relocationReviewComment(path, code, content string) *llm.ChatResponse {
+	args, _ := json.Marshal(map[string][]model.LlmComment{
+		"comments": {{Path: path, ExistingCode: code, Content: content}},
+	})
+	return relocationReviewToolResponse("code_comment", string(args))
+}
+
+func configureRelocationReview(args *Args) {
+	args.MaxConcurrency = 1
+	args.CommentWorkerPool = NewCommentWorkerPool(2)
+	args.Tools = tool.NewRegistry()
+	args.Tools.Register(&tool.CodeCommentProvider{})
+	args.MainToolDefs = append(args.MainToolDefs, llm.ToolDef{
+		Type: "function", Function: llm.FunctionDef{Name: "code_comment"},
+	})
+	args.Template.ReviewFilterTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "{{path}}\n{{diff}}\n{{comments}}"}},
+	}
+}
+
+func TestCrossFileRelocationReview(t *testing.T) {
+	source := model.Diff{OldPath: "a.go", NewPath: "a.go", Diff: "@@ -0,0 +2 @@\n+source()", Insertions: 1}
+	target := model.Diff{OldPath: "b.go", NewPath: "b.go", Diff: "@@ -0,0 +7 @@\n+target()", Insertions: 1}
+	finding := model.LlmComment{Path: "b.go", ExistingCode: "target()", Content: "Validate the target argument", StartLine: 7, EndLine: 7}
+
+	testRelocationReviewSerial(t, source, target, finding)
+	t.Run("two sources interleaved with the target", func(t *testing.T) {
+		testRelocationReviewConcurrent(t, source, target, finding)
+	})
+	testRelocationReviewConditions(t, source, target, finding)
+}
+
+func testRelocationReviewSerial(t *testing.T, source, target model.Diff, finding model.LlmComment) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	diffs := []model.Diff{source, target}
+	historical := finding
+	historical.Content = "Existing finding from the parent"
+
+	parent := newManifestFlowAgentInRepo(t, repoDir, diffs, nil, nil, nil)
+	if err := parent.registerCoverage(diffs); err != nil {
+		t.Fatal(err)
+	}
+	parent.markCompleted(target)
+	fingerprint := reviewItemFingerprint(parent.reviewMode(), target)
+	parent.session.RecordReviewItemDone(target.NewPath, target.OldPath, target.NewPath, fingerprint, []model.LlmComment{historical})
+	state := assertRelocationReviewHistory(t, parent, []model.LlmComment{historical})
+
+	for _, tc := range []struct {
+		name   string
+		diffs  []model.Diff
+		resume *session.ResumeState
+		remove bool
+		want   []model.LlmComment
+	}{
+		{name: "target finishes first", diffs: []model.Diff{target, source}, want: []model.LlmComment{finding}},
+		{name: "source finishes first", diffs: diffs, want: []model.LlmComment{finding}},
+		{name: "keep new finding on reused target", diffs: diffs, resume: state, want: []model.LlmComment{historical, finding}},
+		{name: "remove new finding on reused target", diffs: diffs, resume: state, remove: true, want: []model.LlmComment{historical}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var filterCalls atomic.Int64
+			client := relocationReviewClient(func(_ context.Context, meta llm.RequestMeta, req llm.ChatRequest) (*llm.ChatResponse, error) {
+				switch session.TaskType(meta.TaskType) {
+				case session.MainTask:
+					if meta.FilePath == source.NewPath && meta.RequestNo == 1 {
+						return relocationReviewComment(source.NewPath, finding.ExistingCode, finding.Content), nil
+					}
+					if tc.resume != nil && meta.FilePath == target.NewPath {
+						t.Error("reused target was dispatched")
+					}
+					return agentTaskDoneResponse(), nil
+				case session.ReviewFilterTask:
+					filterCalls.Add(1)
+					ids := relocationReviewFilterIDs(t, meta, req, target.NewPath, []model.Diff{target}, finding)
+					if tc.remove {
+						return removeRelocationReviewFinding(ids[finding.ExistingCode]), nil
+					}
+					return relocationReviewToolResponse("approve_all_comments", "{}"), nil
+				default:
+					return nil, fmt.Errorf("unexpected request: %+v", meta)
+				}
+			})
+			a := newManifestFlowAgentInRepo(t, repoDir, tc.diffs, tc.resume, client, configureRelocationReview)
+			if tc.resume != nil {
+				if err := tc.resume.ValidateResume(session.ResumeRequest{Identity: a.runIdentity(), Model: a.args.Model}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := a.dispatchSubtasks(t.Context())
+			if err != nil || !slices.Equal(got, tc.want) {
+				t.Errorf("output = %+v, error = %v, want %+v", got, err, tc.want)
+			}
+			if got := filterCalls.Load(); got != 1 {
+				t.Errorf("filter calls = %d, want 1", got)
+			}
+			state := assertRelocationReviewHistory(t, a, tc.want)
+			assertRelocationReviewResume(t, a, state, tc.want)
+		})
+	}
+}
+
+func removeRelocationReviewFinding(id string) *llm.ChatResponse {
+	return relocationReviewToolResponse("report_incorrect_comments", fmt.Sprintf(`{"comment_ids":[%q]}`, id))
+}
+
+func relocationReviewFilterIDs(t *testing.T, meta llm.RequestMeta, req llm.ChatRequest, key string, diffs []model.Diff, want ...model.LlmComment) map[string]string {
+	t.Helper()
+	prompt, _ := req.Messages[0].Content.(string)
+	raw, ok := strings.CutPrefix(prompt, key+"\n"+buildConcatenatedDiffs(diffs)+"\n")
+	if meta.FilePath != key || !ok {
+		t.Errorf("unexpected filter for %q: %s", meta.FilePath, prompt)
+		return nil
+	}
+	var candidates []struct {
+		model.LlmComment
+		ID string
+	}
+	if err := json.Unmarshal([]byte(raw), &candidates); err != nil {
+		t.Errorf("decode filter candidates: %v", err)
+		return nil
+	}
+	ids := make(map[string]string, len(candidates))
+	for _, c := range candidates {
+		if !slices.ContainsFunc(want, func(cm model.LlmComment) bool {
+			return cm.Path == c.Path && cm.Content == c.Content && cm.ExistingCode == c.ExistingCode
+		}) {
+			t.Errorf("unexpected filter candidate: %+v", c)
+		}
+		ids[c.ExistingCode] = c.ID
+	}
+	if len(candidates) != len(want) || len(ids) != len(want) {
+		t.Errorf("filter candidates = %+v, want %+v", candidates, want)
+	}
+	return ids
+}
+
+func assertRelocationReviewHistory(t *testing.T, a *Agent, want []model.LlmComment) *session.ResumeState {
+	t.Helper()
+	finishManifestFlow(t, a)
+	history, err := session.LoadComments(a.args.RepoDir, a.SessionID())
+	if err != nil || !slices.Equal(history, want) {
+		t.Errorf("history comments = %+v, error = %v, want %+v", history, err, want)
+	}
+	summary, err := session.LoadSummary(a.args.RepoDir, a.SessionID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.TotalComments != len(want) {
+		t.Errorf("summary comments = %d, want %d", summary.TotalComments, len(want))
+	}
+	state, err := session.LoadReviewResumeState(a.args.RepoDir, a.SessionID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func testRelocationReviewConcurrent(t *testing.T, source, target model.Diff, finding model.LlmComment) {
+	setTestHome(t, t.TempDir())
+	target.Diff = "@@ -0,0 +7,3 @@\n+target()\n+secondTarget()\n+localTarget()"
+	target.Insertions = 3
+	secondSource := model.Diff{OldPath: "c.go", NewPath: "c.go", Diff: "@@ -0,0 +3 @@\n+secondSource()", Insertions: 1}
+	secondFinding := finding
+	secondFinding.ExistingCode = "secondTarget()"
+	secondFinding.StartLine, secondFinding.EndLine = 8, 8
+	local := model.LlmComment{Path: target.NewPath, ExistingCode: "localTarget()", Content: "Target group's own finding", StartLine: 9, EndLine: 9}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	targetStarted := make(chan struct{})
+	secondSourceStarted := make(chan struct{})
+	targetFiltered := make(chan struct{})
+	var filterCalls atomic.Int64
+	client := relocationReviewClient(func(_ context.Context, meta llm.RequestMeta, req llm.ChatRequest) (*llm.ChatResponse, error) {
+		switch session.TaskType(meta.TaskType) {
+		case session.MainTask:
+			if meta.RequestNo != 1 {
+				return agentTaskDoneResponse(), nil
+			}
+			var ready <-chan struct{}
+			var comment model.LlmComment
+			switch meta.FilePath {
+			case source.NewPath:
+				ready, comment = targetStarted, finding
+			case target.NewPath:
+				close(targetStarted)
+				ready, comment = secondSourceStarted, local
+			case secondSource.NewPath:
+				close(secondSourceStarted)
+				ready, comment = targetFiltered, secondFinding
+			default:
+				return nil, fmt.Errorf("unexpected main request: %+v", meta)
+			}
+			select {
+			case <-ready:
+				return relocationReviewComment(meta.FilePath, comment.ExistingCode, comment.Content), nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		case session.ReviewFilterTask:
+			if filterCalls.Add(1) == 1 {
+				relocationReviewFilterIDs(t, meta, req, target.NewPath, []model.Diff{target}, local)
+				close(targetFiltered)
+				return relocationReviewToolResponse("approve_all_comments", "{}"), nil
+			}
+			ids := relocationReviewFilterIDs(t, meta, req, target.NewPath, []model.Diff{target}, finding, secondFinding)
+			return removeRelocationReviewFinding(ids[finding.ExistingCode]), nil
+		}
+		return nil, fmt.Errorf("unexpected request: %+v", meta)
+	})
+	a := newManifestFlowAgentInRepo(t, t.TempDir(), []model.Diff{source, target, secondSource}, nil, client, func(args *Args) {
+		configureRelocationReview(args)
+		args.MaxConcurrency = 2
+	})
+	want := []model.LlmComment{local, secondFinding}
+	got, err := a.dispatchSubtasks(ctx)
+	if err != nil || !slices.Equal(got, want) {
+		t.Errorf("concurrent output = %+v, error = %v, want %+v", got, err, want)
+	}
+	if got := filterCalls.Load(); got != 2 {
+		t.Errorf("filter calls = %d, want 2", got)
+	}
+	state := assertRelocationReviewHistory(t, a, want)
+	assertRelocationReviewResume(t, a, state, want)
+}
+
+func testRelocationReviewConditions(t *testing.T, source, target model.Diff, finding model.LlmComment) {
+	setTestHome(t, t.TempDir())
+	const budget int64 = 25000
+	for _, tc := range []struct {
+		name           string
+		grouped        bool
+		noFilter       bool
+		noPrompt       bool
+		exhausted      bool
+		stopped        bool
+		undispatched   bool
+		deleted        bool
+		runErr         error
+		filterErr      error
+		filterResponse *llm.ChatResponse
+		calls          int64
+	}{
+		{name: "same group", grouped: true, calls: 1},
+		{name: "no filter", noFilter: true},
+		{name: "no filter template", noPrompt: true},
+		{name: "cancelled", runErr: context.Canceled},
+		{name: "budget exhausted", exhausted: true},
+		{name: "provider error", filterErr: errors.New("filter rejected by provider"), calls: 1},
+		{name: "filter timeout", filterErr: context.DeadlineExceeded, calls: 1},
+		{name: "unparseable response", filterResponse: &llm.ChatResponse{}, calls: 1},
+		{name: "target failed without findings", stopped: true, calls: 1},
+		{name: "target not dispatched with budget remaining", undispatched: true, calls: 1},
+		{name: "deleted target has no unique path", deleted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, want := target, finding
+			diffs := []model.Diff{target, source}
+			switch {
+			case tc.undispatched:
+				target.Diff += "\n+" + strings.Repeat("targetMayExceedTokenBudget ", 2000)
+				diffs = []model.Diff{source, target}
+			case tc.stopped:
+				diffs = []model.Diff{source, target}
+			case tc.deleted:
+				unrelated := model.Diff{OldPath: "other.go", NewPath: "/dev/null", Diff: "@@ -1 +0,0 @@\n-unrelated()", IsDeleted: true}
+				target.NewPath, target.Diff, target.IsDeleted = "/dev/null", "@@ -7 +0,0 @@\n-target()", true
+				diffs = []model.Diff{unrelated, source, target}
+				want.Path = target.NewPath
+			}
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var calls atomic.Int64
+			client := relocationReviewClient(func(ctx context.Context, meta llm.RequestMeta, req llm.ChatRequest) (*llm.ChatResponse, error) {
+				switch session.TaskType(meta.TaskType) {
+				case session.MainTask:
+					if meta.FilePath == target.NewPath {
+						if tc.undispatched {
+							t.Error("target was dispatched")
+						}
+						if tc.stopped {
+							return &llm.ChatResponse{}, nil
+						}
+						return agentTaskDoneResponse(), nil
+					}
+					if meta.RequestNo == 1 {
+						return relocationReviewComment(source.NewPath, finding.ExistingCode, finding.Content), nil
+					}
+					if tc.runErr != nil {
+						cancel()
+						return nil, ctx.Err()
+					}
+					resp := agentTaskDoneResponse()
+					if tc.exhausted {
+						resp.Usage = &llm.UsageInfo{PromptTokens: budget - 15}
+					}
+					return resp, nil
+				case session.ReviewFilterTask:
+					calls.Add(1)
+					if tc.grouped {
+						relocationReviewFilterIDs(t, meta, req, "a.go,b.go", diffs, want)
+					}
+					if tc.filterErr != nil || tc.filterResponse != nil {
+						return tc.filterResponse, tc.filterErr
+					}
+					return relocationReviewToolResponse("approve_all_comments", "{}"), nil
+				}
+				return nil, fmt.Errorf("unexpected request: %+v", meta)
+			})
+			a := newManifestFlowAgentInRepo(t, t.TempDir(), diffs, nil, client, func(args *Args) {
+				configureRelocationReview(args)
+				args.SkipFilter = tc.noFilter
+				if tc.exhausted || tc.undispatched {
+					args.MaxTokensBudget = budget
+				}
+				if tc.noPrompt {
+					args.Template.ReviewFilterTask = nil
+				}
+				if tc.grouped {
+					args.Template.GroupingMinFiles, args.Template.GroupingBundleLineThreshold = 3, 10
+				}
+			})
+			got, err := a.dispatchSubtasks(ctx)
+			if !errors.Is(err, tc.runErr) || !slices.Equal(got, []model.LlmComment{want}) {
+				t.Errorf("output = %+v, error = %v, want %+v and %v", got, err, want, tc.runErr)
+			}
+			if calls.Load() != tc.calls {
+				t.Errorf("filter calls = %d, want %d", calls.Load(), tc.calls)
+			}
+			if tc.stopped || tc.undispatched {
+				state := assertRelocationReviewHistory(t, a, nil)
+				if _, reusable := state.ReusableItem(reviewItemFingerprint(a.reviewMode(), target)); reusable {
+					t.Error("target has a reusable checkpoint")
+				}
+			} else if tc.runErr != nil {
+				assertRelocationReviewHistory(t, a, []model.LlmComment{want})
+			}
+		})
+	}
+}
+
+func assertRelocationReviewResume(t *testing.T, parent *Agent, state *session.ResumeState, want []model.LlmComment) {
+	t.Helper()
+	client := relocationReviewClient(func(_ context.Context, meta llm.RequestMeta, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+		t.Errorf("unexpected request on full resume: %+v", meta)
+		return nil, errors.New("unexpected request on full resume")
+	})
+	continued := newManifestFlowAgentInRepo(t, parent.args.RepoDir, parent.diffs, state, client, configureRelocationReview)
+	if err := state.ValidateResume(session.ResumeRequest{Identity: continued.runIdentity(), Model: continued.args.Model}); err != nil {
+		t.Fatalf("validate compatible resume: %v", err)
+	}
+	got, err := continued.dispatchSubtasks(t.Context())
+	if err != nil || !slices.Equal(got, want) {
+		t.Errorf("resume comments = %+v, error = %v, want %+v", got, err, want)
+	}
+	if info := continued.ResumeInfo(); info == nil || info.ReusedFiles != int64(len(parent.diffs)) || info.RerunFiles != 0 {
+		t.Errorf("resume info = %+v, want all files reused", info)
+	}
+	finishManifestFlow(t, continued)
 }
 
 // seedParentManifest gives a hand-built ResumeState the parent manifest a real
