@@ -12,6 +12,9 @@ const crypto = require("crypto");
 
 const { IS_WINDOWS, BINARY_FILENAME: BINARY_NAME, resolveNativeBinary } = require("./platform");
 
+const REQUEST_TIMEOUT_MS = 20000;
+const RESPONSE_STALL_TIMEOUT_MS = 30000;
+
 const packageRoot = path.join(__dirname, "..");
 const binDir = path.join(packageRoot, "bin");
 const binaryDest = path.join(binDir, BINARY_NAME);
@@ -91,6 +94,22 @@ function buildUrl(pattern, vars) {
     .replace(/\{arch\}/g, vars.arch);
 }
 
+function watchResponseStall(res, url) {
+  let timer;
+  const clear = () => clearTimeout(timer);
+  const reset = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      res.destroy(new Error(`Stalled while downloading ${url}`));
+    }, RESPONSE_STALL_TIMEOUT_MS);
+  };
+  res.on("data", reset);
+  res.on("end", clear);
+  res.on("error", clear);
+  res.on("close", clear);
+  reset();
+}
+
 function download(url, maxRedirects = 10) {
   if (!url.startsWith("https")) {
     return Promise.reject(new Error(`Refusing non-HTTPS download: ${url}`));
@@ -99,7 +118,7 @@ function download(url, maxRedirects = 10) {
     return Promise.reject(new Error(`Too many redirects fetching ${url}`));
   }
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    const req = https.get(url, { timeout: REQUEST_TIMEOUT_MS }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
         download(res.headers.location, maxRedirects - 1).then(resolve).catch(reject);
@@ -110,8 +129,13 @@ function download(url, maxRedirects = 10) {
         reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
         return;
       }
+      watchResponseStall(res, url);
       resolve(res);
-    }).on("error", reject);
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error(`Timed out fetching ${url}`));
+    });
+    req.on("error", reject);
   });
 }
 

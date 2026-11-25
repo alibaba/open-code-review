@@ -15,6 +15,8 @@ on:
       - 'package.json'
       - 'scripts/platform.js'
       - 'scripts/version.js'
+      - 'scripts/install.js'
+      - 'scripts/install.test.js'
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
@@ -29,6 +31,8 @@ on:
       - 'package.json'
       - 'scripts/platform.js'
       - 'scripts/version.js'
+      - 'scripts/install.js'
+      - 'scripts/install.test.js'
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
@@ -63,6 +67,9 @@ jobs:
 
       - name: Test GitHub Actions contracts
         run: npm run test:github-actions
+
+      - name: Test installer contracts
+        run: npm run test:installer
 
       - name: Test launcher contracts
         run: npm run test:launcher
