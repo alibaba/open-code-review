@@ -566,6 +566,10 @@ func TestSessionDisplayDoesNotInferLegacyComplete(t *testing.T) {
 	if got := describeStatus(summary); got != "aborted" {
 		t.Fatalf("status = %q", got)
 	}
+	summary.Running = true
+	if got := describeStatus(summary); got != "running" {
+		t.Fatalf("running status = %q", got)
+	}
 }
 
 // newCompareSession records one session with the given findings and returns it.

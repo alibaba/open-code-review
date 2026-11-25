@@ -44,6 +44,7 @@ type Summary struct {
 	TotalComments  int              `json:"total_comments"`
 	LLMFailures    int64            `json:"llm_failures"`
 	Aborted        bool             `json:"aborted"`
+	Running        bool             `json:"running,omitempty"`
 	Legacy         bool             `json:"legacy"`
 	RunManifest    *RunManifest     `json:"run_manifest,omitempty"`
 
@@ -188,6 +189,7 @@ func LoadDetailAt(path, sessionID, fallbackRepoDir string) (*Summary, []ItemDeta
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
+	markRunningIfRecent(summary)
 	return summary, items, nil
 }
 
@@ -206,7 +208,24 @@ func loadSummaryFromFile(path, sessionID, repoDir string) (*Summary, error) {
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
+	markRunningIfRecent(summary)
 	return summary, nil
+}
+
+// runningActivityWindow is twice the default five-minute LLM request timeout.
+// Without session_end, recent file activity is the only local signal that a
+// review process is still alive rather than interrupted.
+const runningActivityWindow = 10 * time.Minute
+
+func markRunningIfRecent(summary *Summary) {
+	if !summary.Aborted {
+		return
+	}
+	info, err := os.Stat(summary.FilePath)
+	if err != nil {
+		return
+	}
+	summary.Running = time.Since(info.ModTime()) <= runningActivityWindow
 }
 
 func walkSessionFile(path string, apply func(summaryRecord)) error {
