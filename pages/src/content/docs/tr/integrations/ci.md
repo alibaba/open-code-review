@@ -363,9 +363,11 @@ if any("OpenCodeReview" in n.get("body", "") for n in notes):
     print("OCR already reviewed this MR. Skipping to save tokens.")
     sys.exit(0)
 
-# ...otherwise call `ocr review ...` as usual and write the JSON to
-# the file the posting step expects.
+# ...otherwise call `ocr review ...` as usual, write the JSON, then run
+# post_review.py here and exit with its status.
 ```
+
+`post_review.py` betiğini incelemeden sonra sarmalayıcının içinden çalıştırın ve şablondaki ayrı gönderim adımını kaldırın. Atlanan bir çalıştırma sonuç yazmaz; `post_review.py` ise sonuç yoksa sıfırdan farklı bir çıkış koduyla sonlanır. Bu yüzden ayrı bir gönderim adımı, zaten incelenmiş bir MR'a yapılan her push'ta işin başarısız olmasına yol açar.
 
 Yeniden incelemeyi zorlamak için önceki OCR notlarını silin. Sonraki akış bunları bulamayacağı için devam eder.
 

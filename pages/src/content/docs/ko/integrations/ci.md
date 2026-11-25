@@ -451,9 +451,14 @@ if any("OpenCodeReview" in n.get("body", "") for n in notes):
     print("OCR already reviewed this MR. Skipping to save tokens.")
     sys.exit(0)
 
-# ...노트가 없으면 평소처럼 `ocr review ...`를 호출하고, 게시 단계가 기대하는
-# 파일에 JSON을 씁니다.
+# ...노트가 없으면 평소처럼 `ocr review ...`를 호출해 JSON을 쓴 뒤, 여기서
+# post_review.py를 실행하고 그 종료 코드로 끝냅니다.
 ```
+
+`post_review.py`는 래퍼 안에서 리뷰가 끝난 뒤에 실행하고, 템플릿의 별도 게시
+단계는 지우세요. 건너뛴 실행은 결과를 쓰지 않고, `post_review.py`는 결과가
+없으면 0이 아닌 코드로 종료하므로, 별도 게시 단계가 남아 있으면 이미 리뷰한
+MR에 푸시할 때마다 작업이 실패합니다.
 
 이 상태에서 다시 리뷰하고 싶다면 MR에서 기존 OCR 노트를 지우세요. 다음 파이프라인
 실행에서 OCR 노트가 보이지 않으면 리뷰가 진행됩니다.

@@ -150,6 +150,8 @@ The pipeline exposes the following to downstream jobs:
 - **dotenv report** (`.ocr/ocr-stats.env`): `OCR_COMMENTS_TOTAL`, `OCR_COMMENTS_INLINE`, `OCR_COMMENTS_SUMMARY`, `OCR_COMMENTS_ROUTED`, `OCR_COMMENTS_SKIPPED`, `OCR_COMMENTS_FAILED`, and `OCR_SUMMARY_URL`. Consume them in later stages via the `dotenv` artifact.
 - **Artifacts** (`when: always`, 1 week retention): `.ocr/ocr-result.json` (raw review JSON) and `.ocr/ocr-stderr.log` (OCR stderr), so you can inspect a failed review even when the job fails. Paths are project-relative (under `.ocr/`) because GitLab Runner refuses to upload artifacts outside the build directory.
 
+The posting script exits non-zero when the OCR JSON cannot be parsed, an inline discussion cannot be posted, or the summary note cannot be created or updated. Failed inline findings are still rendered into the summary before the error is returned. Findings that intentionally have no line information or are routed to the summary by policy do not trigger this failure.
+
 ### Limit concurrency
 
 Set the `OCR_REVIEW_CONCURRENCY` CI/CD variable (passed to `ocr review --concurrency`). For large MRs, lowering this caps concurrent LLM requests:
@@ -239,13 +241,16 @@ script:
         f.write(result.stderr)
 
     print("OCR review completed.")
-    WRAPPER_SCRIPT
 
-  # Post review comments to MR
-  - python3 post_review.py .ocr/ocr-result.json
+    # Post only after a review: a skipped run writes no result, and
+    # post_review.py fails when the result is missing.
+    sys.exit(subprocess.run([sys.executable, "post_review.py", ".ocr/ocr-result.json"]).returncode)
+    WRAPPER_SCRIPT
 ```
 
 The key logic: the Python wrapper checks for existing OCR comments before running `ocr review`. If found, it exits early with `sys.exit(0)` before consuming any LLM tokens. To re-trigger a review, users can manually delete the previous OCR comments.
+
+The wrapper also runs `post_review.py` itself, only after a review, and exits with its status, so a failed post still fails the job. Do not add a separate posting step after the wrapper: `post_review.py` exits non-zero when the review result is missing, so that step would fail every push to an already-reviewed MR.
 
 ### Self-hosted GitLab
 
