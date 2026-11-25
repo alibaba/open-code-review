@@ -147,6 +147,14 @@ func safePath(filePath string) bool {
 		!strings.HasSuffix(base, ".pem") && !strings.HasSuffix(base, ".key") && !strings.HasSuffix(base, ".p12") && !strings.HasSuffix(base, ".pfx")
 }
 
+// codeBoolOptions names the boolean options of each code tool. Models
+// sometimes send them as "true" or "false"; dispatch converts those before
+// validating against the boolean schema.
+var codeBoolOptions = map[string][]string{
+	"code_search": {"case_sensitive", "use_perl_regexp"},
+	"file_find":   {"case_sensitive"},
+}
+
 func (code *codeTools) execute(ctx context.Context, name string, args map[string]any) (Observation, error) {
 	side, _ := args["side"].(string)
 	if side == "" {

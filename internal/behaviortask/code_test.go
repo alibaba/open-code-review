@@ -140,3 +140,48 @@ func TestFrozenRevisionDoesNotReadWorkspace(test *testing.T) {
 		test.Fatal("moving ref accepted")
 	}
 }
+
+func TestDispatchStringTypedBooleanOptions(test *testing.T) {
+	runner := newTestRunner(test, fixture(test), nil, nil)
+	observe := func(name, args string) Observation {
+		test.Helper()
+		outcome, err := runner.dispatch(context.Background(), name, args)
+		if err != nil {
+			test.Fatalf("%s %s: %v", name, args, err)
+		}
+		var observation Observation
+		if err := json.Unmarshal([]byte(outcome.Content), &observation); err != nil {
+			test.Fatal(err)
+		}
+		return observation
+	}
+	for _, pair := range [][2]string{
+		{`{"search_text":"OLD VALUE","side":"old","case_sensitive":true}`, `{"search_text":"OLD VALUE","side":"old","case_sensitive":"true"}`},
+		{`{"search_text":"old value","side":"old","case_sensitive":false}`, `{"search_text":"old value","side":"old","case_sensitive":"false"}`},
+		{`{"search_text":"old val+ue","side":"old","use_perl_regexp":true}`, `{"search_text":"old val+ue","side":"old","use_perl_regexp":"true"}`},
+	} {
+		native, stringy := observe("code_search", pair[0]), observe("code_search", pair[1])
+		if native.ReturnedContent != stringy.ReturnedContent {
+			test.Errorf("%s returned %q, %s returned %q", pair[1], stringy.ReturnedContent, pair[0], native.ReturnedContent)
+		}
+	}
+	if got := observe("file_find", `{"query_name":"CONSUMER","side":"old","case_sensitive":"true"}`); strings.Contains(got.ReturnedContent, "consumer.go") {
+		test.Errorf(`case_sensitive "true" matched across case: %q`, got.ReturnedContent)
+	}
+	if got := observe("file_find", `{"query_name":"CONSUMER","side":"old","case_sensitive":"false"}`); !strings.Contains(got.ReturnedContent, "consumer.go") {
+		test.Errorf(`case_sensitive "false" missed consumer.go: %q`, got.ReturnedContent)
+	}
+	for _, call := range []struct{ name, args, field string }{
+		{"code_search", `{"search_text":"not-matched-anywhere","case_sensitive":"junk"}`, "case_sensitive"},
+		{"code_search", `{"search_text":"not-matched-anywhere","use_perl_regexp":"1"}`, "use_perl_regexp"},
+		{"file_find", `{"query_name":"not-matched-anywhere","case_sensitive":"junk"}`, "case_sensitive"},
+		{"file_find", `{"query_name":"x","case_sensitive":null}`, "case_sensitive"},
+	} {
+		if _, err := runner.dispatch(context.Background(), call.name, call.args); err == nil || !strings.Contains(err.Error(), call.field) {
+			test.Errorf("%s %s: err = %v, want an error naming %s", call.name, call.args, err, call.field)
+		}
+	}
+	if got := observe("code_search", `{"search_text":"true","side":"old"}`); got.Arguments["search_text"] != "true" {
+		test.Errorf("text argument changed: %#v", got.Arguments["search_text"])
+	}
+}

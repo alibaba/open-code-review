@@ -42,11 +42,11 @@ func (p *CodeSearchProvider) execute(ctx context.Context, args map[string]any) (
 	searchText, _ := args["search_text"].(string)
 	caseSensitive, err := boolArg(args, "case_sensitive")
 	if err != nil {
-		return "Error: " + err.Error(), nil
+		return "", err
 	}
 	usePerlRegexp, err := boolArg(args, "use_perl_regexp")
 	if err != nil {
-		return "Error: " + err.Error(), nil
+		return "", err
 	}
 
 	filePatternsIface, _ := args["file_patterns"].([]any)
