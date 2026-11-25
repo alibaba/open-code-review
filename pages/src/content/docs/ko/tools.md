@@ -363,7 +363,7 @@ src/main/java/com/example/internal/UserServiceImpl.java
 
 ### 출력 {#output}
 
-결과는 파일별로 묶입니다. 텍스트 결과는 `File: <path>`와 `Match lines: <n>`으로
+결과는 파일별로 묶입니다. 각 묶음은 `File: <path>`와 `Match lines: <n>`으로
 시작하고, 걸린 곳마다 `line|content` 줄이 이어집니다:
 
 ```
@@ -376,9 +376,6 @@ File: path/to/other.java
 Match lines: 1
 22|      var req = new ToolRequest();
 ```
-
-바이너리 파일이 일치하면 `File: <path>` 다음에 `Binary file matches; content not shown`이 표시됩니다.
-결과는 총 100개까지 반환됩니다. 일치하는 텍스트 한 줄과 바이너리 파일 하나를 각각 한 건으로 셉니다.
 
 일치하는 곳이 없으면 `No matches found`라는 문자열을 그대로 반환합니다.
 
@@ -394,8 +391,9 @@ Match lines: 1
 
 ### 제한 {#limits}
 
-- **모든 파일을 합쳐 최대 100건**을 반환합니다. 일치하는 결과가 100건을 넘을 때만
-  처음 100건을 표시하고, 결과 앞에 `file_patterns`로 검색 범위를 좁히라는 안내를 덧붙입니다.
+- `git grep --max-count 100`으로 **파일당 100건**까지만 받으므로, 파일이 많으면 전체
+  출력은 100건을 넘을 수 있습니다. 파일당 상한에 걸리면 출력 앞에 `Note: The results
+have been truncated. Only showing first 100 results.`가 붙습니다.
 - `search_text`가 비어 있거나 공백뿐이면 모든 줄로 번지지 않고 `Error: search_text is
 blank`를 반환합니다.
 - 워크스페이스 모드에서는 **현재 작업 트리**를, range·commit 모드에서는 해석된 대상

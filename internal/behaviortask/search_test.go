@@ -5,11 +5,9 @@ package behaviortask
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -65,7 +63,6 @@ func TestSearchProviderBoundaryFiltering(test *testing.T) {
 						"File: " + otherSidePath, "Match lines: 1", "3|OTHER_SIDE_PRIVATE_SENTINEL",
 						"File: missing.go", "Match lines: 1", "4|MISSING_PRIVATE_SENTINEL",
 						"File: .env", "Match lines: 1", "5|SECRET_PRIVATE_SENTINEL",
-						"File: excluded.bin", "Binary file matches; content not shown",
 						"UNNUMBERED_PRIVATE_SENTINEL",
 						"Error: simulated search failure",
 						"File: main.go", "Match lines: 1", "9|AUTHORIZED_LAST",
@@ -93,88 +90,6 @@ func TestSearchProviderBoundaryFiltering(test *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestWarningOnlySearchCannotBeCited(test *testing.T) {
-	input := fixture(test)
-	const warning = "Warning: Some git grep matches could not be verified"
-	for _, side := range []string{"old", "new"} {
-		test.Run(side, func(test *testing.T) {
-			runner := newTestRunner(test, input, nil, nil)
-			runner.code.registry = tool.NewRegistry()
-			runner.code.registry.Register(searchBoundaryProvider(func(context.Context, map[string]any) (string, error) {
-				return warning, nil
-			}))
-			outcome, err := runner.dispatch(test.Context(), "code_search", marshal(test, map[string]string{"search_text": "needle", "side": side}))
-			if err != nil {
-				test.Fatal(err)
-			}
-			var observation Observation
-			if err := json.Unmarshal([]byte(outcome.Content), &observation); err != nil {
-				test.Fatal(err)
-			}
-			if stripSide(observation.ReturnedContent) != warning+"\n" || observation.ID == "" {
-				test.Fatalf("unexpected search observation: %+v", observation)
-			}
-			analysis := Analysis{Markdown: "[[" + observation.ID + "]]"}
-			if _, err := runner.dispatch(test.Context(), "submit_analysis", marshal(test, analysis)); err == nil || !strings.Contains(err.Error(), "is missing or failed") {
-				test.Fatalf("expected failed citation, got %v", err)
-			}
-		})
-	}
-}
-
-func TestScopedSearchBinaryMatches(test *testing.T) {
-	input := fixture(test)
-	for _, path := range []string{"build artifact.bin", "excluded.bin"} {
-		writeSearchBoundaryFile(test, input.RepoDir, path, "\x00new value\n")
-	}
-	git(test, input.RepoDir, "add", ".")
-	git(test, input.RepoDir, "commit", "-qm", "Add binary search fixtures")
-	input.Resolution.ResolvedHead = git(test, input.RepoDir, "rev-parse", "HEAD")
-	input.ExcludePatterns = append(input.ExcludePatterns, "excluded.bin")
-	code, err := prepareCodeTools(test.Context(), input)
-	if err != nil {
-		test.Fatal(err)
-	}
-
-	args := map[string]any{"search_text": "new value", "file_patterns": []any{"*.bin"}}
-	binary, err := code.execute(test.Context(), "code_search", args)
-	want := "File: build artifact.bin\nBinary file matches; content not shown\n\n"
-	if err != nil || binary.ReturnedContent != want || len(binary.Locations) != 0 || binary.Truncated || binary.ErrorClass != "" {
-		test.Fatalf("binary search returned %+v, error=%v; want %q with no locations", binary, err, want)
-	}
-
-	delete(args, "file_patterns")
-	mixed, err := code.execute(test.Context(), "code_search", args)
-	if err != nil || !strings.Contains(mixed.ReturnedContent, want) || strings.Contains(mixed.ReturnedContent, "excluded.bin") ||
-		len(mixed.Locations) != 1 || mixed.Locations[0].Path != "main.go" || mixed.Locations[0].StartLine != 1 {
-		test.Fatalf("mixed search returned %+v, error=%v", mixed, err)
-	}
-}
-
-func TestScopedSearchLiteralQuotedBinaryPath(test *testing.T) {
-	if runtime.GOOS == "windows" {
-		test.Skip("Windows filenames cannot contain double quotes")
-	}
-	const path = "asset\"v2.bin"
-	input := fixture(test)
-	writeSearchBoundaryFile(test, input.RepoDir, path, "\x00binary needle\n")
-	writeSearchBoundaryFile(test, input.RepoDir, "excluded.bin", "\x00binary needle\n")
-	git(test, input.RepoDir, "add", ".")
-	git(test, input.RepoDir, "commit", "-qm", "Add quoted binary search fixture")
-	input.Resolution.ResolvedHead = git(test, input.RepoDir, "rev-parse", "HEAD")
-	input.ExcludePatterns = append(input.ExcludePatterns, "excluded.bin")
-	code, err := prepareCodeTools(test.Context(), input)
-	if err != nil {
-		test.Fatal(err)
-	}
-
-	got, err := code.execute(test.Context(), "code_search", map[string]any{"search_text": "binary needle"})
-	want := "File: " + path + "\n" + tool.CodeSearchBinaryMatch + "\n\n"
-	if err != nil || got.ReturnedContent != want || len(got.Locations) != 0 || got.Truncated || got.ErrorClass != "" {
-		test.Fatalf("search returned %+v, error = %v; want %q with no locations", got, err, want)
 	}
 }
 

@@ -208,8 +208,7 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 		observation.ErrorClass = "unsupported_encoding"
 		return observation, fmt.Errorf("non-UTF-8 code output is unavailable")
 	}
-	if strings.HasPrefix(content, "Error:") || strings.Contains(content, "\nError:") ||
-		strings.HasPrefix(content, "Warning:") || strings.Contains(content, "\nWarning:") {
+	if strings.HasPrefix(content, "Error:") || strings.Contains(content, "\nError:") || strings.Contains(content, "\nWarning:") {
 		observation.ErrorClass = "tool_error"
 	}
 	if name == "file_read" {

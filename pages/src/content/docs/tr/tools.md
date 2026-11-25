@@ -277,7 +277,7 @@ Depoda tam metin araması yapar. `git grep` kullandığı için `pathspec` sözd
 
 ### Çıktı {#output-4}
 
-Sonuçlar dosyaya göre gruplanır. Metin dosyalarında her grup `File: <path>` ve `Match lines: <n>` ile başlar. Eşleşen her satır `line|content` biçiminde yazılır.
+Sonuçlar dosyaya göre gruplanır. Her grup `File: <path>` ve `Match lines: <n>` ile başlar; her eşleşme `line|content` biçiminde yazılır:
 
 ```
 File: path/to/example.java
@@ -289,9 +289,6 @@ File: path/to/other.java
 Match lines: 1
 22|      var req = new ToolRequest();
 ```
-
-İkili dosyalarda `File: <path>` satırının ardından `Binary file matches; content not shown` yazılır.
-Araç toplamda en fazla 100 eşleşme döndürür. Eşleşen her metin satırı ve her eşleşen ikili dosya birer eşleşme sayılır.
 
 Eşleşme yoksa aynen `No matches found` döndürülür.
 
@@ -307,7 +304,7 @@ Eşleşme yoksa aynen `No matches found` döndürülür.
 
 ### Sınırlar {#limits-3}
 
-- Sınır **tüm dosyalarda toplam 100 eşleşmedir**. Yalnızca toplam eşleşme sayısı 100'ü aştığında araç ilk 100 eşleşmeyi gösterir ve çıktının başında aramayı `file_patterns` ile daraltmayı önerir.
+- `git grep --max-count 100` ile **dosya başına 100** eşleşme sınırı vardır; birçok dosyanın toplam çıktısı 100'ü aşabilir. Sınıra ulaşıldığında başa `Note: The results have been truncated. Only showing first 100 results.` eklenir.
 - Boş veya yalnızca boşluk içeren `search_text`, tüm satırlarla eşleşmek yerine `Error: search_text is blank` döndürür.
 - Çalışma alanı kipinde **canlı çalışma ağacını**, aralık/commit kipinde çözümlenmiş hedef ref'i arar (`FileReader.Ref`, `git grep` komutuna konumsal argüman olarak geçilir).
 

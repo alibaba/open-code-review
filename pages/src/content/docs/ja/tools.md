@@ -356,7 +356,7 @@ src/main/java/com/example/internal/UserServiceImpl.java
 
 ### 出力
 
-結果はファイルごとにグループ化されます。テキストの結果は `File: <path>` と `Match lines: <n>` で始まり、続いて各ヒットが
+結果はファイルごとにグループ化されます。各グループは `File: <path>` と `Match lines: <n>` で始まり、続いて各ヒットが
 `line|content` の 1 行で表されます：
 
 ```
@@ -369,9 +369,6 @@ File: path/to/other.java
 Match lines: 1
 22|      var req = new ToolRequest();
 ```
-
-バイナリファイルのマッチは `File: <path>` と `Binary file matches; content not shown` で表示されます。
-結果は合計で最大 100 件です。マッチしたテキストの 1 行またはバイナリファイル 1 個を 1 件として数えます。
 
 マッチがない場合、ツールはリテラル文字列 `No matches found` を返します。
 
@@ -387,8 +384,9 @@ Match lines: 1
 
 ### 制限
 
-- 上限は**全ファイル合計で 100 件**です。合計が 100 件を超えた場合のみ、先頭の 100 件を表示し、
-  出力の冒頭で `file_patterns` を使って検索範囲を絞るよう案内します。
+- `git grep --max-count 100` によってファイルごとのヒット数上限を **100** に設定するため、複数ファイルにまたがる
+  合計出力は 100 を超える可能性があります。ファイルごとの上限に達した場合、出力の前に
+  `Note: The results have been truncated. Only showing first 100 results.` が付加されます。
 - 空 / 空白のみの `search_text` は、各行に展開されるのではなく `Error: search_text is blank` を返します。
 - ワークスペースモードは**現在のワークツリー**を検索し、区間 / commit モードは解決された対象の ref を検索します
   （`FileReader.Ref` が位置引数として `git grep` に渡されます）。

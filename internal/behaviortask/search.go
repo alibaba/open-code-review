@@ -122,32 +122,24 @@ func (code *codeTools) search(ctx context.Context, provider tool.Provider, args 
 		}
 		filePath := ""
 		var matches []string
-		binaryMatch := false
 		flush := func() {
 			if len(matches) > 0 {
 				fmt.Fprintf(&body, "File: %s\nMatch lines: %d\n%s\n\n", filePath, len(matches), strings.Join(matches, "\n"))
-			} else if binaryMatch {
-				fmt.Fprintf(&body, "File: %s\n%s\n\n", filePath, tool.CodeSearchBinaryMatch)
+				matches = nil
 			}
-			matches = nil
-			binaryMatch = false
 		}
 		for line := range strings.SplitSeq(stripSide(content), "\n") {
 			switch {
 			case strings.HasPrefix(line, "File: "):
 				flush()
 				filePath = strings.TrimPrefix(line, "File: ")
-			case code.allowed[side][filePath] && (line == tool.CodeSearchBinaryMatch || numberedLine.MatchString(line)):
-				if count >= searchMatchLimit {
-					truncated = true
-					continue
-				}
-				if line == tool.CodeSearchBinaryMatch {
-					binaryMatch = true
-				} else {
+			case numberedLine.MatchString(line) && code.allowed[side][filePath]:
+				if count < searchMatchLimit {
 					matches = append(matches, line)
+					count++
+				} else {
+					truncated = true
 				}
-				count++
 			case strings.HasPrefix(line, "Note: Showing the first "):
 				truncated = true
 			case strings.HasPrefix(line, "Error:") || strings.HasPrefix(line, "Warning:"):

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -166,261 +165,6 @@ func TestGitGrep_WorkspaceMode_NoMatch(t *testing.T) {
 	}
 }
 
-func TestGitGrep_DistinguishesTextAndBinaryMatches(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows filenames cannot contain colons")
-	}
-	const textPath = "Binary file asset"
-	const binaryPath = "asset:12:data.bin"
-	for _, mode := range []string{"workspace", "plain_directory"} {
-		t.Run(mode, func(t *testing.T) {
-			var dir string
-			if mode == "workspace" {
-				dir = setupTestRepo(t)
-				cmd := exec.Command("git", "config", "grep.column", "true")
-				cmd.Dir = dir
-				if out, err := cmd.CombinedOutput(); err != nil {
-					t.Fatalf("git config: %v\n%s", err, out)
-				}
-			} else {
-				dir = t.TempDir()
-			}
-			files := map[string]string{
-				textPath:   strings.Repeat("\n", 11) + "data.bin matches\n",
-				binaryPath: "\x00data.bin matches\n",
-			}
-			for path, content := range files {
-				if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			search := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
-			text := "File: " + textPath + "\nMatch lines: 1\n12|data.bin matches\n\n"
-			binary := "File: " + binaryPath + "\n" + CodeSearchBinaryMatch + "\n\n"
-			for _, tc := range []struct {
-				name string
-				path string
-				want string
-			}{
-				{name: "text", path: textPath, want: text},
-				{name: "binary", path: binaryPath, want: binary},
-				{name: "mixed", want: text + binary},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					args := map[string]any{"search_text": "data.bin matches"}
-					if tc.path != "" {
-						args["file_patterns"] = []any{tc.path}
-					}
-					got, err := search.Execute(t.Context(), args)
-					if err != nil || got != tc.want {
-						t.Fatalf("search = %q, error = %v; want %q", got, err, tc.want)
-					}
-				})
-			}
-		})
-	}
-}
-
-func TestGitGrep_LiteralQuotedBinaryRefPath(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows filenames cannot contain double quotes")
-	}
-	const path = "asset\"v2.bin"
-	dir := setupTestRepo(t)
-	if err := os.WriteFile(filepath.Join(dir, path), []byte("\x00binary needle\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", "--", path}, {"commit", "-m", "add binary fixture"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-
-	search := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeCommit, Ref: "HEAD"})
-	got, err := search.Execute(t.Context(), map[string]any{"search_text": "binary needle"})
-	want := "File: " + path + "\n" + CodeSearchBinaryMatch + "\n\n"
-	if err != nil || got != want {
-		t.Fatalf("search = %q, error = %v; want %q", got, err, want)
-	}
-}
-
-func TestGitGrep_PathsWithNewlines(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows filenames cannot contain newlines")
-	}
-	dir := t.TempDir()
-	const escapedPath = `"a matches\nBinary file b"`
-	files := map[string]string{
-		escapedPath:                   "escaped needle\n",
-		"Binary file text\ncontinued": "needle\nneedle\n",
-		"a matches\nBinary file b":    "\x00needle\n",
-		"z.txt":                       "last needle",
-	}
-	for path, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	search := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
-	got, err := search.Execute(t.Context(), map[string]any{"search_text": "needle"})
-	want := fmt.Sprintf("File: %q\nMatch lines: 1\n1|escaped needle\n\n", escapedPath) +
-		"File: \"Binary file text\\ncontinued\"\nMatch lines: 2\n1|needle\n2|needle\n\n" +
-		"File: \"a matches\\nBinary file b\"\n" + CodeSearchBinaryMatch + "\n\n" +
-		"File: z.txt\nMatch lines: 1\n1|last needle\n\n"
-	if err != nil || got != want {
-		t.Fatalf("search = %q, error = %v; want %q", got, err, want)
-	}
-}
-
-func TestGitGrep_TextPathMatchesBinaryAndTextHeaders(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows filenames cannot contain newlines")
-	}
-	const textPath = "Binary file a matches\nb"
-	for _, mode := range []string{"workspace", "plain_directory", "commit"} {
-		for _, firstLine := range []int{1, 3} {
-			t.Run(fmt.Sprintf("%s/b_starts_at_%d", mode, firstLine), func(t *testing.T) {
-				dir := t.TempDir()
-				if mode != "plain_directory" {
-					dir = setupTestRepo(t)
-				}
-				files := map[string]string{
-					textPath: "needle\nneedle\n",
-					"a":      "\x00needle\n",
-					"b":      strings.Repeat("\n", firstLine-1) + "needle\nneedle\n",
-				}
-				for path, content := range files {
-					if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
-						t.Fatal(err)
-					}
-				}
-				fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
-				if mode == "commit" {
-					for _, args := range [][]string{{"add", "."}, {"commit", "-m", "add search fixtures"}} {
-						cmd := exec.Command("git", args...)
-						cmd.Dir = dir
-						if out, err := cmd.CombinedOutput(); err != nil {
-							t.Fatalf("git %v: %v\n%s", args, err, out)
-						}
-					}
-					fr.Mode, fr.Ref = ModeCommit, "HEAD"
-				}
-				got, err := NewCodeSearch(fr).Execute(t.Context(), map[string]any{"search_text": "needle"})
-				want := fmt.Sprintf("File: %q\nMatch lines: 2\n1|needle\n2|needle\n\n", textPath) +
-					"File: a\n" + CodeSearchBinaryMatch + "\n\n" +
-					fmt.Sprintf("File: b\nMatch lines: 2\n%d|needle\n%d|needle\n\n", firstLine, firstLine+1)
-				if err != nil || got != want {
-					t.Fatalf("search = %q, error = %v; want %q", got, err, want)
-				}
-			})
-		}
-	}
-}
-
-func TestScanGrepMatches_PreservesVerifiedMatches(t *testing.T) {
-	const mixed = "a.txt\x001\x00before\nBinary file b.bin matches\nc.txt\x001\x00ambiguous\nc.txt\x002\x00after\n"
-	const ambiguousTextPath = "a.txt\x001\x00before\nBinary file b.bin matches\nb.txt\x001\x00ambiguous\nc.txt\x002\x00after\n"
-	for _, tc := range []struct {
-		name    string
-		output  string
-		counts  string
-		pathErr error
-	}{
-		{name: "file removed", output: mixed, counts: "a.txt\x001\nc.txt\x002\n"},
-		{name: "file list timed out", output: mixed, pathErr: context.DeadlineExceeded},
-		{name: "file appeared", output: ambiguousTextPath, counts: "a.txt\x001\nb.bin\x001\nc.txt\x001\n"},
-		{name: "incomplete file list", output: mixed, counts: "a.txt\x001\nb.bin\x001\nc.txt\x002"},
-		{name: "invalid count", output: mixed, counts: "a.txt\x001\nb.bin\x001\nc.txt\x00two\n"},
-		{name: "fewer matches in second search", output: mixed, counts: "a.txt\x001\nb.bin\x001\nc.txt\x001\n"},
-		{name: "incomplete text line", output: mixed + "d.txt\x001\x00unfinished", counts: "a.txt\x001\nb.bin\x001\nc.txt\x002\nd.txt\x001\n"},
-		{name: "incomplete text after an ambiguous path", output: mixed + "Binary file d.bin matches\ne.txt\x00", pathErr: context.DeadlineExceeded},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var matches []string
-			warning, err := scanGrepMatches(tc.output, "", func() (string, error) {
-				return tc.counts, tc.pathErr
-			}, func(path string, line int, content string) {
-				matches = append(matches, fmt.Sprintf("%s:%d:%s", path, line, content))
-			})
-			want := []string{"a.txt:1:before", "c.txt:2:after"}
-			if err != nil || warning == nil || !slices.Equal(matches, want) {
-				t.Fatalf("matches = %v, warning = %v, error = %v; want %v and a warning", matches, warning, err, want)
-			}
-		})
-	}
-}
-
-func TestScanGrepMatches_SingleBinaryHitSkipsFileList(t *testing.T) {
-	for _, tc := range []struct {
-		name, output, refPrefix string
-		want                    []string
-		warn                    error
-	}{
-		{name: "quoted path", output: "Binary file HEAD:asset\"v2.bin matches\n", refPrefix: "HEAD:", want: []string{"asset\"v2.bin:0:"}},
-		{name: "workspace newline", output: "Binary file a\nb matches\n", want: []string{"a\nb:0:"}},
-		{name: "ref newline", output: "Binary file HEAD:a\nb matches\n", refPrefix: "HEAD:", want: []string{"a\nb:0:"}},
-		{name: "ambiguous diagnostics", output: "Binary file a matches\nBinary file b matches\n", warn: context.DeadlineExceeded},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var matches []string
-			warning, err := scanGrepMatches(tc.output, tc.refPrefix, func() (string, error) {
-				if tc.warn == nil {
-					t.Fatal("an unambiguous binary hit must not trigger a count search")
-				}
-				return "", context.DeadlineExceeded
-			}, func(path string, line int, content string) {
-				matches = append(matches, fmt.Sprintf("%s:%d:%s", path, line, content))
-			})
-			if err != nil || !errors.Is(warning, tc.warn) || !slices.Equal(matches, tc.want) {
-				t.Fatalf("matches = %q, warning = %v, error = %v; want %q, warning = %v", matches, warning, err, tc.want, tc.warn)
-			}
-		})
-	}
-}
-
-func TestScanGrepMatches_RefBinaryBeforeText(t *testing.T) {
-	const pair = "Binary file HEAD:a.bin matches\nHEAD:b.txt\x001\x00first\n"
-	const ambiguous = "Binary file HEAD:c.bin matches\nBinary file HEAD:d.bin matches\nHEAD:e.txt\x001\x00next\n"
-	const twoTextPaths = "Binary file HEAD:a matches\nHEAD:b matches\nHEAD:c\x001\x00first\n"
-	for _, tc := range []struct {
-		name   string
-		output string
-		counts string
-		warn   error
-		want   []string
-	}{
-		{name: "single boundary", output: pair, want: []string{"a.bin:0:", "b.txt:1:first"}},
-		{name: "newlines inside names", output: "Binary file HEAD:a\n.bin matches\nHEAD:b\n.txt\x001\x00first\n",
-			want: []string{"a\n.bin:0:", "b\n.txt:1:first"}},
-		{name: "two possible text paths", output: twoTextPaths, warn: context.DeadlineExceeded},
-		{name: "file list resolves a newline in the binary path", output: twoTextPaths,
-			counts: "HEAD:a matches\nHEAD:b\x001\nHEAD:c\x001\n", want: []string{"a matches\nHEAD:b:0:", "c:1:first"}},
-		{name: "file list timeout after a verified pair", output: pair + ambiguous, warn: context.DeadlineExceeded,
-			want: []string{"a.bin:0:", "b.txt:1:first", "e.txt:1:next"}},
-		{name: "file list resolves remaining paths", output: pair + ambiguous,
-			counts: "HEAD:a.bin\x001\nHEAD:b.txt\x001\nHEAD:c.bin\x001\nHEAD:d.bin\x003\nHEAD:e.txt\x001\n",
-			want:   []string{"a.bin:0:", "b.txt:1:first", "c.bin:0:", "d.bin:0:", "e.txt:1:next"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var matches []string
-			warning, err := scanGrepMatches(tc.output, "HEAD:", func() (string, error) {
-				if tc.counts == "" {
-					return "", context.DeadlineExceeded
-				}
-				return tc.counts, nil
-			}, func(path string, line int, content string) {
-				matches = append(matches, fmt.Sprintf("%s:%d:%s", path, line, content))
-			})
-			if err != nil || !errors.Is(warning, tc.warn) || !slices.Equal(matches, tc.want) {
-				t.Fatalf("matches = %q, warning = %v, error = %v; want %q, warn = %v", matches, warning, err, tc.want, tc.warn)
-			}
-		})
-	}
-}
-
 func TestGitGrep_ResultLimit(t *testing.T) {
 	for _, mode := range []string{"workspace", "commit", "plain_directory"} {
 		for _, tc := range []struct {
@@ -437,11 +181,10 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 			{name: "single_file_exact_limit", firstCount: 100, wantCount: 100},
 			{name: "across_files", firstCount: 60, secondCount: 60, wantCount: 100, truncated: true, wantFiles: 2},
 			{name: "single_file", firstCount: 101, wantCount: 100, truncated: true, wantFiles: 1},
-			{name: "binary_before_text", binaryCount: 100, firstCount: 1, truncated: true, wantFiles: 101},
-			{name: "binary_with_exact_limit", binaryCount: 1, firstCount: 99, wantCount: 99},
-			{name: "binary_with_truncation", binaryCount: 2, firstCount: 101, wantCount: 98, truncated: true, wantFiles: 3},
-			{name: "binary_only", binaryCount: 1},
-			{name: "binary_only_truncated", binaryCount: 101, truncated: true, wantFiles: 101},
+			{name: "binary_before_text", binaryCount: 100, firstCount: 1, wantCount: 1},
+			{name: "binary_with_exact_limit", binaryCount: 1, firstCount: 100, wantCount: 100},
+			{name: "binary_with_truncation", binaryCount: 100, firstCount: 101, wantCount: 100, truncated: true, wantFiles: 1},
+			{name: "binary_only", binaryCount: 101},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
 				dir := t.TempDir()
@@ -455,7 +198,7 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 				}
 				for i := 0; i < tc.binaryCount; i++ {
 					// Sort binary diagnostics before valid text matches.
-					path := filepath.Join(dir, fmt.Sprintf("0 binary %03d matches.bin", i))
+					path := filepath.Join(dir, fmt.Sprintf("0_binary_%03d.bin", i))
 					if err := os.WriteFile(path, []byte("\x00result_limit_needle\n"), 0o644); err != nil {
 						t.Fatal(err)
 					}
@@ -489,21 +232,13 @@ func TestGitGrep_ResultLimit(t *testing.T) {
 						t.Errorf("expected note to report %q, got:\n%s", want, got)
 					}
 				}
-				wantBinary := min(tc.binaryCount, gitGrepMaxCount)
-				if count := strings.Count(got, "\nBinary file matches; content not shown\n"); count != wantBinary {
-					t.Errorf("returned %d binary matches, want %d", count, wantBinary)
-				}
-				if wantBinary > 0 && !strings.Contains(got, "File: 0 binary 000 matches.bin\nBinary file matches; content not shown\n") {
-					t.Errorf("missing first binary path in result:\n%s", got)
-				}
 				if tc.name == "binary_only" {
-					want := "File: 0 binary 000 matches.bin\nBinary file matches; content not shown\n\n"
-					if got != want {
-						t.Errorf("binary-only search = %q, want %q", got, want)
+					// Every hit is in a binary file. The tool must still answer
+					// with its documented no-match string rather than an empty
+					// result, which the tool-use loop reads as a failed call.
+					if got != "No matches found" {
+						t.Errorf("binary-only search = %q, want %q", got, "No matches found")
 					}
-				}
-				if tc.name == "binary_with_exact_limit" && !strings.HasPrefix(got, "File: 0 binary 000 matches.bin\n") {
-					t.Error("expected the first binary file before the text results")
 				}
 				if tc.name == "across_files" {
 					if !strings.Contains(got, "File: a.go\nMatch lines: 60\n") || !strings.Contains(got, "File: b.go\nMatch lines: 40\n") {
