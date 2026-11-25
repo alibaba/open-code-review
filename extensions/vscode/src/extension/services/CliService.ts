@@ -14,7 +14,22 @@ class CliExitError extends Error {
   }
 }
 
+export class CustomStorageError extends Error {
+  constructor() {
+    super('The OCR extension does not support OCR_HOME. Use the OCR CLI with this storage directory.');
+  }
+}
+
 export class CliService {
+  requireDefaultStorage(): void {
+    const env = getShellEnv();
+    // Node uses the first lexicographically sorted spelling of a Windows env key.
+    const key = process.platform === 'win32'
+      ? Object.keys(env).sort().find((name) => name.toUpperCase() === 'OCR_HOME')
+      : 'OCR_HOME';
+    if (key && env[key]) throw new CustomStorageError();
+  }
+
   private current: ReturnType<typeof spawn> | null = null;
   private envCache: { env: EnvCheckResult; at: number } | null = null;
   private static readonly ENV_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -149,6 +164,7 @@ export class CliService {
   async review(opts: CliRunOptions, cwd: string, onLog: (l: LogLine) => void): Promise<CliResult> {
     let stdout: string;
     try {
+      this.requireDefaultStorage();
       stdout = await this.runRaw(buildReviewArgs(opts), cwd, onLog);
     } catch (error) {
       if (!(error instanceof CliExitError) || error.code !== 1) throw error;

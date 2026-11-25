@@ -216,16 +216,17 @@ fish、PowerShell、および永続化の詳しい設定方法は [CLI リファ
 
 ## OCR が状態を保存する場所
 
+`OCR_HOME` が未設定または空の場合、CLI は `~/.opencodereview` を使用します。別のディレクトリを使うには、OCR の起動前に `OCR_HOME` に絶対パスを設定してください。macOS や Linux では、たとえば `export OCR_HOME=/data/ocr` を実行します。表の `<storage>` は選択した CLI の保存先です。npm の更新状態とプロジェクトルールの保存場所は変わりません。
+
+既存のデータは自動で移行されません。引き続き使うには、切り替え前に設定とセッションを新しいディレクトリにコピーしてください。
+
 | パス | 保存内容 |
 |---|---|
-| `~/.opencodereview/config.json` | LLM エンドポイント、言語、テレメトリ設定（`ocr config set` で管理）。 |
-| `~/.opencodereview/rule.json` | オプションのグローバルレビュールール。 |
-| `~/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl` | レビューセッションごとのストリーミング JSONL トランスクリプト。`ocr viewer` で使用します。 |
+| `<storage>/config.json` | LLM エンドポイント、言語、テレメトリ設定（`ocr config set` で管理）。 |
+| `<storage>/rule.json` | オプションのグローバルレビュールール。 |
+| `<storage>/sessions/<encoded-repo-path>/<session-id>.jsonl` | レビューセッションごとのストリーミング JSONL トランスクリプト。`ocr viewer` で使用します。 |
 | `~/.opencodereview/{last-update-check,update.lock,update-available}` | NPM wrapper のバックグラウンド更新チェックの状態。wrapper はより新しい release があるかをポーリングし（デフォルトで約 18 分ごと）、アップグレードの案内を表示します。`OCR_NO_UPDATE=1` で無効化するか、`OCR_UPDATE_INTERVAL`（分）で間隔を調整します。静的バイナリはこれらのファイルを書き込みません。 |
 | `<repo>/.opencodereview/rule.json` | オプションのプロジェクトレベルのレビュールール——安全にコミットできます。 |
-
-OCR は `~/.opencodereview/` の外に書き込むことは決してありません（NPM が一時的にバイナリをダウンロードする場合を除く）。
-このディレクトリを削除すれば、クリーンなアンインストールが完了します。
 
 ## 関連項目
 

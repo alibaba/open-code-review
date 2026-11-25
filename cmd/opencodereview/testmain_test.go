@@ -22,6 +22,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	_ = os.Setenv(testHomeIsolatedEnv, "1")
+	_ = os.Unsetenv("OCR_HOME")
 	_ = os.Setenv("HOME", tmp)
 	_ = os.Setenv("USERPROFILE", tmp)
 

@@ -4,10 +4,25 @@
 package com.alibaba.opencodereview.idea.services
 
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class ShellEnvTest {
+    @Test
+    fun `config reads and writes stop with OCR_HOME in the CLI environment`() {
+        val cache = ShellEnv::class.java.getDeclaredField("cachedEnv").apply { isAccessible = true }
+        val previous = cache.get(ShellEnv)
+        try {
+            cache.set(ShellEnv, mapOf("OCR_HOME" to "/custom-storage"))
+            val config = ConfigService(CliService("unused-ocr-binary"))
+            assertFailsWith<CustomStorageException> { config.read() }
+            assertFailsWith<CustomStorageException> { config.set("model", "test-model") }
+        } finally {
+            cache.set(ShellEnv, previous)
+        }
+    }
+
 
     private val delim = "_OCR_ENV_DELIM_"
 

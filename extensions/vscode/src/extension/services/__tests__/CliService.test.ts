@@ -8,6 +8,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { ReviewMode } from '@shared/types';
 import { CliService } from '../CliService';
+import { ConfigService } from '../ConfigService';
 import { ReviewSession } from '../ReviewSession';
 
 describe('CliService.isAvailable', () => {
@@ -19,6 +20,22 @@ describe('CliService.isAvailable', () => {
     const svc = new CliService('definitely-not-a-real-binary-xyz');
     expect(await svc.isAvailable()).toBe(false);
   });
+});
+
+it('blocks config reads and writes with an inherited OCR_HOME', async () => {
+  const previous = process.env.OCR_HOME;
+  process.env.OCR_HOME = '/custom-storage';
+  const cli = new CliService();
+  const run = jest.spyOn(cli, 'runRaw');
+  const config = new ConfigService(cli);
+  try {
+    expect(() => config.read()).toThrow('Use the OCR CLI');
+    await expect(config.set('model', 'test-model')).rejects.toThrow('Use the OCR CLI');
+    expect(run).not.toHaveBeenCalled();
+  } finally {
+    if (previous === undefined) delete process.env.OCR_HOME;
+    else process.env.OCR_HOME = previous;
+  }
 });
 
 describe('CliService probe shell option', () => {

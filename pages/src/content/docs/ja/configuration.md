@@ -4,7 +4,11 @@ sidebar:
   order: 5
 ---
 
-設定ファイルは `~/.opencodereview/config.json` にあります。編集方法は 3 つあります。
+設定ファイルのデフォルトは `~/.opencodereview/config.json` です。CLI を永続ボリューム上で使うには、`OCR_HOME` にマウント先の絶対パス（例: `/data/ocr`）を設定します。`ocr config`、`ocr review`、`ocr viewer` で同じ保存先を使うと、保存したセッションをビューアーで読み取れます。保存先の変更は CLI で利用できます。
+
+`ocr review`、`ocr scan`、`ocr viewer` などのネイティブコマンドは、`OCR_HOME` でマウント先を指定できます。GitHub PR ヘルパーを使う場合、`OCR_HOME` は未設定または空にしてください。保存先を指定したい場合は、`ocr review` を直接実行してください。
+
+設定ファイルの編集方法は 3 つあります。
 
 - **インタラクティブ TUI** —— `ocr config provider` / `ocr config model`。ガイド付きメニューが表示されます。
 - **コマンドライン** —— `ocr config set <key> <value>`。スクリプトや CI に適しています。

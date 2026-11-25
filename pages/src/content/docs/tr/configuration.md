@@ -4,7 +4,11 @@ sidebar:
   order: 5
 ---
 
-Yapılandırma dosyası `~/.opencodereview/config.json` konumundadır. Üç şekilde düzenleyebilirsiniz:
+Varsayılan yapılandırma dosyası `~/.opencodereview/config.json` konumundadır. CLI’yi kalıcı bir birimle kullanırken `OCR_HOME` değişkenine bağlama noktasının mutlak yolunu (örneğin `/data/ocr`) verin. Görüntüleyicinin kayıtlı oturumları okuyabilmesi için `ocr config`, `ocr review` ve `ocr viewer` ile aynı depolama dizinini kullanın. Özel depolama konumu CLI üzerinden kullanılabilir.
+
+`ocr review`, `ocr scan` ve `ocr viewer` gibi yerel komutlar, bağlı depolama için `OCR_HOME` değişkenini destekler. GitHub PR yardımcısı, `OCR_HOME` değişkeninin ayarlanmamış veya boş olmasını gerektirir. Özel depolama için doğrudan `ocr review` komutunu çalıştırın.
+
+Yapılandırmayı üç şekilde düzenleyebilirsiniz:
 
 - **Etkileşimli terminal arayüzü** — Yönlendirmeli menülerle `ocr config provider` / `ocr config model`.
 - **Komut satırı** — Betikler ve CI için uygun olan `ocr config set <key> <value>`.

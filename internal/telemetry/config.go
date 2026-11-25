@@ -7,6 +7,7 @@ package telemetry
 
 import (
 	"encoding/json"
+	"github.com/alibaba/open-code-review/internal/ocrhome"
 	"os"
 	"path/filepath"
 )
@@ -126,9 +127,9 @@ func ResolveConfig(configPath string) Config {
 
 // HomeConfigPath returns the default path to ~/.opencodereview/config.json.
 func HomeConfigPath() string {
-	home, err := os.UserHomeDir()
+	home, err := ocrhome.Dir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".opencodereview", "config.json")
+	return filepath.Join(home, "config.json")
 }

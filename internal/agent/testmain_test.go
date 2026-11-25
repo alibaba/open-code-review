@@ -9,6 +9,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	_ = os.Unsetenv("OCR_HOME")
 	tmp, err := os.MkdirTemp("", "ocr-test-*")
 	if err != nil {
 		panic(err)

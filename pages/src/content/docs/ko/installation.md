@@ -203,15 +203,17 @@ fish, PowerShell 및 영구 설정 방법은 [CLI 레퍼런스](./cli-reference.
 
 ## OCR이 상태를 저장하는 위치 {#where-ocr-stores-state}
 
+`OCR_HOME`이 설정되지 않았거나 비어 있으면 CLI는 `~/.opencodereview`를 사용합니다. 다른 디렉터리를 사용하려면 OCR 실행 전에 `OCR_HOME`에 절대 경로를 지정하세요. 예를 들어 macOS나 Linux에서는 `export OCR_HOME=/data/ocr`를 실행합니다. 표의 `<storage>`는 선택한 CLI 저장 디렉터리입니다. npm 업데이트 상태와 프로젝트 규칙의 위치는 그대로 유지됩니다.
+
+기존 데이터는 자동으로 마이그레이션되지 않습니다. 계속 사용하려면 전환하기 전에 설정과 세션을 새 디렉터리에 복사하세요.
+
 | 경로 | 내용 |
 |---|---|
-| `~/.opencodereview/config.json` | LLM 엔드포인트, 언어, 텔레메트리 설정(`ocr config set`으로 관리). |
-| `~/.opencodereview/rule.json` | 선택적인 전역 리뷰 규칙. |
-| `~/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl` | 모든 리뷰 세션의 스트리밍 JSONL 기록. `ocr viewer`가 사용. |
+| `<storage>/config.json` | LLM 엔드포인트, 언어, 텔레메트리 설정(`ocr config set`으로 관리). |
+| `<storage>/rule.json` | 선택적인 전역 리뷰 규칙. |
+| `<storage>/sessions/<encoded-repo-path>/<session-id>.jsonl` | 모든 리뷰 세션의 스트리밍 JSONL 기록. `ocr viewer`가 사용. |
 | `~/.opencodereview/{last-update-check,update.lock,update-available}` | NPM 래퍼의 백그라운드 업데이트 확인 상태. 래퍼는 새 릴리스를 주기적으로(기본 약 18분마다) 확인하고 업그레이드 안내를 출력합니다. `OCR_NO_UPDATE=1`로 끄거나 `OCR_UPDATE_INTERVAL`(분 단위)로 주기를 조정합니다. 정적 바이너리는 기록하지 않음. |
 | `<repo>/.opencodereview/rule.json` | 선택적인 프로젝트별 리뷰 규칙 — 커밋해도 안전. |
-
-OCR은 `~/.opencodereview/` 밖에는 기록하지 않습니다(NPM을 통한 일시적인 바이너리 다운로드 제외). 이 디렉터리를 지우면 깔끔하게 제거됩니다.
 
 ## 관련 문서 {#see-also}
 
