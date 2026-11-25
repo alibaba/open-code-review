@@ -288,18 +288,6 @@ func (p *Provider) loadGitignorePatterns() []string {
 	return parseGitignorePatterns(data)
 }
 
-func parseGitignorePatterns(data []byte) GitignorePatterns {
-	var patterns GitignorePatterns
-	for line := range strings.SplitSeq(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		patterns = append(patterns, line)
-	}
-	return patterns
-}
-
 // isPathExcluded returns true when the given relative file path should be skipped
 // based on hardcoded dir rules or .gitignore patterns.
 //
@@ -310,7 +298,7 @@ func parseGitignorePatterns(data []byte) GitignorePatterns {
 // correct under last-match-wins. Treating negations as unmatchable made every
 // file in such a repository look excluded, so a review silently covered nothing.
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
-	return isProviderDirExcluded(relPath) || GitignorePatterns(gitignorePatterns).Matches(relPath)
+	return isProviderDirExcluded(relPath) || (GitignorePatterns{lines: gitignorePatterns}).Matches(relPath)
 }
 
 func (patterns GitignorePatterns) Matches(relPath string) bool {
@@ -318,14 +306,14 @@ func (patterns GitignorePatterns) Matches(relPath string) bool {
 }
 
 func (patterns GitignorePatterns) matches(relPath string, directory bool) bool {
-	if len(patterns) == 0 {
+	if len(patterns.lines) == 0 {
 		return false
 	}
 	relPath = filepath.ToSlash(relPath)
 	for {
-		for _, pattern := range slices.Backward(patterns) {
+		for _, pattern := range slices.Backward(patterns.lines) {
 			body, negated := strings.CutPrefix(pattern, "!")
-			if matchGitignoreEntry(relPath, body, directory) {
+			if matchGitignoreEntry(relPath, body, directory, patterns.ignoreCase) {
 				if !negated {
 					return true
 				}

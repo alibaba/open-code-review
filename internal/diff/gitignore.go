@@ -11,7 +11,10 @@ import (
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
 
-type GitignorePatterns []string
+type GitignorePatterns struct {
+	lines      []string
+	ignoreCase bool
+}
 
 func LoadGitignoreAtRef(ctx context.Context, repoDir, ref string, runner *gitcmd.Runner) (GitignorePatterns, error) {
 	if runner == nil {
@@ -19,7 +22,7 @@ func LoadGitignoreAtRef(ctx context.Context, repoDir, ref string, runner *gitcmd
 	}
 	entries, err := runner.Output(ctx, repoDir, "ls-tree", "-z", "--full-tree", "--end-of-options", ref)
 	if err != nil {
-		return nil, fmt.Errorf("locate root .gitignore at %s: %w", ref, err)
+		return GitignorePatterns{}, fmt.Errorf("locate root .gitignore at %s: %w", ref, err)
 	}
 	for entry := range strings.SplitSeq(string(entries), "\x00") {
 		metadata, name, _ := strings.Cut(entry, "\t")
@@ -32,11 +35,19 @@ func LoadGitignoreAtRef(ctx context.Context, repoDir, ref string, runner *gitcmd
 		}
 		data, err := runner.Output(ctx, repoDir, "cat-file", "blob", oid)
 		if err != nil {
-			return nil, fmt.Errorf("read root .gitignore at %s: %w", ref, err)
+			return GitignorePatterns{}, fmt.Errorf("read root .gitignore at %s: %w", ref, err)
 		}
-		return parseGitignorePatterns(data), nil
+		lines := parseGitignorePatterns(data)
+		if len(lines) == 0 {
+			break
+		}
+		ignoreCase, err := runner.ConfigBool(ctx, repoDir, "core.ignoreCase")
+		if err != nil {
+			return GitignorePatterns{}, fmt.Errorf("read core.ignoreCase: %w", err)
+		}
+		return GitignorePatterns{lines: lines, ignoreCase: ignoreCase}, nil
 	}
-	return nil, nil
+	return GitignorePatterns{}, nil
 }
 
 // ExcludedDirs is the list of directory prefixes that scanners and diff
@@ -76,8 +87,8 @@ func IsPathExcluded(repoDir, relPath string, patterns []string) bool {
 }
 
 // IsDirectoryExcluded reports whether a walker can prune this directory.
-func IsDirectoryExcluded(relPath string, patterns GitignorePatterns) bool {
-	return isProviderDirExcluded(relPath) || patterns.matches(relPath, true)
+func IsDirectoryExcluded(relPath string, patterns []string) bool {
+	return isProviderDirExcluded(relPath) || (GitignorePatterns{lines: patterns}).matches(relPath, true)
 }
 
 // MatchGitignorePattern reports whether relPath matches a single
@@ -85,5 +96,5 @@ func IsDirectoryExcluded(relPath string, patterns GitignorePatterns) bool {
 // already implements (basename match, prefix match, directory-only suffix).
 // Useful when callers want to test a single pattern in isolation.
 func MatchGitignorePattern(relPath, pat string) bool {
-	return GitignorePatterns{pat}.Matches(relPath)
+	return GitignorePatterns{lines: []string{pat}}.Matches(relPath)
 }

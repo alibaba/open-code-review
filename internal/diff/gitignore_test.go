@@ -82,7 +82,7 @@ func TestLoadGitignorePatterns(t *testing.T) {
 
 func TestLoadGitignoreAtRef(t *testing.T) {
 	repo := initBareRepo(t)
-	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("*.log\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("*.log\n out\nsrc\n!Src/\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	runGitTest(t, repo, "commit", "--allow-empty", "-qm", "No ignore file")
@@ -92,14 +92,18 @@ func TestLoadGitignoreAtRef(t *testing.T) {
 	runGitTest(t, repo, "update-index", "--cacheinfo", "120000,"+blob+",.gitignore")
 	runGitTest(t, repo, "commit", "-qm", "Symlink instead of rules")
 	t.Setenv("GIT_GLOB_PATHSPECS", "1")
-	patterns, err := LoadGitignoreAtRef(t.Context(), repo, "HEAD~1", nil)
-	if err != nil || !patterns.Matches("test.log") {
-		t.Fatalf("regular .gitignore: patterns=%q err=%v", patterns, err)
+	for _, setting := range []string{"false", "true"} {
+		runGitTest(t, repo, "config", "core.ignoreCase", setting)
+		patterns, err := LoadGitignoreAtRef(t.Context(), repo, "HEAD~1", nil)
+		if err != nil || !patterns.Matches("test.log") || patterns.Matches("out/main.go") ||
+			!patterns.Matches(" out/main.go") || patterns.Matches("src/main.go") != (setting == "false") {
+			t.Fatalf("regular .gitignore with core.ignoreCase=%s: patterns=%+v err=%v", setting, patterns, err)
+		}
 	}
 	for _, ref := range []string{"HEAD~2", "HEAD"} {
 		patterns, err := LoadGitignoreAtRef(t.Context(), repo, ref, nil)
-		if err != nil || len(patterns) != 0 {
-			t.Fatalf("%s: patterns=%q err=%v", ref, patterns, err)
+		if err != nil || len(patterns.lines) != 0 {
+			t.Fatalf("%s: patterns=%+v err=%v", ref, patterns, err)
 		}
 	}
 	if _, err := LoadGitignoreAtRef(t.Context(), repo, "absent-revision", nil); err == nil {
