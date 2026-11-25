@@ -27,17 +27,17 @@ Copilot CLI yükleyicisi şu anda doğrudan eklenti yüklemelerinin (depo/yol/UR
 Beceriyi Copilot CLI'nin keşfettiği bir dizine kopyalayın. **Proje düzeyinde** (ekibin paylaşması için commit'e ekleyin):
 
 ```bash
-mkdir -p .github/skills/open-code-review
-curl -o .github/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p .github/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C .github/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 **Kullanıcı düzeyinde** (makinedeki tüm projelerde):
 
 ```bash
-mkdir -p ~/.copilot/skills/open-code-review
-curl -o ~/.copilot/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p ~/.copilot/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C ~/.copilot/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 Copilot CLI, projedeki `.agents/skills/` ve `.claude/skills/` dizinlerini de keşfeder. Aynı adlı kişisel beceriye göre proje becerisi önceliklidir. Oturum içinde `/skills list` (dışında `copilot skill list`) ile yüklenenleri kontrol edin. Elle kopyalanan beceriler `/skills reload` veya yeni oturumla etkinleşir. Yüklü eklentiler yeniden yüklenerek (`copilot plugin install`) veya `copilot plugin update` ile güncellenir.
@@ -48,14 +48,14 @@ Beceriyi `/open-code-review` ile açıkça belirtin veya görevi anlatın; Copil
 
 ```
 /open-code-review
-/open-code-review review this PR against main
+/open-code-review 42
 /open-code-review focus on race conditions in commit abc123
 ```
 
 | İsteğiniz | Becerinin çalıştırdığı komut |
 | --- | --- |
 | “değişikliklerimi incele” | `ocr review --audience agent` (hazırlanmış, hazırlanmamış, izlenmeyen) |
-| “bu PR'ı incele” | `ocr review --from main --to <branch>` |
+| `42` | `python3 "$SKILL_DIR/scripts/review_pr.py" 42` |
 | “abc123 commit'ini incele” | `ocr review --commit abc123` |
 
 Beceri, `ocr` aracını kendi yapılandırılmış modeliyle çalıştırır ve bulguları önem derecesine göre gruplandırır. `ocr` için ayrı LLM yapılandırmak istemiyorsanız [görev devri modunu](../delegate/) kullanın: modeli ana ajan (Copilot) sağlar; `ocr` yalnızca dosyaları seçer ve kuralları çözümler.
