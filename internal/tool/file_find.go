@@ -204,7 +204,7 @@ func (p *FileFindProvider) listWalkFiles(ctx context.Context) ([]string, error) 
 		rel = filepath.ToSlash(rel)
 
 		if d.IsDir() {
-			if diff.IsPathExcluded(root, rel, gitignorePatterns) {
+			if diff.IsDirectoryExcluded(rel, gitignorePatterns) {
 				return filepath.SkipDir
 			}
 			return nil

@@ -39,10 +39,18 @@ var cancelGracePeriod = 5 * time.Second
 // semaphore. All git command invocations should go through a shared Runner
 // instance so that the total system-wide subprocess count stays bounded.
 type Runner struct {
-	sem            chan struct{}
-	localOnly      bool
-	configArgs     []string
-	configuredRepo string
+	sem             chan struct{}
+	localOnly       bool
+	configArgs      []string
+	configuredRepo  string
+	effectiveConfig bool
+}
+
+func (r *Runner) ConfigBool(ctx context.Context, repoDir, key string) (bool, error) {
+	view := *r
+	view.effectiveConfig = true
+	setting, err := view.Output(ctx, repoDir, "config", "--type=bool", "--default=false", "--get", key)
+	return strings.TrimSpace(string(setting)) == "true", err
 }
 
 func (r *Runner) LocalOnly() *Runner {
@@ -137,6 +145,11 @@ func (r *Runner) command(ctx context.Context, repoDir string, args ...string) *e
 			cmd.Env = append(cmd.Env, entry)
 		}
 		cmd.Env = append(cmd.Env, "GIT_NO_LAZY_FETCH=1", "GIT_ALLOW_PROTOCOL=", "GIT_OPTIONAL_LOCKS=0")
+	} else if r.effectiveConfig {
+		cmd.Env = slices.DeleteFunc(cmd.Environ(), func(entry string) bool {
+			key, _, _ := strings.Cut(entry, "=")
+			return strings.EqualFold(key, "GIT_CONFIG")
+		})
 	}
 	return cmd
 }

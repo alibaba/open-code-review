@@ -98,7 +98,7 @@ func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileS
 // Enumerate returns one ScanItem per reviewable file. Binaries are emitted
 // with empty Content + IsBinary=true so previews can show them as excluded.
 func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
-	files, err := p.listFiles(ctx)
+	files, ignored, err := p.listFiles(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -109,8 +109,6 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 			return nil, err
 		}
 	}
-
-	gitignorePatterns := diff.LoadGitignorePatterns(p.repoDir)
 
 	var out []model.ScanItem
 	for _, rel := range files {
@@ -123,7 +121,7 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		if rel == "" {
 			continue
 		}
-		if diff.IsPathExcluded(p.repoDir, rel, gitignorePatterns) {
+		if diff.ProviderDirPrefix(rel) != "" || ignored[rel] {
 			continue
 		}
 		full := filepath.Join(p.repoDir, rel)
@@ -174,11 +172,12 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 // negation rules). In a non-git directory it falls back to filepath.WalkDir
 // with the simpler in-process gitignore handling (root .gitignore + the
 // internal ExcludedDirs blocklist).
-func (p *Provider) listFiles(ctx context.Context) ([]string, error) {
+func (p *Provider) listFiles(ctx context.Context) ([]string, map[string]bool, error) {
 	if p.isGitRepo(ctx) {
 		return p.listFilesViaGit(ctx)
 	}
-	return p.listFilesViaWalk(ctx)
+	files, err := p.listFilesViaWalk(ctx)
+	return files, nil, err
 }
 
 // isGitRepo reports whether p.repoDir is inside a git working tree.
@@ -187,29 +186,34 @@ func (p *Provider) isGitRepo(ctx context.Context) bool {
 	return cmd.Run() == nil
 }
 
-func (p *Provider) listFilesViaGit(ctx context.Context) ([]string, error) {
+func (p *Provider) listFilesViaGit(ctx context.Context) ([]string, map[string]bool, error) {
 	tracked, err := p.gitLs(ctx, "-z")
 	if err != nil {
-		return nil, fmt.Errorf("git ls-files (tracked): %w", err)
+		return nil, nil, fmt.Errorf("git ls-files (tracked): %w", err)
 	}
 	untracked, err := p.gitLs(ctx, "-z", "--others", "--exclude-standard")
 	if err != nil {
-		return nil, fmt.Errorf("git ls-files (untracked): %w", err)
+		return nil, nil, fmt.Errorf("git ls-files (untracked): %w", err)
 	}
 
-	seen := make(map[string]struct{}, len(tracked)+len(untracked))
+	ignoredPaths, err := p.gitLs(ctx, "-z", "--cached", "--ignored", "--exclude-standard")
+	if err != nil {
+		return nil, nil, fmt.Errorf("git ls-files (ignored tracked): %w", err)
+	}
+	ignored := make(map[string]bool, len(ignoredPaths))
+	for _, name := range ignoredPaths {
+		ignored[name] = true
+	}
+	seen := make(map[string]bool, len(tracked)+len(untracked))
 	all := make([]string, 0, len(tracked)+len(untracked))
 	for _, f := range append(tracked, untracked...) {
-		if f == "" {
+		if seen[f] {
 			continue
 		}
-		if _, ok := seen[f]; ok {
-			continue
-		}
-		seen[f] = struct{}{}
+		seen[f] = true
 		all = append(all, f)
 	}
-	return all, nil
+	return all, ignored, nil
 }
 
 // listFilesViaWalk recursively walks p.repoDir collecting regular files.
@@ -244,7 +248,7 @@ func (p *Provider) listFilesViaWalk(ctx context.Context) ([]string, error) {
 
 		if d.IsDir() {
 			// Skip the whole subtree if the dir itself is excluded.
-			if diff.IsPathExcluded(p.repoDir, rel, gitignorePatterns) {
+			if diff.IsDirectoryExcluded(rel, gitignorePatterns) {
 				return filepath.SkipDir
 			}
 			return nil

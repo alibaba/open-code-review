@@ -410,6 +410,19 @@ func TestProvider_Enumerate_ResolvedAliasSelectsTrackedSpelling(t *testing.T) {
 	}
 }
 
+func TestProvider_Enumerate_IgnoredTrackedAlias(t *testing.T) {
+	repo := initTestRepo(t)
+	writeFile(t, repo, "src/main.go", []byte("package main\n"))
+	if err := os.Symlink("src/main.go", filepath.Join(repo, "alias.go")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	gitCommit(t, repo, "track alias")
+	writeFile(t, repo, ".gitignore", []byte("alias.go\n"))
+	if got := enumeratePaths(t, repo, []string{"alias.go"}); len(got) != 0 {
+		t.Errorf("ignored alias selected %q, want no files", got)
+	}
+}
+
 // TestProvider_ResolveSelector_RepositoryBoundary covers selectors that
 // resolve to the repository root or outside it: no tracked entry can match
 // the result, so the scan stays a clean skip rather than widening to whatever

@@ -175,7 +175,9 @@ func TestProvider_Enumerate_NonGitDirectory(t *testing.T) {
 	repo := t.TempDir()
 	writeFile(t, repo, "main.go", []byte("package main\n"))
 	writeFile(t, repo, "pkg/util.go", []byte("package pkg\n"))
-	writeFile(t, repo, ".gitignore", []byte("ignored.txt\n"))
+	writeFile(t, repo, ".gitignore", []byte("*\n!*/\n!.gitignore\n!*.go\n!*.js\n!logs/keep.log\n"))
+	writeFile(t, repo, "logs/keep.log", []byte("keep\n"))
+	writeFile(t, repo, "sub/logs/keep.log", []byte("ignore\n"))
 	writeFile(t, repo, "ignored.txt", []byte("should be excluded by root .gitignore\n"))
 	writeFile(t, repo, "node_modules/lib/foo.js", []byte("module.exports = 1;\n")) // should be skipped via ExcludedDirs
 
@@ -190,7 +192,7 @@ func TestProvider_Enumerate_NonGitDirectory(t *testing.T) {
 	}
 	sort.Strings(paths)
 
-	want := []string{".gitignore", "main.go", "pkg/util.go"}
+	want := []string{".gitignore", "logs/keep.log", "main.go", "pkg/util.go"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Errorf("paths = %v, want %v (ignored.txt must be filtered by .gitignore, node_modules/* by ExcludedDirs)", paths, want)
 	}
@@ -236,4 +238,106 @@ func TestProvider_Enumerate_PathFilter(t *testing.T) {
 	if !reflect.DeepEqual(paths, want) {
 		t.Errorf("paths = %v, want %v", paths, want)
 	}
+}
+
+func TestProvider_Enumerate_GitignoreAncestorRules(t *testing.T) {
+	repo := initTestRepo(t)
+	writeFile(t, repo, ".gitignore", []byte("src/**\n!src/*.go\ndocs/generated\n"))
+	writeFile(t, repo, "src/a.go", []byte("package src\n"))
+	writeFile(t, repo, "src/sub/b.go", []byte("package sub\n"))
+	writeFile(t, repo, "docs/generated/c.go", []byte("package generated\n"))
+	writeFile(t, repo, "nested/docs/generated/d.go", []byte("package generated\n"))
+	gitCommit(t, repo, "init")
+
+	got, err := NewProvider(repo, nil, nil, 0).Enumerate(context.Background())
+	if err != nil {
+		t.Fatalf("Enumerate: %v", err)
+	}
+	paths := make([]string, 0, len(got))
+	for _, it := range got {
+		paths = append(paths, it.Path)
+	}
+	sort.Strings(paths)
+	// src/a.go: src/** ignores the contents, but the directory itself stays
+	// unignored so !src/*.go re-includes it.
+	// src/sub/b.go: excluded — the negation only reaches direct children.
+	// docs/generated/c.go: excluded — the root-relative rule matches its own
+	// subtree (the control).
+	// nested/docs/generated/d.go: included — an internal slash keeps the rule
+	// relative to the .gitignore location, so the unrelated subtree survives.
+	want := []string{".gitignore", "nested/docs/generated/d.go", "src/a.go"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Errorf("paths = %v, want %v", paths, want)
+	}
+}
+
+func TestProvider_Enumerate_GitignoreAncestorExceptions(test *testing.T) {
+	cases := []struct {
+		name     string
+		patterns string
+		path     string
+	}{
+		{
+			name:     "slashless globstar negation",
+			patterns: "cache\n!**cache\n",
+			path:     "src/cache/a.go",
+		},
+		{
+			name:     "path wildcard with nested exception",
+			patterns: "src/*\n!src/ok/\n!src/ok/nested/*.go\n",
+			path:     "src/ok/nested/a.go",
+		},
+		{
+			name:     "anchored wildcard with nested exception",
+			patterns: "/*\n!/.gitignore\n!/src/\n!*.go\n",
+			path:     "src/inner/a.go",
+		},
+	}
+	for _, testCase := range cases {
+		test.Run(testCase.name, func(test *testing.T) {
+			repo := initTestRepo(test)
+			writeFile(test, repo, ".gitignore", []byte(testCase.patterns))
+			writeFile(test, repo, testCase.path, []byte("package fixture\n"))
+			gitCommit(test, repo, "init")
+
+			items, err := NewProvider(repo, nil, nil, 0).Enumerate(context.Background())
+			if err != nil {
+				test.Fatalf("Enumerate: %v", err)
+			}
+			paths := make([]string, 0, len(items))
+			for _, item := range items {
+				paths = append(paths, item.Path)
+			}
+			sort.Strings(paths)
+			want := []string{".gitignore", testCase.path}
+			if !reflect.DeepEqual(paths, want) {
+				test.Errorf("paths = %v, want %v", paths, want)
+			}
+		})
+	}
+}
+
+func TestProvider_Enumerate_NestedIgnoreBeforeAndAfterStaging(t *testing.T) {
+	repo := initTestRepo(t)
+	writeFile(t, repo, "tracked.log", []byte("tracked before ignore rules\n"))
+	writeFile(t, repo, "pkg/hidden.go", []byte("package fixture\n"))
+	gitCommit(t, repo, "track log")
+	writeFile(t, repo, ".gitignore", []byte("generated/\n*.log\n"))
+	writeFile(t, repo, "pkg/.gitignore", []byte("!generated/\nhidden.go\n"))
+	gitCommit(t, repo, "set ignore rules")
+	for _, name := range []string{"pkg/generated/a.go", "generated/ignored.go", "vendor/blocked.go"} {
+		writeFile(t, repo, name, []byte("package fixture\n"))
+	}
+	want := []string{".gitignore", "pkg/.gitignore", "pkg/generated/a.go"}
+	check := func() {
+		t.Helper()
+		if got := enumeratePaths(t, repo, nil); !reflect.DeepEqual(got, want) {
+			t.Errorf("enumerated %q, want %q", got, want)
+		}
+	}
+	check()
+	if output, err := exec.Command("git", "-C", repo, "add", "--", "pkg/generated/a.go").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, output)
+	}
+	check()
 }

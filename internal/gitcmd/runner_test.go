@@ -76,6 +76,24 @@ func TestRunner_New(t *testing.T) {
 	}
 }
 
+func TestConfigBoolReadsEffectiveRepositoryConfig(t *testing.T) {
+	repo := initRepo(t)
+	runner := New(1)
+	if _, err := runner.Run(t.Context(), repo, "config", "core.ignoreCase", "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG", os.DevNull)
+	if value, err := runner.ConfigBool(t.Context(), repo, "core.ignoreCase"); err != nil || !value {
+		t.Fatalf("repository setting: got %t, err %v", value, err)
+	}
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.ignoreCase")
+	t.Setenv("GIT_CONFIG_VALUE_0", "false")
+	if value, err := runner.ConfigBool(t.Context(), repo, "core.ignoreCase"); err != nil || value {
+		t.Fatalf("environment override: got %t, err %v", value, err)
+	}
+}
+
 func TestLocalRepositoryRejectsRedirectsAndDisablesFilters(t *testing.T) {
 	repo, other := initRepo(t), initRepo(t)
 	runner := New(1)

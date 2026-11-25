@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -64,6 +65,84 @@ func TestRunPreviewJSONFormat(t *testing.T) {
 	}
 	if got.Entries[0].ExcludeReason != model.ExcludeExtension {
 		t.Errorf("exclude_reason = %q, want %q", got.Entries[0].ExcludeReason, model.ExcludeExtension)
+	}
+}
+
+func TestReviewPreviewReincludedDirectory(t *testing.T) {
+	freshOCRHome(t)
+	repo := initTestGitRepo(t)
+	gitCommitFile(t, repo, ".gitignore", "/*/\n!/src/\n", "ignore all directories except src")
+	for _, dir := range []string{"src", "other"} {
+		if err := os.Mkdir(filepath.Join(repo, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, dir, "a.go"), []byte("package fixture\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(t *testing.T, args ...string) {
+		t.Helper()
+		preview := previewJSON(t, repo, args...)
+		if len(preview.Entries) != 1 || preview.Entries[0].Path != "src/a.go" || !preview.Entries[0].WillReview {
+			t.Errorf("preview entries = %+v, want only src/a.go for review", preview.Entries)
+		}
+	}
+	t.Run("untracked", func(t *testing.T) { check(t) })
+	gitIn(t, repo, "add", "src/a.go")
+	gitIn(t, repo, "add", "-f", "other/a.go")
+	gitIn(t, repo, "commit", "-qm", "add both files")
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("*\n!*/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("commit", func(t *testing.T) { check(t, "--commit", "HEAD") })
+	t.Run("range", func(t *testing.T) { check(t, "--from", "HEAD~1", "--to", "HEAD") })
+}
+
+func TestReviewPreviewNestedGitignore(t *testing.T) {
+	freshOCRHome(t)
+	repo := initTestGitRepo(t)
+	gitCommitFile(t, repo, ".gitignore", "generated\n", "ignore generated paths")
+	writeRulesCheckTestFile(t, repo, "pkg/.gitignore", "!generated/\n")
+	gitIn(t, repo, "add", "pkg/.gitignore")
+	gitIn(t, repo, "commit", "-qm", "allow package sources")
+	for _, name := range []string{"pkg/generated/a.go", "generated/ignored.go", "vendor/blocked.go"} {
+		writeRulesCheckTestFile(t, repo, name, "package fixture\n")
+	}
+	preview := previewJSON(t, repo)
+	if len(preview.Entries) != 1 || preview.Entries[0].Path != "pkg/generated/a.go" || !preview.Entries[0].WillReview {
+		t.Errorf("preview entries = %+v, want only pkg/generated/a.go", preview.Entries)
+	}
+}
+
+func TestReviewPreviewGitignorePatternSyntax(t *testing.T) {
+	freshOCRHome(t)
+	repo := initTestGitRepo(t)
+	rules := []string{"build[!0-9]", "src/", "/*,*/", "!{src,lib}/", "pkg/[!/]x.go", `old\/gen/*.go`, "file[![:digit:]].go", "build*//", `**\/keep.go`}
+	gitCommitFile(t, repo, ".gitignore", strings.Join(rules, "\n")+"\n", "set ignore rules")
+	for _, name := range []string{
+		"build1/a.go", "buildX/a.go", "src/a.go", "{src,lib}/a.go", "pkg/ax.go", "old/gen/a.go",
+		"file1.go", "fileX.go", "build-output/test.go", "keep.go", "deep/keep.go", "deep/sub/keep.go",
+	} {
+		writeRulesCheckTestFile(t, repo, name, "package fixture\n")
+	}
+	visible, err := runGitCmdStdout(repo, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Split(strings.TrimSuffix(string(visible), "\x00"), "\x00")
+	gitIn(t, repo, "add", "-f", ".")
+	gitIn(t, repo, "commit", "-qm", "commit both ignored and visible paths")
+	for _, args := range [][]string{{"--commit", "HEAD"}, {"--from", "HEAD~1", "--to", "HEAD"}} {
+		var got []string
+		for _, entry := range previewJSON(t, repo, args...).Entries {
+			if entry.WillReview {
+				got = append(got, entry.Path)
+			}
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Errorf("preview %v = %q, git lists %q", args, got, want)
+		}
 	}
 }
 
