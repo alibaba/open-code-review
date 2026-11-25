@@ -50,6 +50,7 @@ and add:
 | `BITBUCKET_API_TOKEN` | Alternative | Yes | Scoped user API token; use with `BITBUCKET_API_TOKEN_EMAIL` |
 | `BITBUCKET_API_TOKEN_EMAIL` | With API token | No | Atlassian account email belonging to `BITBUCKET_API_TOKEN` |
 | `OCR_LLM_USE_ANTHROPIC` | No | No | Set to `true` for the Anthropic API format; defaults to `false` |
+| `OCR_LANGUAGE` | No | No | Review output language, for example `Chinese` or `English` |
 
 Configure **one** Bitbucket authentication method:
 

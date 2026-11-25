@@ -34,6 +34,8 @@ The bot only needs to read changes and comment on them. In the project's (or `Al
 
 Copy `post_review.py` into your repository (or fetch it in the job) and wire it into your Jenkins job — see the [`Jenkinsfile`](Jenkinsfile) in this directory. Store `GERRIT_HTTP_USER` / `GERRIT_HTTP_PASSWORD` as Jenkins credentials, plus the LLM API token for the review step itself. `ocr` resolves `OCR_LLM_URL` / `OCR_LLM_TOKEN` / `OCR_LLM_MODEL` directly from the environment — no `ocr config set` needed, so the token is never written to disk on a shared agent.
 
+Set the optional `OCR_LANGUAGE` environment variable to choose the review output language, for example `Chinese`.
+
 ## Configuration Reference
 
 Every value can be passed via flag or environment variable; **flags override the environment**. Run `python3 post_review.py -h` for the same list.

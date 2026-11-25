@@ -14,9 +14,24 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+func TestScanTemplateUsesEnvironmentLanguageWithoutConfig(t *testing.T) {
+	t.Setenv("OCR_LANGUAGE", "Chinese")
+
+	scanTpl, err := template.LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+	scanTpl.ApplyLanguage(configuredLanguage(nil))
+
+	if !strings.Contains(scanTpl.MainTask.Messages[0].Content, "Chinese") {
+		t.Fatal("scan template did not apply OCR_LANGUAGE without a config file")
+	}
+}
 
 func TestExecuteScanRejectsFileReadDiff(t *testing.T) {
 	freshOCRHome(t)

@@ -192,9 +192,7 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	}
 	// Apply language to the scan template too (loadLLMRuntime only mutates
 	// the diff-review template it was handed).
-	if rt.AppCfg != nil {
-		scanTpl.ApplyLanguage(rt.AppCfg.Language)
-	}
+	scanTpl.ApplyLanguage(configuredLanguage(rt.AppCfg))
 
 	// Scan mode always reads file contents from the working tree.
 	fileReader := &tool.FileReader{
