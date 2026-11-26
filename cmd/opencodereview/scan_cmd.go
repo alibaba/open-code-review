@@ -84,7 +84,7 @@ var scanCmd = &cobra.Command{
 		if err := validateScanOptions(&scanOpts); err != nil {
 			return err
 		}
-		return executeScanContext(cmd.Context(), scanOpts)
+		return executeScanContext(cmd.Context(), scanOpts, cmd.Flags().Changed("path"))
 	},
 }
 
@@ -108,10 +108,15 @@ func splitPaths(raw string) []string {
 }
 
 func executeScan(opts scanOptions) error {
-	return executeScanContext(context.Background(), opts)
+	return executeScanContext(context.Background(), opts, opts.paths != "")
 }
 
-func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
+func executeScanContext(ctx context.Context, opts scanOptions, pathSupplied bool) (retErr error) {
+	scanPaths := splitPaths(opts.paths)
+	if pathSupplied && len(scanPaths) == 0 {
+		return errors.New("--path requires at least one file or directory")
+	}
+
 	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
 	if err != nil {
 		return err
@@ -151,8 +156,6 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	if opts.maxTokensBudget > 0 {
 		budget = int64(opts.maxTokensBudget)
 	}
-
-	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
 		maxTokens, err := previewMaxTokens(scanTpl.MaxTokens, opts.maxTokens)
