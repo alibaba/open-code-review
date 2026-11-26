@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
@@ -157,6 +158,10 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		content, err := os.ReadFile(full)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read %s: %v\n", rel, err)
+			continue
+		}
+		if !utf8.Valid(content) {
+			out = append(out, model.ScanItem{Path: rel, InvalidUTF8: true})
 			continue
 		}
 		out = append(out, model.ScanItem{

@@ -333,9 +333,13 @@ func sarifInvocationFromRun(warnings []agent.AgentWarning, manifest *session.Run
 		if manifest != nil && isSubtaskErrorType(w.Type) {
 			continue
 		}
+		message := w.Message
+		if w.Type == string(model.ExcludeInvalidUTF8) {
+			message = w.File + ": " + message
+		}
 		notif := sarifNotification{
 			Level:   "warning",
-			Message: sarifMessage{Text: w.Message},
+			Message: sarifMessage{Text: message},
 		}
 		inv.ToolExecutionNotifications = append(inv.ToolExecutionNotifications, notif)
 	}

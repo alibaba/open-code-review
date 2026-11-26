@@ -844,7 +844,7 @@ func emitRunResult(
 
 	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 && analysis == nil {
 		if outputFormat == "json" {
-			return outputJSONNoFiles(traceID, llmIdentity, out)
+			return outputJSONNoFiles(traceID, llmIdentity, ag.Warnings(), out)
 		}
 		return outputSARIF(nil, Version, ag.Warnings(), manifest, out)
 	}

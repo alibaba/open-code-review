@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 func TestParseDiffText_RealGitPathHeaders(t *testing.T) {
@@ -167,6 +169,57 @@ func TestParseDiffText_RealGitPathHeaders(t *testing.T) {
 						t.Errorf("changes = +%d/-%d, want +%d/-%d", parsed.Insertions, parsed.Deletions, wantInsertions, wantDeletions)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestMixedEncodingDiffs(t *testing.T) {
+	dir := t.TempDir()
+	runGitTest(t, dir, "init")
+	runGitTest(t, dir, "config", "user.email", "test@example.com")
+	runGitTest(t, dir, "config", "user.name", "test")
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const invalid = "// \xc4\xe3\xba\xc3\n"
+	const unicodeLine = "// \u4f60\u597d \ufffd"
+	padding := strings.Repeat("// unchanged\n", 10)
+	write("old.go", invalid)
+	write("snapshot.go", invalid+padding+"// before\n")
+	write("ok.go", unicodeLine+"\r\n"+padding+"// old\r\n")
+	runGitTest(t, dir, "add", ".")
+	runGitTest(t, dir, "commit", "-m", "base")
+	write("old.go", "// fixed\n")
+	write("snapshot.go", invalid+padding+"// after\n")
+	write("ok.go", unicodeLine+"\r\n"+padding+"// new \u597d\r\n")
+	runGitTest(t, dir, "add", ".")
+	runGitTest(t, dir, "commit", "-m", "head")
+	for name, provider := range map[string]*Provider{
+		"commit": NewCommitProvider(dir, "HEAD", nil),
+		"range":  NewProvider(dir, "HEAD^", "HEAD", nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			diffs, err := provider.GetDiff(t.Context())
+			if err != nil || len(diffs) != 3 {
+				t.Fatalf("GetDiff returned %d items, %v", len(diffs), err)
+			}
+			for _, d := range diffs {
+				if d.NewPath != "ok.go" {
+					if !d.InvalidUTF8 || d.Diff != "" || d.NewFileContent != "" {
+						t.Errorf("retained invalid source: %+v", d)
+					}
+					continue
+				}
+				for snippet, line := range map[string]int{unicodeLine: 1, "// new \u597d": 12, "// old": 12} {
+					cm := model.LlmComment{ExistingCode: snippet}
+					if !ResolveComment(&cm, &d) || cm.StartLine != line || cm.EndLine != line {
+						t.Errorf("resolve %q: got %d-%d, want %d", snippet, cm.StartLine, cm.EndLine, line)
+					}
+				}
 			}
 		})
 	}

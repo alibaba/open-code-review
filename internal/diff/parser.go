@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -100,7 +101,13 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	defer cancel()
 	diffs := ParsePatch(diffText)
 	for index := range diffs {
-		finalizeDiff(ctx, &diffs[index], repoDir, ref, runner)
+		d := &diffs[index]
+		finalizeDiff(ctx, d, repoDir, ref, runner)
+		if !utf8.ValidString(d.Diff) || !utf8.ValidString(d.NewFileContent) {
+			d.InvalidUTF8 = true
+			d.Diff = ""
+			d.NewFileContent = ""
+		}
 	}
 	return diffs, nil
 }

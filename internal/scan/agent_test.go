@@ -591,3 +591,50 @@ func TestScanAgent_WaitBackground_NoLeakOnRun(t *testing.T) {
 		t.Errorf("last session JSONL record type = %q, want session_end", lastRec["type"])
 	}
 }
+
+func TestScanSkipsInvalidUTF8(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	const valid = "// \u4f60\u597d \ufffd\r\n"
+	writeFile(t, dir, "valid.go", []byte(valid))
+	writeFile(t, dir, "legacy.go", []byte("// \xc4\xe3\xba\xc3\n"))
+	for _, tc := range []struct {
+		name     string
+		paths    []string
+		selected int
+	}{
+		{"mixed", nil, 1},
+		{"all skipped", []string{"legacy.go"}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeScanClient{responses: []*llm.ChatResponse{scanTaskDoneResponse()}}
+			args := Args{
+				RepoDir: dir, Paths: tc.paths, Template: makeTemplateWithFullScan(),
+				LLMClient: client, Model: "test",
+				MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
+				SkipPlan:     true, SkipDedup: true, SkipSummary: true,
+			}
+			preview, err := Preview(t.Context(), args)
+			if err != nil || preview.ReviewableCount != tc.selected || preview.ExcludedCount != 1 {
+				t.Fatalf("Preview: %+v, %v", preview, err)
+			}
+			for _, e := range preview.Entries {
+				if e.Path == "legacy.go" && (e.WillReview || e.ExcludeReason != model.ExcludeInvalidUTF8) {
+					t.Fatalf("unexpected preview entry: %+v", e)
+				}
+			}
+			a := NewAgent(args)
+			_, err = a.Run(t.Context())
+			if err != nil || a.FilesReviewed() != int64(tc.selected) || client.calls != tc.selected {
+				t.Fatalf("Run: %d reviewed, %d calls, %v", a.FilesReviewed(), client.calls, err)
+			}
+			w := a.Warnings()
+			if len(w) != 1 || w[0].File != "legacy.go" || w[0].Type != "invalid_utf8" {
+				t.Fatalf("warnings = %+v", w)
+			}
+			if tc.selected > 0 && a.Diffs()[0].NewFileContent != valid {
+				t.Fatalf("valid content changed: %q", a.Diffs()[0].NewFileContent)
+			}
+		})
+	}
+}

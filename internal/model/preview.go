@@ -22,6 +22,7 @@ const (
 	ExcludeProviderDirectory ExcludeReason = "provider_directory"
 	ExcludeDeleted           ExcludeReason = "deleted"
 	ExcludeBinary            ExcludeReason = "binary"
+	ExcludeInvalidUTF8       ExcludeReason = "invalid_utf8"
 	ExcludeTooLarge          ExcludeReason = "too_large"
 )
 
@@ -30,7 +31,7 @@ const (
 func (r ExcludeReason) IsExclusion() bool {
 	switch r {
 	case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath, ExcludeSecret,
-		ExcludeProviderDirectory, ExcludeDeleted, ExcludeBinary, ExcludeTooLarge:
+		ExcludeProviderDirectory, ExcludeDeleted, ExcludeBinary, ExcludeInvalidUTF8, ExcludeTooLarge:
 		return true
 	default:
 		return false

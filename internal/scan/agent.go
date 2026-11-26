@@ -437,6 +437,9 @@ func (a *Agent) selectScanItems(items []model.ScanItem) []scanSelection {
 			item:   it,
 			reason: a.whyExcluded(it),
 		}
+		if decision.reason == model.ExcludeNone && it.InvalidUTF8 {
+			decision.reason = model.ExcludeInvalidUTF8
+		}
 		if decision.reason == model.ExcludeNone && limit > 0 {
 			decision.tokens = llm.CountTokens(it.Content)
 			if decision.tokens > limit {
@@ -462,6 +465,10 @@ func (a *Agent) logSelection(decisions []scanSelection) {
 	staticSkipped := 0
 	for _, decision := range decisions {
 		if decision.reason == model.ExcludeNone || decision.reason == model.ExcludeTooLarge {
+			continue
+		}
+		if decision.reason == model.ExcludeInvalidUTF8 {
+			a.recordWarning(string(decision.reason), decision.item.Path, "Skipped file containing invalid UTF-8.")
 			continue
 		}
 		if decision.item.IsBinary {
