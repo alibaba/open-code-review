@@ -77,18 +77,20 @@ func (c *Client) CallTool(ctx context.Context, req intent.LLMRequest) (intent.To
 type openAIResponse struct {
 	Choices []struct {
 		Message struct {
-			ToolCalls []struct {
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
+			ToolCalls []openAIToolCall `json:"tool_calls"`
 		} `json:"message"`
 	} `json:"choices"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+type openAIToolCall struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 func (c *Client) callOpenAI(ctx context.Context, req intent.LLMRequest) (intent.ToolCall, error) {
@@ -128,7 +130,10 @@ func (c *Client) callOpenAI(ctx context.Context, req intent.LLMRequest) (intent.
 	if len(resp.Choices) == 0 {
 		return intent.ToolCall{}, fmt.Errorf("openai response contained no choices")
 	}
-	calls := resp.Choices[0].Message.ToolCalls
+	var calls []openAIToolCall
+	for _, choice := range resp.Choices {
+		calls = append(calls, choice.Message.ToolCalls...)
+	}
 	if len(calls) != 1 {
 		return intent.ToolCall{}, fmt.Errorf("openai response contained %d tool calls, want exactly 1; the endpoint may not support forced tool calls", len(calls))
 	}
