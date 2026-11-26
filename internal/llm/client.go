@@ -625,6 +625,10 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 		openaiopt.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
+	// nonRetryableQuotaMiddleware registers ahead of retryCodesMiddleware so its
+	// x-should-retry: false runs outermost on the return path, preventing SDK
+	// retries on terminal budget/quota 429s even when RetryCodes includes 429.
+	opts = append(opts, openaiopt.WithMiddleware(nonRetryableQuotaMiddleware()))
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
 	}
@@ -1233,6 +1237,7 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		)
 	}
 
+	opts = append(opts, option.WithMiddleware(nonRetryableQuotaMiddleware()))
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
 	}
@@ -1292,6 +1297,7 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	}
 	// ExtraHeaders are applied per request in CompletionsWithCtx, where the
 	// session key template can expand — same as the plain Anthropic client.
+	opts = append(opts, option.WithMiddleware(nonRetryableQuotaMiddleware()))
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
 	}

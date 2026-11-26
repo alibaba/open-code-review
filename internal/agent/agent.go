@@ -677,11 +677,21 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	groupResult := groupDiffs(ctx, nonDeleted, a.args.LLMClient, a.args.Model,
 		a.args.Template, llmloop.PromptTokenLimit(a.args.Template.MaxTokens),
 		&groupingSessionOpts{session: a.session, provider: a.args.Provider, model: a.args.Model})
-	groups := groupResult.groups
-	a.fileGroups = groups
 	if groupResult.usage != nil {
 		a.runner.RecordUsage(groupResult.usage)
 	}
+	if groupResult.err != nil {
+		a.budgetExceeded.Store(true)
+		a.recordWarning("provider_budget_exceeded", "", groupResult.err.Error())
+		if b := a.session.Manifest(); b != nil {
+			if err := b.SetPendingFailureCause(session.FailureBudget, "provider budget or quota exceeded"); err != nil {
+				a.recordWarning("manifest_error", "", err.Error())
+			}
+		}
+		return nil, fmt.Errorf("provider budget exceeded: %w", groupResult.err)
+	}
+	groups := groupResult.groups
+	a.fileGroups = groups
 
 	var wg sync.WaitGroup
 
@@ -692,6 +702,9 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 	sem := make(chan struct{}, concurrency)
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute * time.Duration(a.args.Template.ReviewRounds())
+	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
+	defer cancelDispatch()
+	var providerBudgetErr atomic.Pointer[error]
 
 	var dispatched int64
 dispatchLoop:
@@ -735,10 +748,10 @@ dispatchLoop:
 
 		select {
 		case sem <- struct{}{}: // acquire semaphore
-		case <-ctx.Done():
+		case <-dispatchCtx.Done():
 			break dispatchLoop
 		}
-		if ctx.Err() != nil {
+		if dispatchCtx.Err() != nil {
 			<-sem // release the slot acquired concurrently with cancellation
 			break dispatchLoop
 		}
@@ -769,16 +782,34 @@ dispatchLoop:
 			var groupCtx context.Context
 			var cancel context.CancelFunc
 			if timeout > 0 {
-				groupCtx, cancel = context.WithTimeout(ctx, timeout)
+				groupCtx, cancel = context.WithTimeout(dispatchCtx, timeout)
 				defer cancel()
 			} else {
-				groupCtx = ctx
+				groupCtx = dispatchCtx
 			}
 
 			completed, stop, err := a.executeGroupSubtask(groupCtx, g)
 			if err != nil {
 				atomic.AddInt64(&a.subtaskFailed, int64(len(g.Diffs)))
+				isBudget := llm.IsBudgetExceededError(err)
+				if isBudget {
+					errCopy := err
+					if providerBudgetErr.CompareAndSwap(nil, &errCopy) {
+						a.budgetExceeded.Store(true)
+						a.recordWarning("provider_budget_exceeded", g.Label, err.Error())
+						if b := a.session.Manifest(); b != nil {
+							if setErr := b.SetPendingFailureCause(session.FailureBudget, "provider budget or quota exceeded"); setErr != nil {
+								a.recordWarning("manifest_error", "", setErr.Error())
+							}
+						}
+						cancelDispatch()
+					}
+				}
 				class, reason := classifyItemError(err)
+				if !isBudget && errors.Is(err, context.Canceled) && ctx.Err() == nil && providerBudgetErr.Load() != nil {
+					class = session.FailureBudget
+					reason = "provider budget or quota exceeded"
+				}
 				for _, d := range g.Diffs {
 					fingerprint := reviewItemFingerprint(a.reviewMode(), d)
 					a.markFailed(d, class, reason)
@@ -866,6 +897,9 @@ dispatchLoop:
 		// hitting the error. Return those comments instead of discarding them.
 		if comments := a.args.CommentCollector.Comments(); len(comments) > 0 {
 			return comments, nil
+		}
+		if pErr := providerBudgetErr.Load(); pErr != nil {
+			return nil, fmt.Errorf("provider budget exceeded: %w", *pErr)
 		}
 		return nil, fmt.Errorf("all %d file review(s) failed — check your LLM configuration and API key", dispatched)
 	}
@@ -1225,6 +1259,8 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // empty-template precondition is a configuration failure.
 func classifyItemError(err error) (session.FailureClass, string) {
 	switch {
+	case llm.IsBudgetExceededError(err):
+		return session.FailureBudget, "provider budget or quota exceeded"
 	case errors.Is(err, llm.ErrRequestTimeout):
 		return session.FailureTimeout, "LLM request timed out; configure OCR_LLM_TIMEOUT or provider timeout_sec"
 	case errors.Is(err, context.DeadlineExceeded):
@@ -1491,6 +1527,9 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		var err error
 		planResult, err = a.executeGroupPlanPhase(ctx, g, concatenatedDiffs, changeFilesExcludingGroup, rule)
 		if err != nil {
+			if llm.IsBudgetExceededError(err) {
+				return false, nil, err
+			}
 			fmt.Fprintf(stdout.Writer(), "[ocr] Plan phase failed for group %q: %v (continuing without plan)\n", groupKey, err)
 			telemetry.Eventf(ctx, "plan.failed", err.Error(),
 				telemetry.AnyToAttr("group.label", groupKey))
