@@ -14,6 +14,7 @@ import (
 type CommentCollector struct {
 	mu       sync.Mutex
 	comments []model.LlmComment
+	byPath   map[string][]model.LlmComment
 }
 
 // NewCommentCollector creates an empty collector.
@@ -25,6 +26,10 @@ func NewCommentCollector() *CommentCollector {
 func (c *CommentCollector) Add(cm model.LlmComment) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.byPath == nil {
+		c.byPath = make(map[string][]model.LlmComment)
+	}
+	c.byPath[cm.Path] = append(c.byPath[cm.Path], cm)
 	c.comments = append(c.comments, cm)
 }
 
@@ -41,12 +46,12 @@ func (c *CommentCollector) Comments() []model.LlmComment {
 func (c *CommentCollector) CommentsForPath(path string) []model.LlmComment {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []model.LlmComment
-	for _, cm := range c.comments {
-		if cm.Path == path {
-			out = append(out, cm)
-		}
+	comments := c.byPath[path]
+	if len(comments) == 0 {
+		return nil
 	}
+	out := make([]model.LlmComment, len(comments))
+	copy(out, comments)
 	return out
 }
 
@@ -88,7 +93,23 @@ func (c *CommentCollector) ReplaceSince(start int, replacements []model.LlmComme
 	if start > len(c.comments) {
 		return
 	}
+	for i := len(c.comments) - 1; i >= start; i-- {
+		path := c.comments[i].Path
+		comments := c.byPath[path]
+		comments[len(comments)-1] = model.LlmComment{}
+		if len(comments) == 1 {
+			delete(c.byPath, path)
+		} else {
+			c.byPath[path] = comments[:len(comments)-1]
+		}
+	}
 	c.comments = append(c.comments[:start:start], replacements...)
+	if len(replacements) > 0 && c.byPath == nil {
+		c.byPath = make(map[string][]model.LlmComment)
+	}
+	for _, cm := range replacements {
+		c.byPath[cm.Path] = append(c.byPath[cm.Path], cm)
+	}
 }
 
 // RemoveByPathAndIndices removes comments for a given path whose per-path index
@@ -113,4 +134,19 @@ func (c *CommentCollector) RemoveByPathAndIndices(path string, indices map[int]s
 		tail[i] = model.LlmComment{}
 	}
 	c.comments = kept
+	if len(tail) > 0 {
+		comments := c.byPath[path]
+		keptPath := comments[:0]
+		for i, cm := range comments {
+			if _, remove := indices[i]; !remove {
+				keptPath = append(keptPath, cm)
+			}
+		}
+		clear(comments[len(keptPath):])
+		if len(keptPath) == 0 {
+			delete(c.byPath, path)
+		} else {
+			c.byPath[path] = keptPath
+		}
+	}
 }
