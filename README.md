@@ -35,7 +35,7 @@
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
-  English | <a href="docs/i18n/README.zh-CN.md">简体中文</a> | <a href="docs/i18n/README.ja-JP.md">日本語</a> | <a href="docs/i18n/README.ko-KR.md">한국어</a> | <a href="docs/i18n/README.ru-RU.md">Русский</a>
+  English | <a href="docs/i18n/README.zh-CN.md">简体中文</a> | <a href="docs/i18n/README.ja-JP.md">日本語</a> | <a href="docs/i18n/README.ko-KR.md">한국어</a> | <a href="docs/i18n/README.ru-RU.md">Русский</a> | <a href="docs/i18n/README.tr-TR.md">Türkçe</a> | <a href="docs/i18n/README.fr-FR.md">Français</a> | <a href="docs/i18n/README.vi-VN.md">Tiếng Việt</a>
 </p>
 
 ---
@@ -102,8 +102,11 @@ The agent's strengths are concentrated where they matter most — dynamic decisi
 
 ## How to Use
 
+<a id="supported-platforms"></a>
+
 ### Prerequisites
 
+- **Operating system:** Windows, macOS, or Linux.
 - **Git >= 2.41** — Open Code Review relies on Git for diff generation, code search, and repository operations.
 
 <a id="supported-agents"></a>
@@ -174,6 +177,9 @@ cd your-project
 
 # Workspace mode — review all staged, unstaged, and untracked changes
 ocr review
+
+# Current branch — review changes since it diverged from main (--to defaults to HEAD)
+ocr review --from main
 
 # Branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)
 ocr review --from main --to feature-branch

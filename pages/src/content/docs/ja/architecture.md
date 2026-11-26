@@ -13,7 +13,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (selection.go) — drop binaries, secret paths,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -37,12 +37,13 @@ flowchart TD
 
 untracked ファイルはディスクから読み込まれ、ファイル全体の新規追加として扱われるため、commit 前にレビューできます。
 
-## 5 段階ゲートのファイルフィルタリング
+## 6 段階ゲートのファイルフィルタリング
 
 diff の読み込み後、各ファイルは [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go) を通過します。この関数は次のいずれかを返します:
 
 ```
 binary          — file is binary
+secret_exclude  — path matches a built-in secret pattern (.env, id_rsa, …)
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
@@ -51,10 +52,11 @@ default_path    — matched a built-in test-file exclude pattern
 ……またはファイルが保持される場合は空を返します。`deleted` と `too_large` は `whyExcluded` からは**返されません**。これらはゲートのあとに `selectFiles` が適用します。`deleted` は保持されたファイルの diff が `IsDeleted` を報告したとき、`too_large` は diff だけで `max_tokens` の 80% を超えるときです。各ゲートは以下の順序で実行されます:
 
 1. `binary`: バイナリファイルが最初に破棄されます。
-2. `user_exclude`: あなたのプロジェクトの `exclude` が常に優先されます。
-3. `user_include`: include パターンが設定されており**かつ**ファイルがそのいずれかに一致する場合、即座に保持され（空を返す）、下記の `unsupported_ext` と `default_path` のゲートをバイパスします。
-4. `unsupported_ext` は拡張子のホワイトリストでフィルタリングします。
-5. `default_path` は最後のゲートです: 組み込みの**テストファイル**除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）に一致します。各パターンはルートプレフィックスとして `**/` を付けます。
+2. `secret_exclude`: 新旧いずれかのパスが組み込みの**シークレットパス**保護（`.env`、`id_rsa`、`.netrc` など）に一致します。`provider_directory` と同様、`include` ルールでレビュー対象に戻すことはできません。
+3. `user_exclude`: あなたのプロジェクトの `exclude` が常に優先されます。
+4. `user_include`: include パターンが設定されており**かつ**ファイルがそのいずれかに一致する場合、即座に保持され（空を返す）、下記の `unsupported_ext` と `default_path` のゲートをバイパスします。
+5. `unsupported_ext` は拡張子のホワイトリストでフィルタリングします。
+6. `default_path` は最後のゲートです: 組み込みの**テストファイル**除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）に一致します。各パターンはルートプレフィックスとして `**/` を付けます。
 
 ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、diff-provider 層で、`internal/diff/git.go` の `providerDirIgnoreDirs` リストを通じて発生します。これらのディレクトリの diff は解析されたあと除去され、ファイルごとのフィルターに到達することは決してありません。Preview はこれらのファイルを `provider_directory` として報告します。`include` ルールでこれらをレビュー対象に戻すことはできません。
 
@@ -131,6 +133,8 @@ loop up to MAX_TOOL_REQUEST_TIMES (default 100):
 | MAX_TOKENS の 60% | `tokenSoftThreshold` | **非同期**のバックグラウンド圧縮を起動します。現在のループは中断せず継続します。 |
 | MAX_TOKENS の 80% | `tokenWarningThreshold` | 次のリクエストを送る前に**同期的**に圧縮を実行します。 |
 
+active ゾーンに残すラウンドを選ぶ前に、OCR はサマリー本文の領域を予約します。予約量は、設定された出力上限、コンテキストウィンドウの 20%、固定プロンプトとラッパーを差し引いた残りの領域の最小値です。推論トークンも出力に含めるプロバイダーがあるため、圧縮リクエスト自体に 80% の警告しきい値まで余裕があれば、設定された出力上限の範囲で生成予算を増やし、本文は予約量以内に収めるよう指示します。再構築した会話のサイズは別途検査されます。これらの制限は累積予算 `--max-tokens-budget` とは独立しており、累積予算をゼロにしても圧縮は無効になりません。
+
 ### 3 つのゾーン
 
 ```mermaid
@@ -144,30 +148,16 @@ flowchart LR
     F --- C --- A
 ```
 
-1「ラウンド」とは、1 つの assistant メッセージと、それに続くツール結果メッセージのことです。`partitionMessages` は末尾から前へラウンドを辿り、`(0.80 × MAX_TOKENS) - reservedTokens` に収まる限り多くのラウンドを保持します。それより前の内容が **compress ゾーン**になります。
+1「ラウンド」とは、1 つの assistant メッセージと、それに続くツール結果メッセージのことです。`partitionMessages` は末尾から前へラウンドを辿り、token 数が `(0.80 × MAX_TOKENS) - reservedTokens` を厳密に下回る範囲で、できるだけ多くのラウンドを保持します。予約する予算には、先頭 2 メッセージ（以前のサマリーを含む）、新しいサマリー本文の予約量、そのラッパーの分が含まれます。それより前の内容が **compress ゾーン**になります。compress ゾーンが空なら会話は変更しません。また、元の会話がまだ警告しきい値を下回っている場合、バックグラウンド圧縮で固定プレフィックス以降の全ラウンドをまとめて要約することはありません。
 
 compress ゾーンは XML としてレンダリングされ、`MEMORY_COMPRESSION_TASK` prompt でモデルに渡されます。返されたサマリーは、`<previous_review_summary>` タグで包まれて元の user メッセージ内に追記されます。
 
-圧縮後: `messages = frozen[2] + compressed_user_msg + active`。
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … MEMORY_COMPRESSION_TASK を呼び出す …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+圧縮後: `messages = system + (original_user + summary) + active`。
+再構築した会話は同じローカルの token 推定方法で検査し、元の会話より小さくなっている必要があります。圧縮テンプレートがない場合、サマリーが空の場合、または結果が小さくならない場合は、元の履歴をそのまま保持します。サマリーテンプレートが使用できない場合や、再構築した結果が上限を超える場合は、元のメッセージを一切破棄せずにエラーを返します。
 
 ### 非同期 vs 同期
 
-非同期パスでは、バックグラウンドで圧縮が実行されている間も main ループがツール呼び出しを生成し続けられます。次の token チェックが発生したとき、準備できたサマリーが `tryApplyPendingCompression` を通じて適用されます。非同期タスクが完了する前に比率が警告しきい値を越えた場合、ループは一時停止して `runCompression` を同期的に実行します。これにより次のリクエストが必ず収まることが保証されます。
+非同期パスでは、バックグラウンドで圧縮が実行されている間も main ループがツール呼び出しを生成し続けられます。次の token チェックが発生したとき、準備できたサマリーが `tryApplyPendingCompression` を通じて適用されます。非同期タスクが完了する前に比率が警告しきい値を越えた場合、ループは一時停止して `runCompression` を同期的に実行します。バックグラウンド処理のスナップショット取得後に追加されたメッセージは、サマリーを適用する際にも保持されます。それでも会話がローカルの警告しきい値を厳密に下回れない場合は、未圧縮の履歴を黙って破棄するのではなく、`StopCompression` でループを停止します。この推定は、プロバイダーの実際のコンテキストウィンドウ容量に収まることを保証するものではありません。
 
 ## コメント処理パイプライン
 

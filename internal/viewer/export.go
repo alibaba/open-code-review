@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"path/filepath"
 )
 
 // ExportSession renders one persisted session as a single self-contained HTML
@@ -61,18 +60,21 @@ func ExportSession(out io.Writer, root, encodedRepo, sessionID string) error {
 		return fmt.Errorf("parse session template: %w", err)
 	}
 
-	// Same display name the live handler derives, so the exported page and the
-	// served one carry an identical breadcrumb.
-	name := filepath.Base(vs.Summary.CWD)
-	if name == "." || name == "" {
-		name = encodedRepo
+	var analysis *analysisPage
+	if vs.Summary.AnalysisEnabled {
+		directory, err := openAnalysis(root, encodedRepo, sessionID)
+		if err == nil {
+			defer directory.Close()
+		}
+		page := readAnalysis(directory, sessionID)
+		analysis = &page
 	}
-
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, sessionPageData{
 		EncodedRepo: encodedRepo,
-		RepoName:    name,
+		RepoName:    sessionRepoName(vs.Summary.CWD, encodedRepo),
 		Session:     vs,
+		Analysis:    analysis,
 		Static:      true,
 		InlineCSS:   template.CSS(css),
 		InlineJS:    template.JS(js),

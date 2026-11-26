@@ -15,7 +15,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (selection.go) — drop binaries, secret paths,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -51,7 +51,7 @@ diff마다 옛/새 경로, 옛/새 hunk, 추가·삭제 줄 수, 바이너리 �
 추적되지 않는 파일은 디스크에서 읽어 파일 전체가 추가된 것으로 다룹니다.
 그래서 커밋 전에도 리뷰됩니다.
 
-## 다섯 관문 파일 필터 {#the-five-gate-file-filter}
+## 여섯 관문 파일 필터 {#the-six-gate-file-filter}
 
 diff를 다 읽고 나면 모든 파일이
 [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)를
@@ -59,6 +59,7 @@ diff를 다 읽고 나면 모든 파일이
 
 ```
 binary          — file is binary
+secret_exclude  — path matches a built-in secret pattern (.env, id_rsa, …)
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
@@ -70,12 +71,15 @@ default_path    — matched a built-in test-file exclude pattern
 `max_tokens`의 80%를 넘으면 `too_large`입니다. 관문은 이 순서로 돕니다.
 
 1. `binary` — 바이너리 파일을 가장 먼저 버립니다.
-2. `user_exclude` — 프로젝트의 `exclude`가 언제나 이깁니다.
-3. `user_include` — 필터에 include 패턴이 있고 **그중 하나에** 파일이 걸리면
+2. `secret_exclude` — 두 경로 중 하나라도 내장 **자격 증명 경로** 보호
+   (`.env`, `id_rsa`, `.netrc` 등)에 걸립니다. `provider_directory`처럼
+   `include` 규칙으로 되돌릴 수 없습니다.
+3. `user_exclude` — 프로젝트의 `exclude`가 언제나 이깁니다.
+4. `user_include` — 필터에 include 패턴이 있고 **그중 하나에** 파일이 걸리면
    그 자리에서 남기고(빈 문자열 반환) 아래의 `unsupported_ext`와
    `default_path` 관문을 건너뜁니다.
-4. `unsupported_ext`는 확장자 허용 목록으로 거릅니다.
-5. `default_path`가 마지막 관문입니다. 내장 **테스트 파일** 제외 패턴
+5. `unsupported_ext`는 확장자 허용 목록으로 거릅니다.
+6. `default_path`가 마지막 관문입니다. 내장 **테스트 파일** 제외 패턴
    (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/__tests__/**`,
    `**/*_test.py`, `**/*_spec.rb`, `**/*.test.ets` 등)에 걸리는지 봅니다.
    모든 패턴 앞에는 `**/` 접두사가 붙습니다.
@@ -214,12 +218,19 @@ main 루프는 한 번만 도는 게 아니라 그룹마다 최대 `MAX_REVIEW_R
 
 > **`MAX_TOKENS`는 *입력* 상한입니다.** 프롬프트, 즉 메시지 버퍼를 압축할 때
 > 기준이 되는 컨텍스트 윈도 예산만 제한할 뿐 그 밖에는 관여하지 않습니다.
-> 모델의 *출력* 상한은 별도의 손잡이인 `MAX_COMPLETION_TOKENS = 16384`이고,
-> 매 요청에 `max_completion_tokens`로 실려 갑니다
-> (`Template.CompletionTokenLimit()`). 둘을 떼어 놓은 덕분에, 컨텍스트가 큰
+> 모델의 *출력* 상한은 별도의 설정인 `MAX_COMPLETION_TOKENS = 16384`로
+> 정합니다 (`Template.CompletionTokenLimit()`). 둘을 떼어 놓은 덕분에, 컨텍스트가 큰
 > 모델을 쓰려고 `--max-tokens`로 프롬프트 상한을 올려도 출력 예산이 몰래
 > 부풀지 않습니다. `MAX_COMPLETION_TOKENS`가 설정돼 있지 않으면 하위 호환을
 > 위해 `MAX_TOKENS`를 출력 상한으로 씁니다.
+
+활성 구역에 남길 라운드를 고르기 전에 요약 본문을 위한 공간을 예약합니다.
+예약량은 설정된 출력 한도, 컨텍스트 윈도의 20%, 고정 프롬프트와 래퍼를 제외한
+공간 중 최솟값입니다. 일부 제공자는 추론 토큰도 출력에 포함합니다. 압축 요청 자체에
+80% 경고 임계값까지 여유가 있으면 설정된 출력 한도 안에서 생성 예산을 늘리고,
+모델에 요약 본문은 예약량 안에 맞추도록 요청합니다. 재구성된 대화의 크기는 여전히 검사합니다. 대화별 제한은 누적 예산인
+`--max-tokens-budget`과 독립적이므로, 누적 예산을 0으로 설정해도 컨텍스트
+압축은 비활성화되지 않습니다.
 
 ### 세 구역 {#the-three-zones}
 
@@ -236,29 +247,23 @@ flowchart LR
 
 여기서 "라운드"란 assistant 메시지 하나와 그 뒤에 따라온 도구 결과 메시지
 묶음을 말합니다. `partitionMessages`는 끝에서부터 라운드를 훑으며
-`(0.80 × MAX_TOKENS) - reservedTokens` 안에 들어가는 만큼을 남깁니다. 그보다
-오래된 것은 모두 **압축 구역**이 됩니다.
+토큰 수가 `(0.80 × MAX_TOKENS) - reservedTokens`보다 엄격히 작은 범위에서
+최대한 많은 라운드를 남깁니다. 예약 예산에는 첫 두 메시지(이전 요약 포함),
+새 요약 본문에 예약한 공간, 요약 래퍼가 포함됩니다. 그보다 오래된 것은 모두
+**압축 구역**이 됩니다. 압축 구역이 비어 있으면 대화는 바뀌지 않습니다.
+원래 대화가 아직 경고 임계값 아래에 있다면, 백그라운드 압축은 고정 접두부
+뒤의 모든 라운드를 통째로 요약하지 않습니다.
 
 압축 구역은 XML로 렌더링해 `MEMORY_COMPRESSION_TASK` 프롬프트와 함께 모델에
 보냅니다. 돌아온 요약은 `<previous_review_summary>` 태그에 담겨 원래의 user
 메시지 뒤에 붙습니다.
 
-압축이 끝나면 `messages = frozen[2] + compressed_user_msg + active`가 됩니다.
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … call MEMORY_COMPRESSION_TASK …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+압축이 끝나면 `messages = system + (original_user + summary) + active`가 됩니다.
+재구성한 대화는 동일한 로컬 토큰 추정 방식으로 검사하며, 원래 대화보다
+작아야 합니다. 압축 템플릿이 없거나 요약이 비어 있거나 결과가 작아지지
+않으면 원래 이력을 그대로 유지합니다. 요약 템플릿을 사용할 수 없거나
+재구성한 결과가 한도를 넘으면, 원래 메시지를 하나도 버리지 않고 오류를
+반환합니다.
 
 ### 비동기와 동기 {#async-vs-sync}
 
@@ -266,7 +271,11 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 호출합니다. 다음번 토큰 검사 때 준비된 요약이 있으면
 `tryApplyPendingCompression`이 갈아 끼웁니다. 비동기 작업이 끝나기 전에
 비율이 경고 임계값을 넘으면 루프를 멈추고 `runCompression`을 동기로 돌립니다.
-다음 요청이 반드시 들어맞도록 보장하는 장치입니다.
+백그라운드 스냅샷을 만든 뒤에 추가된 메시지도 요약을 적용할 때 유지합니다.
+그래도 대화의 토큰 수가 로컬 경고 임계값보다 엄격히 작아질 수 없다면,
+압축하지 않은 이력을 조용히 버리는 대신 `StopCompression`으로 루프를
+멈춥니다. 이 추정치는 제공자의 실제 컨텍스트 윈도 용량에 맞는다는 보장이
+아닙니다.
 
 ## 코멘트 처리 파이프라인 {#comment-processing-pipeline}
 

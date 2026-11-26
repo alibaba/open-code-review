@@ -38,17 +38,17 @@ Copilot CLI 的安装程序目前会警告：直接安装插件（repo/path/URL�
 把 skill 复制到 Copilot CLI 能发现的目录中。**项目级**（提交到仓库，让团队共享）：
 
 ```bash
-mkdir -p .github/skills/open-code-review
-curl -o .github/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p .github/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C .github/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 **用户级**（机器上每个项目都可用）：
 
 ```bash
-mkdir -p ~/.copilot/skills/open-code-review
-curl -o ~/.copilot/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p ~/.copilot/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C ~/.copilot/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 Copilot CLI 还会发现项目中的 `.agents/skills/` 和 `.claude/skills/`；同名时项目级
@@ -64,14 +64,14 @@ skill 的描述自动选用：
 
 ```
 /open-code-review
-/open-code-review review this PR against main
+/open-code-review 42
 /open-code-review focus on race conditions in commit abc123
 ```
 
 | 你说 | skill 会运行什么 |
 | --- | --- |
 | "review my changes" | `ocr review --audience agent` (staged, unstaged, untracked) |
-| "review this PR" | `ocr review --from main --to <branch>` |
+| `42` | `python3 "$SKILL_DIR/scripts/review_pr.py" 42` |
 | "review commit abc123" | `ocr review --commit abc123` |
 
 该 skill 用自身配置的模型驱动 `ocr`，并按严重程度分组报告发现。如果你不想为

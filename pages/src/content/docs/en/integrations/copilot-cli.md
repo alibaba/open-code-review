@@ -43,17 +43,17 @@ Copy the skill into a directory Copilot CLI discovers. **Project-level**
 (commit it so the team shares it):
 
 ```bash
-mkdir -p .github/skills/open-code-review
-curl -o .github/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p .github/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C .github/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 **User-level** (available in every project on the machine):
 
 ```bash
-mkdir -p ~/.copilot/skills/open-code-review
-curl -o ~/.copilot/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p ~/.copilot/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C ~/.copilot/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 Copilot CLI also discovers `.agents/skills/` and `.claude/skills/` in
@@ -70,14 +70,14 @@ the task — Copilot picks the skill from its description:
 
 ```
 /open-code-review
-/open-code-review review this PR against main
+/open-code-review 42
 /open-code-review focus on race conditions in commit abc123
 ```
 
 | You say | What the skill runs |
 | --- | --- |
 | "review my changes" | `ocr review --audience agent` (staged, unstaged, untracked) |
-| "review this PR" | `ocr review --from main --to <branch>` |
+| `42` | `python3 "$SKILL_DIR/scripts/review_pr.py" 42` |
 | "review commit abc123" | `ocr review --commit abc123` |
 
 The skill drives `ocr` with its own configured model and reports

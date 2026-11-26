@@ -154,7 +154,7 @@ func (t ScanTemplate) CompletionTokenLimit() int {
 	return t.MaxTokens
 }
 
-//go:embed task_template.json prompts/*
+//go:embed task_template.json behavior_template.json prompts/*
 var templateFS embed.FS
 
 //go:embed scan_template.json

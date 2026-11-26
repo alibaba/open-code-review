@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -351,6 +352,39 @@ func TestEmitRunResult_JSONWithComments(t *testing.T) {
 	}
 	if out.Summary == nil || out.Summary.FilesReviewed != 3 {
 		t.Errorf("summary.FilesReviewed = %v", out.Summary)
+	}
+}
+
+func TestEmitRunResult_CommentSeverityOrder(t *testing.T) {
+	input := []model.LlmComment{
+		{Severity: "", Content: "missing-finding"},
+		{Severity: "high", Content: "first-high-finding"},
+		{Severity: "low", Content: "low-finding"},
+		{Severity: "other", Content: "unknown-finding"},
+		{Severity: "medium", Content: "medium-finding"},
+		{Severity: "critical", Content: "critical-finding"},
+		{Severity: "high", Content: "second-high-finding"},
+	}
+	want := []string{"missing-finding", "unknown-finding", "low-finding", "medium-finding", "first-high-finding", "second-high-finding", "critical-finding"}
+	for _, format := range []string{"text", "json", "sarif"} {
+		t.Run(format, func(t *testing.T) {
+			comments := slices.Clone(input)
+			var out bytes.Buffer
+			if err := emitRunResult(t.Context(), &mockResultProvider{}, comments, time.Now(), format, "developer", nil, nil, &out, nil); err != nil {
+				t.Fatal(err)
+			}
+			rest := out.String()
+			for _, finding := range want {
+				var found bool
+				_, rest, found = strings.Cut(rest, finding)
+				if !found {
+					t.Fatalf("missing or out-of-order finding %q in %s", finding, out.String())
+				}
+			}
+			if !slices.Equal(input, comments) {
+				t.Fatal("rendering changed the input comments")
+			}
+		})
 	}
 }
 

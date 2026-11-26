@@ -41,17 +41,17 @@ Copilot CLI가 인식하는 디렉터리에 스킬을 복사하세요. **프로�
 커밋해 팀이 공유):
 
 ```bash
-mkdir -p .github/skills/open-code-review
-curl -o .github/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p .github/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C .github/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 **사용자 수준**(머신의 모든 프로젝트에서 사용):
 
 ```bash
-mkdir -p ~/.copilot/skills/open-code-review
-curl -o ~/.copilot/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p ~/.copilot/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C ~/.copilot/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 Copilot CLI는 프로젝트의 `.agents/skills/`와 `.claude/skills/`도 인식합니다. 이름이
@@ -68,14 +68,14 @@ Copilot CLI는 프로젝트의 `.agents/skills/`와 `.claude/skills/`도 인식�
 
 ```
 /open-code-review
-/open-code-review review this PR against main
+/open-code-review 42
 /open-code-review focus on race conditions in commit abc123
 ```
 
 | 이렇게 말하면 | 스킬이 실행하는 명령 |
 | --- | --- |
 | "내 변경 사항을 리뷰해 줘" | `ocr review --audience agent` (스테이징된 변경, 스테이징되지 않은 변경, 추적되지 않은 파일) |
-| "이 PR을 리뷰해 줘" | `ocr review --from main --to <branch>` |
+| `42` | `python3 "$SKILL_DIR/scripts/review_pr.py" 42` |
 | "커밋 abc123을 리뷰해 줘" | `ocr review --commit abc123` |
 
 스킬은 자체 설정된 모델로 `ocr`을 구동하고, 발견 사항을 심각도별로 묶어 보고합니다.

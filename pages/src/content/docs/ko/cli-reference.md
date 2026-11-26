@@ -92,6 +92,10 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 핵심 명령입니다. Git diff를 해석하고, 변경된 파일을 의미 단위로 묶고, 그룹마다 서브
 Agent를 하나씩 붙여 리뷰 코멘트를 모아 출력합니다.
+`review`와 `scan`의 최종 보고서는 텍스트, JSON, SARIF 형식 모두에서 지적 사항을
+심각도가 낮은 순서(`low`, `medium`, `high`, `critical`)로 나열합니다. 심각도가 없거나
+그 값을 인식할 수 없는 지적 사항은 `low`보다 앞에 표시됩니다. 심각도가 같으면 수집된
+순서를 유지하지만, 병렬 처리로 인해 이 순서는 실행할 때마다 달라질 수 있습니다.
 
 ### 명령 형식 {#synopsis}
 
@@ -126,11 +130,13 @@ ocr r      [flags]   (alias)
 | `--effort <level>` | — | `medium` | 리뷰 강도 프리셋: `low`(라운드 1회), `medium`(2회), `high`(3회). 라운드를 늘리면 놓치는 지적이 줄지만 비용도 그만큼 늘어납니다. 이 실행에 한해 저장된 `effort` 설정을 덮어씁니다. |
 | `--rule <path>` | — | — | 커스텀 JSON 리뷰 규칙 파일 경로. 프로젝트 수준과 전역 `rule.json`을 덮어씁니다. |
 | `--max-tools <n>` | — | 템플릿 기본값 | 서브태스크당 최대 도구 호출 라운드 수. `0`이면 템플릿 기본값(`100`)을 쓰고, 1~49는 `50`으로 올려 맞춥니다. 검증된 양수 값은 상한으로 정확히 적용됩니다. |
-| `--max-tokens <n>` | — | 설정 또는 템플릿 기본값 | 서브태스크당 프롬프트(입력) 토큰 상한이며 템플릿 기본값은 `200000`입니다. 이 실행에 한해 저장된 `max_tokens` 설정을 덮어씁니다. 출력 상한은 바뀌지 않습니다. `MAX_COMPLETION_TOKENS`를 참고하세요. |
+| `--max-tokens <n>` | — | 설정 또는 템플릿 기본값 | Review와 Analysis 모두에 적용되는 서브태스크당 프롬프트(입력) 토큰 상한입니다. 템플릿 기본값은 `200000`입니다. 이번 실행에 한해 저장된 `max_tokens` 설정을 덮어씁니다. 출력 상한은 바뀌지 않습니다. `MAX_COMPLETION_TOKENS`를 참고하세요. |
+| `--analysis` | — | 꺼짐 | 단일 커밋이나 커밋 범위를 리뷰할 때(`--commit` 또는 `--from`) 동작 변화와 그 영향을 별도로 분석합니다. `text`와 `json` 출력만 지원합니다. 워크스페이스의 미커밋 변경을 리뷰할 때는 사용할 수 없으며, `--preview`나 `--resume`과도 함께 쓸 수 없습니다. Analysis는 `--max-tools`와 관계없이 최대 300라운드까지 조사합니다. 예산을 소진하면 보고서 제출만을 위해 최대 한 라운드를 더 쓸 수 있습니다. Analysis가 실패하거나 건너뛰더라도 Review의 종료 상태는 바뀌지 않습니다. |
+| `--analysis-max-tokens-budget <n>` | — | `0`(무제한) | Analysis에만 적용되는 소프트 한도로, 입력과 출력 토큰 수의 합계를 기준으로 합니다. Analysis는 Review와 동시에 모델 요청을 한 건 더 실행할 수 있습니다. JSON 출력의 `analysis_meta.usage`와 `analysis_meta.execution_status`에서 사용량과 실행 상태를 확인하세요. |
 | `--max-tokens-budget <n>` | — | `0`(무제한) | 리뷰 전체의 입력+출력 토큰 사용량을 제한합니다. LLM 라운드마다 먼저 확인하며, 이미 예산을 넘긴 하위 작업은 발견 사항을 제출할 마지막 라운드를 한 번 받고 `failed(budget)`로 보고됩니다. 이후 하위 작업은 전달되지 않지만 그때까지의 결과는 그대로 내보냅니다. |
 | `--provider <name>` | — | — | 이 실행에 쓸 프로바이더를 고릅니다. `providers`와 `custom_providers` 양쪽의 이름을 모두 받습니다. |
 | `--model <name>` | — | — | 이 실행에 한해 해석된 LLM 모델을 덮어씁니다(예: `claude-opus-4-6`). |
-| `--max-git-procs <n>` | — | `16` | 동시에 띄울 git 서브프로세스의 최대 개수. |
+| `--max-git-procs <n>` | — | `16` | Review와 Analysis를 합쳐 동시에 실행할 수 있는 Git 서브프로세스의 최대 개수. |
 
 > 모드 플래그는 함께 쓸 수 없습니다. `--from`/`--to`, `--commit`, 아무것도 주지
 > 않기(워크스페이스 모드) 중 하나만 고르세요. 섞어 쓰면 오류로 중단됩니다.
@@ -193,6 +199,12 @@ ocr review -c abc123
 ```
 
 `git show abc123`이 만드는 diff, 즉 그 커밋 하나가 도입한 변경을 리뷰합니다.
+
+단일 커밋이나 커밋 범위를 리뷰할 때 Review와 Analysis는 모두 대상 커밋(`--commit`으로 지정한 커밋 또는 `--to`가 가리키는 커밋)의 루트에 있는 `.gitignore`를 기준으로 변경 목록을 거릅니다. 현재 작업 트리의 규칙은 사용하지 않습니다. Analysis는 목록에서 제외한 파일도 맥락을 파악하기 위해 읽을 수 있습니다. 읽기까지 막으려면 `--exclude`를 사용하세요.
+
+`--analysis`를 사용하면 `ocr viewer`에서 하나의 세션 ID로 보고서 하나를 열고 **Review** 탭과 **Analysis** 탭을 전환할 수 있습니다. **Analysis** 탭에는 실행 상태, 분석 범위에 포함된 변경 파일 수(읽은 파일 수가 아님), 모델의 자체 평가, 인용한 근거가 표시됩니다. 본문의 인용 번호를 선택하면 해당 근거를 볼 수 있습니다. **Evidence**를 펼치면 인용 여부에 관계없이 모든 조사 기록을 확인할 수 있습니다.
+
+**Conversations**를 펼치면 기록된 Analysis 요청별로 모델 응답, 도구 호출과 그 결과를 확인할 수 있습니다. 이 대화 기록은 HTML 내보내기에 포함되지 않습니다. 보고서의 Markdown, 결과 메타데이터, 근거, 실행 로그는 `~/.opencodereview/sessions/<encoded-repo>/<session-id>/analysis/` 아래에 저장됩니다. 근거와 로그에는 소스 코드가 포함될 수 있습니다. 분석이 끝나지 않았다면 최종 상태가 기록되지 않았을 수 있습니다.
 
 ### 중단된 리뷰 이어서 하기 {#resuming-interrupted-reviews}
 
@@ -512,7 +524,7 @@ ocr session export 20250601-100000-abc123 -o review.html
 
 ### `ocr session rm` {#ocr-session-rm}
 
-`~/.opencodereview/sessions/`에 저장된 세션 하나를 삭제합니다.
+`~/.opencodereview/sessions/`에 저장된 세션 하나를 삭제합니다. 세션에 Analysis 보고서가 있으면 해당 보고서와 근거, 로그도 함께 삭제됩니다.
 
 ```bash
 ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b

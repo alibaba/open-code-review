@@ -200,7 +200,7 @@ export const ja: TranslationKeys = {
   'docs.reviewFlag10Desc': 'ファイルあたりの最大ツール呼び出しラウンド数',
   'docs.reviewFlag10Default': '内蔵',
   'docs.reviewFlag11Desc': '最大並行 git サブプロセス数',
-  'docs.reviewNote': '注意：<code>--from/--to</code> と <code>--commit</code> は同時に使用できません。<code>--from</code> を指定する場合、<code>--to</code> も指定する必要があります。',
+  'docs.reviewNote': '注意：<code>--from/--to</code> と <code>--commit</code> は同時に使用できません。<code>--from</code> のみを指定した場合、比較先は <code>HEAD</code> になります。',
   'docs.scanTitle': 'ocr scan',
   'docs.scanDesc': '<code>ocr scan</code> は diff の代わりにファイル全体をレビューします。Git 履歴や意味のある diff は不要です。未知のコードベースの調査、移行前のディレクトリ調査、diff の対象がないプロジェクトのレビューに使用します。',
   'docs.scanVsTitle': 'ocr scan と ocr review の違い',
@@ -291,6 +291,7 @@ export const ja: TranslationKeys = {
   'docs.sidebar.configuration': '設定',
   'docs.sidebar.cliReference': 'CLI リファレンス',
   'docs.sidebar.reviewRules': 'レビュールール',
+  'docs.sidebar.reviewingRequirements': '要件に基づくレビュー',
   'docs.sidebar.architecture': 'アーキテクチャ',
   'docs.sidebar.tools': 'ツール',
   'docs.sidebar.mcp': 'MCP サーバー',
@@ -311,6 +312,11 @@ export const ja: TranslationKeys = {
   'docs.search.hint.select': '選択',
   'docs.search.hint.open': '開く',
   'docs.search.hint.close': '閉じる',
+  'docs.content.loading': 'ドキュメントを読み込み中...',
+  'docs.content.loadError': 'ドキュメントの読み込みに失敗しました。',
+  'docs.content.retry': '再試行',
+  'docs.search.loading': '検索中...',
+  'docs.search.loadError': '検索コンテンツの読み込みに失敗しました。',
 
   // Blog
   'blog.title': 'ブログ',

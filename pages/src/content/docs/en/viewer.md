@@ -100,7 +100,11 @@ fit on a page; the pager at the bottom right moves between pages.
 
 The detail page is the interesting one. It shows:
 
-1. **Header** — diff range, model, branch, total tokens, run duration.
+1. **Header** — working directory, branch, review mode, diff range or
+   commit, and model. When a session includes Analysis, this context stays
+   above the **Review** and **Analysis** tabs. The review status, file
+   count, and duration appear at the top of **Review** rather than in the
+   shared header.
 2. **File group** — one block per reviewed group. Files are grouped
    semantically before review, so a block may cover several related
    files; its title is the group's file paths. Inside each group, five

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -24,39 +25,47 @@ var sessionSubDir = "sessions"
 // $HOME/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl.
 // It is safe for concurrent use by multiple goroutines.
 type jsonlWriter struct {
-	mu          sync.Mutex
-	sessionID   string
-	repoDir     string
-	gitBranch   string
-	model       string
-	llmSource   string
-	reviewMode  string
-	diffFrom    string
-	diffTo      string
-	diffCommit  string
-	scanPaths   []string
-	resumedFrom string
-	file        *os.File
-	writer      *bufio.Writer
-	lastUUID    string // tracks chain of records via parentUuid
+	mu              sync.Mutex
+	sessionID       string
+	repoDir         string
+	gitBranch       string
+	model           string
+	llmSource       string
+	reviewMode      string
+	diffFrom        string
+	diffTo          string
+	diffCommit      string
+	scanPaths       []string
+	resumedFrom     string
+	analysisEnabled bool
+	file            *os.File
+	writer          *bufio.Writer
+	lastUUID        string // tracks chain of records via parentUuid
 }
 
 // newJSONLWriter creates and opens a new JSONL writer for the given session.
 func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOptions) (*jsonlWriter, error) {
 	jw := &jsonlWriter{
-		sessionID:   sessionID,
-		repoDir:     repoDir,
-		gitBranch:   gitBranch,
-		model:       model,
-		llmSource:   opts.LLMSource,
-		reviewMode:  opts.ReviewMode,
-		diffFrom:    opts.DiffFrom,
-		diffTo:      opts.DiffTo,
-		diffCommit:  opts.DiffCommit,
-		scanPaths:   append([]string(nil), opts.ScanPaths...),
-		resumedFrom: opts.ResumedFrom,
+		sessionID:       sessionID,
+		repoDir:         repoDir,
+		gitBranch:       gitBranch,
+		model:           model,
+		llmSource:       opts.LLMSource,
+		reviewMode:      opts.ReviewMode,
+		diffFrom:        opts.DiffFrom,
+		diffTo:          opts.DiffTo,
+		diffCommit:      opts.DiffCommit,
+		scanPaths:       append([]string(nil), opts.ScanPaths...),
+		resumedFrom:     opts.ResumedFrom,
+		analysisEnabled: opts.AnalysisEnabled,
 	}
-	if err := jw.open(); err != nil {
+	var err error
+	if opts.tracePath != "" {
+		err = jw.openFile(opts.tracePath, os.O_EXCL)
+	} else {
+		err = jw.open()
+	}
+	if err != nil {
 		return nil, err
 	}
 	return jw, nil
@@ -114,7 +123,11 @@ func (jw *jsonlWriter) open() error {
 	}
 
 	filename := filepath.Join(sessionDir, jw.sessionID+".jsonl")
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	return jw.openFile(filename, os.O_TRUNC)
+}
+
+func (jw *jsonlWriter) openFile(filename string, flags int) error {
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|flags, 0600)
 	if err != nil {
 		return fmt.Errorf("open session file: %w", err)
 	}
@@ -150,6 +163,9 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	if jw.llmSource != "" {
 		rec["llmSource"] = jw.llmSource
 	}
+	if jw.analysisEnabled {
+		rec["analysis"] = AnalysisOptions{Enabled: true}
+	}
 	if jw.reviewMode != "" {
 		rec["reviewMode"] = jw.reviewMode
 	}
@@ -172,6 +188,9 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
 	jw.writeRecordLocked(rec)
+	if jw.analysisEnabled {
+		jw.writer.Flush()
+	}
 	jw.lastUUID = uuid
 	return uuid
 }
@@ -369,12 +388,13 @@ func (jw *jsonlWriter) WriteResumeLineage(l *ResumeLineage) string {
 }
 
 // WriteSessionEnd writes the final session_end summary record and closes the
-// file. When manifest is non-nil it is embedded under "run_manifest"; session_end
-// is the last physical record of the stream and no separate run_manifest record
-// is appended. The record is flushed before the file is closed. Any marshal,
-// flush or close error is returned so the caller can surface it as a delivery
-// error rather than silently losing the manifest.
-func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest) error {
+// file. When manifest is non-nil it is embedded under "run_manifest", and when
+// retryReport is non-nil under "llm_retry_report"; session_end is the last
+// physical record of the stream and neither gets a record of its own. A nil
+// retryReport is the normal case, not a loss. The record is flushed before the
+// file is closed. Any marshal, flush or close error is returned so the caller can
+// surface it as a delivery error rather than silently losing the manifest.
+func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest, retryReport *llm.RetryReport) error {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -391,6 +411,9 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 	}
 	if manifest != nil {
 		rec["run_manifest"] = manifest
+	}
+	if retryReport != nil {
+		rec["llm_retry_report"] = retryReport
 	}
 	jw.lastUUID = uuid
 

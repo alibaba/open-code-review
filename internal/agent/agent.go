@@ -53,6 +53,7 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
+	AnalysisEnabled bool
 	// RepoDir is the root of the git repository.
 	RepoDir string
 
@@ -80,6 +81,11 @@ type Args struct {
 
 	// LLM client for model inference.
 	LLMClient llm.LLMClient
+
+	// RetryCollector is the collector the LLMClient reports attempts to. The
+	// agent holds it only to freeze the report at the run boundary. Nil means
+	// this run persists none.
+	RetryCollector *llm.RetryCollector
 
 	// Tool registry mapping tool aliases to implementations.
 	Tools *tool.Registry
@@ -216,13 +222,14 @@ func New(args Args) *Agent {
 			mode = reviewModeString(args.From, args.To, args.Commit)
 		}
 		args.Session = session.New(args.RepoDir, gitBranch, args.Model, session.SessionOptions{
-			ReviewMode:  mode,
-			DiffFrom:    args.From,
-			DiffTo:      args.To,
-			DiffCommit:  args.Commit,
-			ResumedFrom: resumedFromSession(args.Resume),
-			Operation:   session.OperationReview,
-			LLMSource:   args.EndpointSource,
+			AnalysisEnabled: args.AnalysisEnabled,
+			ReviewMode:      mode,
+			DiffFrom:        args.From,
+			DiffTo:          args.To,
+			DiffCommit:      args.Commit,
+			ResumedFrom:     resumedFromSession(args.Resume),
+			Operation:       session.OperationReview,
+			LLMSource:       args.EndpointSource,
 		})
 	}
 	a := &Agent{
@@ -292,6 +299,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		if b := a.session.Manifest(); b != nil {
 			_ = b.SetRunFailure(session.RunFailureInput, "failed to resolve review input")
 		}
+		// Collector is empty here (no request issued yet); frozen anyway so a future
+		// path issuing requests before this exit cannot silently lose them.
+		a.freezeRetryReport()
 		manifestErr := a.finalizeManifest()
 		// Keep the load failure as the primary cause, but never drop a persistence
 		// failure: a run that could not even write its failed session_end must
@@ -365,6 +375,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// run_failure), which is the correct terminal state for "nothing to do".
 		// A persistence failure here is still a delivery error — a clean skip
 		// cannot be claimed if its session_end never reached disk.
+		// Empty here too: grouping and every task run after this point.
+		a.freezeRetryReport()
 		manifestErr := a.finalizeManifest()
 		if ferr := a.session.Finalize(); ferr != nil {
 			manifestErr = errors.Join(manifestErr, fmt.Errorf("finalize session: %w", ferr))
@@ -422,6 +434,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// and be discarded wholesale. Cheap in the normal case — every job has
 	// already been cancelled by now.
 	a.runner.WaitBackground()
+	// Every request is finalized now, so the report can be frozen.
+	a.freezeRetryReport()
 	// Freeze coverage into the immutable manifest before session_end embeds it,
 	// so the CLI and the persisted session serialize the identical object. A
 	// persistence failure is a delivery error in its own right: when the review
@@ -1332,6 +1346,28 @@ func (a *Agent) finalizeManifest() error {
 	return nil
 }
 
+// freezeRetryReport freezes this run's retry report into the session. Every
+// terminal path calls it just before finalizeManifest, and the normal path only
+// after WaitBackground: a request still in flight is un-finalized, and Freeze
+// discards the whole report over one such entry.
+//
+// A nil report is the ordinary outcome — Freeze withholds one unless something
+// retried, failed or was cancelled. An error means the collector's invariants
+// were violated, so the report contradicts itself and is published nowhere.
+func (a *Agent) freezeRetryReport() {
+	if a.args.RetryCollector == nil {
+		return
+	}
+	// The in-memory UUID, not a.SessionID(), which is "" when persistence failed:
+	// logical_request_id must stay unique per run, and Freeze rejects an empty
+	// run_id.
+	rep, err := a.args.RetryCollector.Freeze(a.session.SessionID)
+	if err != nil {
+		return
+	}
+	a.session.SetFinalRetryReport(rep)
+}
+
 func resumedFromSession(resume *session.ResumeState) string {
 	if resume == nil {
 		return ""
@@ -1865,10 +1901,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 		all := a.args.CommentCollector.CommentsForPath(d.NewPath)
 		start := 0
 		if from != nil {
-			start = from[d.NewPath]
-			if start > len(all) {
-				start = len(all)
-			}
+			start = min(from[d.NewPath], len(all))
 		}
 		for i := start; i < len(all); i++ {
 			candidates = append(candidates, filterCandidate{cm: all[i], pathIdx: i})

@@ -51,7 +51,7 @@ pipeline {
         stage('Install OCR') {
             steps {
                 // Pin the version you have validated; bump deliberately.
-                sh 'npm install -g @alibaba-group/open-code-review@1.7.12'
+                sh 'npm install -g @alibaba-group/open-code-review@1.14.0'
                 // extra_body has no env-var equivalent. Providers that accept
                 // a top-level "thinking" field (e.g. DashScope/GLM; OpenAI
                 // rejects unknown fields) must fall back to the config file,
@@ -67,16 +67,18 @@ pipeline {
 
         stage('Review') {
             steps {
-                // `|| true` is REQUIRED: `ocr review` exits non-zero only
-                // when EVERY sub-agent fails; partial failures still exit 0.
-                // The guard in the next stage handles the empty-output case.
+                // `ocr review` exits non-zero when the review failed or left
+                // items unreviewed, but its JSON is still worth posting. Save
+                // the exit code instead of failing here; the next stage posts
+                // the result and then fails the build with that code.
                 sh '''
+                    rm -f ocr-exit-code
                     ocr review \
                       --from "origin/$GERRIT_BRANCH" \
                       --to "$GERRIT_PATCHSET_REVISION" \
                       --format json \
                       --audience agent \
-                      > result.json || true
+                      > result.json || echo "$?" > ocr-exit-code
                 '''
             }
         }
@@ -91,14 +93,23 @@ pipeline {
                     // `current` default would retarget comments if a new
                     // patchset landed mid-pipeline. GERRIT_CHANGE_NUMBER and
                     // GERRIT_URL/GERRIT_CHANGE_URL come from the environment.
+                    // Capture the poster's exit code too, so a posting
+                    // failure still fails the build without relying on
+                    // `sh -e`, and the review's code takes precedence.
                     sh '''
-                        if [ ! -s result.json ]; then
+                        POST_EXIT_CODE=0
+                        if [ -s result.json ]; then
+                          python3 examples/gerrit_ci/post_review.py \
+                            --input result.json \
+                            --revision "$GERRIT_PATCHSET_REVISION" || POST_EXIT_CODE=$?
+                        else
                           echo "OCR review produced no output, skipping post."
-                          exit 0
                         fi
-                        python3 examples/gerrit_ci/post_review.py \
-                          --input result.json \
-                          --revision "$GERRIT_PATCHSET_REVISION"
+                        if [ -s ocr-exit-code ]; then
+                          echo "ocr review exited with code $(cat ocr-exit-code); failing the build."
+                          exit "$(cat ocr-exit-code)"
+                        fi
+                        exit "$POST_EXIT_CODE"
                     '''
                 }
             }

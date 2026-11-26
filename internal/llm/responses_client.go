@@ -465,7 +465,7 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 	}
 
 	params := responses.ResponseNewParams{
-		Model: openai.ResponsesModel(model),
+		Model: model,
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: input,
 		},
@@ -515,7 +515,8 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 // ...) pairs correctly.
 func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response) *ChatResponse {
 	var contentPtr *string
-	if text := sdkResp.OutputText(); text != "" {
+	text := sdkResp.OutputText()
+	if text != "" {
 		cleaned := stripThinkTags(text)
 		contentPtr = &cleaned
 	}
@@ -598,9 +599,10 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 		}
 	}
 	return &ChatResponse{
-		ID:       sdkResp.ID,
-		Model:    string(sdkResp.Model),
-		RawUsage: rawUsageJSON,
+		ID:            sdkResp.ID,
+		Model:         sdkResp.Model,
+		RawUsage:      rawUsageJSON,
+		rawOutputText: text,
 		Choices: []Choice{{
 			Message: ResponseMessage{
 				Role:             "assistant",
