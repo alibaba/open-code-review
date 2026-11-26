@@ -140,7 +140,8 @@ function parseSteps(text) {
       script = body.join("\n");
     }
 
-    steps.push({ name: current.name, run, script, env, index: current.index });
+    const condition = rawLines.find((line) => line.startsWith("      if: "));
+    steps.push({ name: current.name, run, script, env, index: current.index, condition: condition?.trim() });
     current = undefined;
   }
 
@@ -228,8 +229,6 @@ function makeFixture() {
   const callsPath = path.join(dir, "calls.jsonl");
   const npmCallsPath = path.join(dir, "npm-calls.jsonl");
   const configPath = path.join(dir, "config.jsonl");
-  const resultPath = path.join(dir, "ocr-result.json");
-  const stderrPath = path.join(dir, "ocr-stderr.log");
 
   const ocrScript = `#!/usr/bin/env node
 const fs = require("fs");
@@ -254,7 +253,8 @@ if (args[0] === "config" && args[1] === "set") {
   if (output && !output.endsWith("\\n")) process.stdout.write("\\n");
   process.exit(Number(process.env.OCR_FAKE_VERSION_STATUS || 0));
 } else if (args[0] === "review") {
-  process.stdout.write(JSON.stringify({ comments: [], warnings: [] }));
+  process.stdout.write(JSON.stringify({ status: process.env.OCR_FAKE_REVIEW_STATUS || "success", comments: [], warnings: [] }));
+  process.exitCode = Number(process.env.OCR_FAKE_REVIEW_EXIT || 0);
 } else {
   process.stdout.write("ocr " + args.join(" ") + "\\n");
 }
@@ -270,7 +270,7 @@ process.stdout.write("npm " + args.join(" ") + "\\n");
     fs.writeFileSync(file, body, { mode: 0o755 });
   }
 
-  return { dir, bin, callsPath, npmCallsPath, configPath, resultPath, stderrPath };
+  return { dir, bin, callsPath, npmCallsPath, configPath };
 }
 
 function removeFixture(fixture) {
@@ -285,6 +285,7 @@ function runShell(script, env, fixture) {
       OCR_CALLS: fixture.callsPath,
       OCR_NPM_CALLS: fixture.npmCallsPath,
       OCR_CONFIG: fixture.configPath,
+      RUNNER_TEMP: fixture.dir,
       GITHUB_OUTPUT: path.join(fixture.dir, "github-output"),
       GITHUB_ENV: path.join(fixture.dir, "github-env"),
     }, env),
@@ -293,13 +294,8 @@ function runShell(script, env, fixture) {
   return result;
 }
 
-function runStep(step, values, fixture, extraEnv = {}, options = {}) {
-  let script = renderedRun(step, values);
-  if (options.replaceResultPaths) {
-    script = script
-      .replaceAll("/tmp/ocr-result.json", fixture.resultPath)
-      .replaceAll("/tmp/ocr-stderr.log", fixture.stderrPath);
-  }
+function runStep(step, values, fixture, extraEnv = {}) {
+  const script = renderedRun(step, values);
   return runShell(script, Object.assign({}, renderedEnv(step, values), extraEnv), fixture);
 }
 
@@ -670,8 +666,7 @@ function testReviewTimeoutForwardedSeparatelyFromLlmTimeout() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout },
-      { replaceResultPaths: true }
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
@@ -712,8 +707,7 @@ function testDefaultLlmTimeoutExportedSeparatelyFromReviewTimeout() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout },
-      { replaceResultPaths: true }
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
@@ -745,8 +739,7 @@ function testEmptyLlmTimeoutNormalizesBeforeReviewInvocation() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout },
-      { replaceResultPaths: true }
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
@@ -790,8 +783,7 @@ function testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: exported.REVIEW_TASK_TIMEOUT },
-      { replaceResultPaths: true }
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: exported.REVIEW_TASK_TIMEOUT }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
@@ -867,8 +859,7 @@ function testEffortAndBudgetNormalizeAndForwardAcrossSteps() {
         REVIEW_TASK_TIMEOUT: exported.REVIEW_TASK_TIMEOUT,
         EFFORT: exported.EFFORT,
         MAX_TOKENS_BUDGET: exported.MAX_TOKENS_BUDGET,
-      },
-      { replaceResultPaths: true }
+      }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
@@ -919,8 +910,7 @@ function testEmptyEffortAndBudgetOmitTheFlags() {
         REVIEW_TASK_TIMEOUT: "15",
         EFFORT: "",
         MAX_TOKENS_BUDGET: "",
-      },
-      { replaceResultPaths: true }
+      }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
@@ -1072,7 +1062,7 @@ function testRunKeepsAgentAudienceAndLogFileByDefault() {
   assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
   assert.match(
     run.run,
-    /STREAM_PROGRESS:-false\}" = "true" \]; then\s+OCR_STDERR_FIFO="\$\(mktemp -u\)"\s+mkfifo "\$OCR_STDERR_FIFO" \|\| exit 1\s+tee \/tmp\/ocr-stderr\.log < "\$OCR_STDERR_FIFO" >&2 &\s+TEE_PID=\$!\s+ocr review "\$\{ARGS\[@\]\}" > \/tmp\/ocr-result\.json 2> "\$OCR_STDERR_FIFO"\s+OCR_EXIT_CODE=\$\?\s+wait "\$TEE_PID"\s+rm -f "\$OCR_STDERR_FIFO"\s+else\s+ocr review "\$\{ARGS\[@\]\}" > \/tmp\/ocr-result\.json 2>\/tmp\/ocr-stderr\.log/,
+    /STREAM_PROGRESS:-false\}" = "true" \]; then\s+OCR_STDERR_FIFO="\$report_dir\/stderr\.fifo"\s+mkfifo "\$OCR_STDERR_FIFO" \|\| exit 1\s+tee "\$report_dir\/ocr-stderr\.log" < "\$OCR_STDERR_FIFO" >&2 &\s+TEE_PID=\$!\s+ocr review "\$\{ARGS\[@\]\}" > "\$report_dir\/ocr-result\.json" 2> "\$OCR_STDERR_FIFO"\s+OCR_EXIT_CODE=\$\?\s+wait "\$TEE_PID"\s+rm -f "\$OCR_STDERR_FIFO"\s+else\s+ocr review "\$\{ARGS\[@\]\}" > "\$report_dir\/ocr-result\.json" 2>"\$report_dir\/ocr-stderr\.log"/,
     "the live-tee path must be gated on stream_progress, flush the FIFO-fed tee via wait, and the default path must redirect stderr to the log file"
   );
   const fixture = makeFixture();
@@ -1087,8 +1077,7 @@ function testRunKeepsAgentAudienceAndLogFileByDefault() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15" },
-      { replaceResultPaths: true }
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15" }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
@@ -1096,7 +1085,7 @@ function testRunKeepsAgentAudienceAndLogFileByDefault() {
     const audienceIndex = reviewCall.args.indexOf("--audience");
     assert.ok(audienceIndex >= 0, "the default path must keep --audience agent");
     assert.strictEqual(reviewCall.args[audienceIndex + 1], "agent");
-    assert.ok(fs.existsSync(fixture.stderrPath), "the default path must still capture stderr to the log file");
+    assert.ok(fs.existsSync(path.join(readEnvAssignments(path.join(fixture.dir, "github-output")).report_dir, "ocr-stderr.log")), "the default path must still capture stderr to the log file");
   } finally {
     removeFixture(fixture);
   }
@@ -1117,14 +1106,13 @@ function testRunStreamsProgressWhenOptedIn() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15", STREAM_PROGRESS: "true" },
-      { replaceResultPaths: true }
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15", STREAM_PROGRESS: "true" }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
     assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
     assert.ok(!reviewCall.args.includes("--audience"), "stream_progress=true must drop --audience agent");
-    assert.ok(fs.existsSync(fixture.stderrPath), "the streaming path must still capture stderr to the log file");
+    assert.ok(fs.existsSync(path.join(readEnvAssignments(path.join(fixture.dir, "github-output")).report_dir, "ocr-stderr.log")), "the streaming path must still capture stderr to the log file");
   } finally {
     removeFixture(fixture);
   }
@@ -1638,8 +1626,7 @@ function testRunRetainsExtraHeadersEnvironmentOverride() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout },
-      { replaceResultPaths: true }
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
@@ -1665,8 +1652,7 @@ function testRunFailsClosedWhenValidatedTaskTimeoutIsMissing() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "" },
-      { replaceResultPaths: true }
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "" }
     );
     assert.notStrictEqual(result.status, 0, "Run OpenCodeReview must fail when validated timeout state is missing");
     assert.match(
@@ -1991,8 +1977,7 @@ function testActionOcrInvocationsDisableSelfUpdate() {
       stepNamed("Run OpenCodeReview"),
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15" },
-      { replaceResultPaths: true }
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15" }
     );
     assert.strictEqual(
       run.status,
@@ -2068,6 +2053,39 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
 }
 
+function testPublishBeforePropagatingReviewExit() {
+  const review = stepNamed("Run OpenCodeReview");
+  const post = stepNamed("Post review comments");
+  const fail = stepNamed("Fail job on OCR error");
+  assert.ok(review.index < post.index && post.index < fail.index);
+  assert.strictEqual(post.condition, "if: ${{ !cancelled() && steps.review.outputs.exit_code != '' }}");
+  assert.strictEqual(fail.condition,
+    "if: ${{ !cancelled() && steps.review.outputs.exit_code != '' && steps.review.outputs.exit_code != '0' }}");
+  assert.strictEqual(post.env.OCR_REPORT_DIR, "${{ steps.review.outputs.report_dir }}");
+  assert.match(post.script, /resultPath: path.join\(process.env.OCR_REPORT_DIR, 'ocr-result.json'\)/);
+
+  const fixture = makeFixture();
+  try {
+    const values = inputValues();
+    for (const code of ["0", "17"]) {
+      const run = runStep(review, values, fixture, {
+        REVIEW_TASK_TIMEOUT: "10", OCR_FAKE_REVIEW_EXIT: code, OCR_FAKE_REVIEW_STATUS: "partial",
+      });
+      assert.strictEqual(run.status, 0, resultDescription(run));
+      const outputs = readEnvAssignments(path.join(fixture.dir, "github-output"));
+      assert.strictEqual(outputs.exit_code, code);
+      const report = JSON.parse(fs.readFileSync(path.join(outputs.report_dir, "ocr-result.json"), "utf8"));
+      assert.strictEqual(report.status, "partial");
+      if (code !== "0") {
+        const env = renderedEnv(fail, values, { review: outputs });
+        assert.strictEqual(runShell(renderedRun(fail, values), env, fixture).status, Number(code));
+      }
+    }
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
 function testPostReviewCommentsWiresAppSlug() {
   const post = stepNamed("Post review comments");
   assert.ok(post, "action.yml must retain the Post review comments step");
@@ -2137,6 +2155,7 @@ const TESTS = [
   ["the resolved PR number reaches the fork-safe head fetch", testResolvedPrNumberReachesTheHeadFetch],
   ["both github-script steps read the resolved PR number", testPrNumberWiredIntoBothGithubScriptSteps],
   ["GitHub Actions README documents PR number resolution", testExampleReadmeDocumentsPrNumberResolution],
+  ["Publish the current report before propagating the review exit", testPublishBeforePropagatingReviewExit],
   ["Post review comments wires the app slug", testPostReviewCommentsWiresAppSlug],
 ];
 

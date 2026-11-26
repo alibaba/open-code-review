@@ -104,7 +104,7 @@ composite action
 | Input | 默认值 | 说明 |
 |---|---|---|
 | `effort` | `''` | 传给 `ocr review --effort` 的评审强度预设：`low`、`medium` 或 `high`（不区分大小写）。留空则沿用 CLI 默认值（已配置的值，否则为 medium）。需要 OCR v1.10.0 或更新版本；在更旧版本上 action 会提前以明确报错失败。 |
-| `max_tokens_budget` | `''` | 传给 `ocr review --max-tokens-budget` 的 token 总量上限（输入 + 输出）。留空或 `'0'` 表示不限。每次 LLM 轮次前都会检查：已超出上限的子任务会获得最后一轮来提交发现，不再派发新的子任务，超出预算和被跳过的文件记为 `failed(budget)`。仅因预算而中断且已有有效审查结果时，退出码为 0。发生超时、模型服务错误等运行故障，或所有选中项均失败（包括全部因预算失败）时，退出码非零。CLI 会输出已有结果。非零退出时，Action 可按配置上传原始输出，但会跳过 PR 评论。 |
+| `max_tokens_budget` | `''` | 传给 `ocr review --max-tokens-budget` 的 token 总量上限（输入 + 输出）。留空或 `'0'` 表示不限。每次 LLM 轮次前都会检查：已超出上限的子任务会获得最后一轮来提交发现，不再派发新的子任务，超出预算和被跳过的文件记为 `failed(budget)`。仅因预算而中断且已有有效审查结果时，退出码为 0。发生超时、模型服务错误等运行故障，或所有选中项均失败（包括全部因预算失败）时，退出码非零。CLI 会输出已有结果。即使退出码非零，Action 也会先尝试发布本次报告，再返回原退出码。 |
 | `llm_reasoning_effort` | `''` | 面向支持 `reasoning_effort` 请求字段的模型（如 GLM-5.x、OpenAI reasoning 模型）的推理深度：`minimal`、`low`、`medium`、`high`、`max`（不区分大小写）。经 `llm_extra_body` 合并进请求体，因此所有已发布的 CLI 版本均可使用；`llm_extra_body` 中显式的 `reasoning_effort` 键优先于此 input。留空（默认）则不发送。仅适用于 OpenAI 兼容协议——Anthropic API 会拒绝未知请求体字段，action 在该协议下会快速失败；Anthropic 的 thinking 控制请改用 `llm_extra_body` 中的显式键。 |
 | `stream_progress` | `'false'` | 设为 `'true'` 时，把 `[ocr]` 实时进度行流入工作流日志（stderr 上的 human audience），而不是在评审结束前保持静默。仅影响展示：stderr 仍会写入文件，供产物上传与评论张贴使用。 |
 
@@ -301,9 +301,7 @@ review（或 `ocr scan`）来生成报告。
 | 评审评论落到错误行 | 通常意味着评审开始到评论张贴之间 diff 发生了偏移。张贴脚本此时回退为普通 issue 评论——无需处理。 |
 
 > **注意。** `OCR_DEBUG` 环境变量目前在 OCR 中**未实现**——设置
-> `OCR_DEBUG: "1"` 无效。此处记录以备将来接入。当前若需详细输出，可检查工作流写
-> 到 `/tmp/ocr-result.json` 和 `/tmp/ocr-stderr.log` 的原始评审 JSON 和 stderr
-> （见下方故障排查），或本地运行 `ocr review`。
+> `OCR_DEBUG: "1"` 无效。此处记录以备将来接入。要查看原始报告和 stderr，可下载该次工作流的产物，或在本地运行 `ocr review`。
 
 ## GitLab CI
 
