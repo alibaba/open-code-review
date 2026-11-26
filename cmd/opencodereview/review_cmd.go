@@ -203,10 +203,36 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	cc.Template.ApplyEffort(effort)
 
+	args := agent.Args{
+		AnalysisEnabled:       opts.analysis,
+		RepoDir:               cc.RepoDir,
+		From:                  opts.from,
+		To:                    opts.to,
+		Commit:                opts.commit,
+		ReviewMode:            reviewModeFromOptions(opts),
+		Template:              *cc.Template,
+		SystemRule:            cc.Resolver,
+		FileFilter:            cc.FileFilter,
+		LLMClient:             rt.Client,
+		RetryCollector:        rt.RetryCollector,
+		CommentCollector:      rt.Collector,
+		MaxConcurrency:        opts.concurrency,
+		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
+		Model:                 rt.Model,
+		Provider:              rt.Provider,
+		EndpointSource:        rt.Source,
+		Background:            opts.background,
+		GitRunner:             cc.GitRunner,
+		Resume:                resumeState,
+		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		SkipFilter:            opts.noFilter,
+		RuntimeConfig:         rt.RuntimeConfig,
+	}
+
 	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
 	// input it returns pins the run to the very commits this check passed on, so
 	// the decision cannot be undone by a ref moving afterwards.
-	sealed, err := validateResumeIdentity(ctx, cc, opts, rt, resumeState)
+	sealed, err := validateResumeIdentity(ctx, args, opts)
 	if err != nil {
 		return err
 	}
@@ -245,39 +271,12 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	defer closeReviewMCPClients(mcpClients)
 
 	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
-	planToolDefs = append(planToolDefs, mcpToolDefs...)
-	mainToolDefs = append(mainToolDefs, mcpToolDefs...)
-
-	ag := agent.New(agent.Args{
-		AnalysisEnabled:       opts.analysis,
-		RepoDir:               cc.RepoDir,
-		From:                  opts.from,
-		To:                    opts.to,
-		Commit:                opts.commit,
-		ReviewMode:            reviewModeFromOptions(opts),
-		Template:              *cc.Template,
-		SystemRule:            cc.Resolver,
-		FileFilter:            cc.FileFilter,
-		LLMClient:             rt.Client,
-		RetryCollector:        rt.RetryCollector,
-		Tools:                 tools,
-		PlanToolDefs:          planToolDefs,
-		MainToolDefs:          mainToolDefs,
-		CommentCollector:      rt.Collector,
-		CommentWorkerPool:     agent.NewCommentWorkerPool(opts.concurrency),
-		MaxConcurrency:        opts.concurrency,
-		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
-		Model:                 rt.Model,
-		Provider:              rt.Provider,
-		EndpointSource:        rt.Source,
-		Background:            opts.background,
-		GitRunner:             cc.GitRunner,
-		Resume:                resumeState,
-		SealedInput:           codeTools.resolution,
-		MaxTokensBudget:       int64(opts.maxTokensBudget),
-		SkipFilter:            opts.noFilter,
-		RuntimeConfig:         rt.RuntimeConfig,
-	})
+	args.Tools = tools
+	args.PlanToolDefs = append(planToolDefs, mcpToolDefs...)
+	args.MainToolDefs = append(mainToolDefs, mcpToolDefs...)
+	args.CommentWorkerPool = agent.NewCommentWorkerPool(opts.concurrency)
+	args.SealedInput = codeTools.resolution
+	ag := agent.New(args)
 
 	closeRaw := bindRawWriter(rt.RawHolder, cc.RepoDir, ag.Session())
 	defer closeRaw()
@@ -463,8 +462,8 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 	return state, nil
 }
 
-// validateResumeIdentity rejects a resume whose input, rules, provider or model
-// no longer match the parent run.
+// validateResumeIdentity checks the input, rules, prompts and endpoint
+// against the parent run.
 //
 // It must run before agent.New: agent.New creates the session, and session.New
 // writes session_start immediately, so validating any later would leave an orphan
@@ -477,28 +476,18 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // command line: both default to the empty string and nothing else can set them,
 // so a provider that changed via config file or environment stays implicit —
 // which is the transition this check exists to reject.
-func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState) (*agent.SealedInput, error) {
-	if state == nil {
+func validateResumeIdentity(ctx context.Context, args agent.Args, opts reviewOptions) (*agent.SealedInput, error) {
+	if args.Resume == nil {
 		return nil, nil
 	}
-	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		ReviewMode: reviewModeFromOptions(opts),
-		Template:   *cc.Template,
-		SystemRule: cc.Resolver,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
-	})
+	sealed, err := agent.ResolveIdentity(ctx, args)
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
 	}
-	if err := state.ValidateResume(session.ResumeRequest{
+	if err := args.Resume.ValidateResume(session.ResumeRequest{
 		Identity:         sealed.Identity,
-		Provider:         rt.Provider,
-		Model:            rt.Model,
+		Provider:         args.Provider,
+		Model:            args.Model,
 		ProviderExplicit: opts.provider != "",
 		ModelExplicit:    opts.model != "",
 	}); err != nil {

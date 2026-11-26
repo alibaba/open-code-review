@@ -199,6 +199,11 @@ Devam ettirme bilinçli olarak katıdır. Kontrol noktaları yalnızca önceki �
 - Çalışma alanında hem taban commit hem commit edilmemiş değişiklikler eşleşmelidir. Aralık/commit kipinden farklı olarak sabitlenecek bir commit olmadığından devam ederken yapılan düzenlemeler korunmaz. Kimlik, bayt bayt görüntüden değil seçilip ayrıştırılan farktan hesaplanır. İzlenmeyen dosyanın son satır sonunu eklemek/kaldırmak veya yalnızca LF/CRLF değiştirmek aynı farka normalleşir; devam edilebilir. İçerik değişikliği reddedilir.
 - Kip eşleşmelidir; aralık oturumu commit oturumu olarak sürdürülemez.
 - Çözümlenen girdi eşleşmelidir. Ref'lerin yazımı karşılaştırılmaz; `abc1234` ve `abc1234def` aynı commit olabilir. Aynı ref artık farklı farka çözümleniyorsa veya kural/filtreler seçilen dosyaları değiştirmişse kısmi kullanım yerine tüm devam isteği reddedilir.
+- İncelemede kullanılan gereksinim bağlamı ve Plan ile Main istem şablonları
+  (yanıt dili dahil) eşleşmelidir. Bağlam dosyaları temizlenmiş içerikleri
+  üzerinden karşılaştırılır. Bunlardan biri değiştiyse veya önceki çalıştırmanın
+  bildiriminde `review_prompt_sha256` yoksa `--resume` seçeneğini kaldırıp yeni bir
+  inceleme başlatın. Önceki oturumu yine `ocr session show` ile görüntüleyebilirsiniz.
 - Sağlayıcı/model değişikliği açıkça `--provider` / `--model` ile istenmelidir. Yapılandırma ya da ortamdan gelen değişiklik reddedilir.
 - Önceki oturum, girdinin doğrulanacağı çalıştırma bildirimini içermelidir. Dosya dağıtımından sonra Ctrl-C incelemeyi düzgün iptal edip bildirim kaydeder; tamamlanan kontrol noktaları kullanılabilir kalır. Düzgün kapanmadan öldürülen süreçte ve bu özellikten eski oturumlarda bildirim yoktur.
 - Yalnızca önceki bildirimin tamamladığını belirttiği dosyalar kullanılır. Bildirimde olmayan veya okunamayan kontrol noktası yalnızca ilgili dosyayı etkiler; o dosya yeniden incelenir.

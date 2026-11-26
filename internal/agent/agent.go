@@ -980,6 +980,7 @@ func (a *Agent) initManifest() {
 		ConfiguredConcurrency: a.args.MaxConcurrency,
 		MaxToolRequestTimes:   a.args.Template.MaxToolRequestTimes,
 		RuleConfigSHA256:      a.ruleConfigSHA256(),
+		ReviewPromptSHA256:    a.reviewPromptSHA256(),
 		RuntimeConfigSHA256:   a.runtimeConfigSHA256(),
 	})
 }

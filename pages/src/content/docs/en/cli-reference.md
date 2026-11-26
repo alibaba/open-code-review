@@ -256,6 +256,11 @@ would review the same thing the parent did:
   and `abc1234def` name the same commit — but if the same refs now resolve to a
   different diff, or the rules or filters changed the selected file set, the
   whole resume is rejected rather than partially reused
+- the effective background and the Plan and Main prompt templates (including
+  the response language) must match. Background files are compared by their
+  sanitized content. If either input differs or the parent manifest lacks
+  `review_prompt_sha256`, omit `--resume` to start a fresh review. You can still
+  inspect the earlier session with `ocr session show`.
 - a provider or model change must be asked for explicitly with `--provider` /
   `--model`. A change that arrived through config or the environment is rejected
 - the parent must carry a run manifest, which is what its input is verified

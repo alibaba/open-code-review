@@ -127,11 +127,15 @@ func initResumeRepo(t *testing.T) string {
 	return dir
 }
 
-func resumeTestContext(repoDir string) *commonContext {
-	return &commonContext{
-		RepoDir:   repoDir,
-		Template:  &template.Template{MaxTokens: 4000},
-		IsGitRepo: true,
+func resumeTestArgs(repoDir string, opts reviewOptions) agent.Args {
+	return agent.Args{
+		RepoDir:    repoDir,
+		From:       opts.from,
+		To:         opts.to,
+		ReviewMode: reviewModeFromOptions(opts),
+		Template:   template.Template{MaxTokens: 4000},
+		Provider:   "anthropic",
+		Model:      "claude",
 	}
 }
 
@@ -153,6 +157,7 @@ func writeVerifiableParent(t *testing.T, repoDir string, id session.RunIdentity,
 	})
 	b.SetExecution(session.ManifestExecution{
 		Provider: provider, Model: model, RuleConfigSHA256: id.RuleConfigSHA256,
+		ReviewPromptSHA256: id.ReviewPromptSHA256,
 	})
 	if err := b.RegisterSelected(session.CoverageItem{ItemID: "item-1", Path: "main.go"}); err != nil {
 		t.Fatalf("register selected: %v", err)
@@ -204,6 +209,7 @@ func writeVerifiableWorkspaceParent(t *testing.T, repoDir string, id session.Run
 	})
 	b.SetExecution(session.ManifestExecution{
 		Provider: provider, Model: model, RuleConfigSHA256: id.RuleConfigSHA256,
+		ReviewPromptSHA256: id.ReviewPromptSHA256,
 	})
 	if err := b.RegisterSelected(session.CoverageItem{ItemID: "item-1", Path: "main.go"}); err != nil {
 		t.Fatalf("register selected: %v", err)
@@ -250,21 +256,15 @@ func countSessionFiles(t *testing.T, repoDir string) int {
 // resume must not leave a session behind, which is only true while the check runs
 // before agent.New.
 func TestValidateResumeIdentity(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := initResumeRepo(t)
-	cc := resumeTestContext(repoDir)
 	// A real range: HEAD~1..HEAD contains the commit that added main.go, so the
 	// resolved identity is derived from actual reviewable content rather than from
 	// the digest of an empty selected set.
 	opts := reviewOptions{from: "HEAD~1", to: "HEAD"}
+	args := resumeTestArgs(repoDir, opts)
 
-	sealed, err := agent.ResolveIdentity(context.Background(), agent.Args{
-		RepoDir:    repoDir,
-		From:       opts.from,
-		To:         opts.to,
-		ReviewMode: reviewModeFromOptions(opts),
-		Template:   *cc.Template,
-	})
+	sealed, err := agent.ResolveIdentity(context.Background(), args)
 	if err != nil {
 		t.Fatalf("ResolveIdentity: %v", err)
 	}
@@ -277,17 +277,18 @@ func TestValidateResumeIdentity(t *testing.T) {
 	if state.Manifest == nil {
 		t.Fatal("parent manifest did not survive the round trip through session_end")
 	}
+	args.Resume = state
 
 	t.Run("same provider and model is accepted", func(t *testing.T) {
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
+		if _, err := validateResumeIdentity(context.Background(), args, opts); err != nil {
 			t.Errorf("want accepted, got: %v", err)
 		}
 	})
 
 	t.Run("nil state is a non-resume run", func(t *testing.T) {
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, nil); err != nil {
+		fresh := args
+		fresh.Resume = nil
+		if _, err := validateResumeIdentity(context.Background(), fresh, opts); err != nil {
 			t.Errorf("a run with no --resume must not be checked, got: %v", err)
 		}
 	})
@@ -296,14 +297,13 @@ func TestValidateResumeIdentity(t *testing.T) {
 		// The false-rejection half of the contract. The parent was reviewed as
 		// HEAD~1..HEAD; naming the very same two commits by full SHA is the same
 		// input, and a check that compared ref text would kill this resume.
-		equivalent := opts
-		equivalent.from = revParse(t, repoDir, "HEAD~1")
-		equivalent.to = revParse(t, repoDir, "HEAD")
-		if equivalent.from == opts.from || equivalent.to == opts.to {
+		equivalent := args
+		equivalent.From = revParse(t, repoDir, "HEAD~1")
+		equivalent.To = revParse(t, repoDir, "HEAD")
+		if equivalent.From == args.From || equivalent.To == args.To {
 			t.Fatal("fixture must use a different spelling than the parent did")
 		}
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, equivalent, rt, state); err != nil {
+		if _, err := validateResumeIdentity(context.Background(), equivalent, opts); err != nil {
 			t.Errorf("ref spelling must not decide admission, got: %v", err)
 		}
 	})
@@ -311,8 +311,9 @@ func TestValidateResumeIdentity(t *testing.T) {
 	t.Run("implicit provider change is rejected and persists nothing", func(t *testing.T) {
 		before := countSessionFiles(t, repoDir)
 
-		rt := &llmRuntime{Provider: "openai", Model: "gpt-5"}
-		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
+		changed := args
+		changed.Provider, changed.Model = "openai", "gpt-5"
+		_, err := validateResumeIdentity(context.Background(), changed, opts)
 		if err == nil {
 			t.Fatal("want rejection for a provider change with no --provider flag")
 		}
@@ -329,9 +330,51 @@ func TestValidateResumeIdentity(t *testing.T) {
 		// means: the flag defaults to empty and nothing else assigns it.
 		explicit := opts
 		explicit.provider = "openai"
-		rt := &llmRuntime{Provider: "openai", Model: "gpt-5"}
-		if _, err := validateResumeIdentity(context.Background(), cc, explicit, rt, state); err != nil {
+		changed := args
+		changed.Provider, changed.Model = "openai", "gpt-5"
+		if _, err := validateResumeIdentity(context.Background(), changed, explicit); err != nil {
 			t.Errorf("want accepted with --provider, got: %v", err)
+		}
+	})
+
+	t.Run("explicit model change requires matching prompts", func(t *testing.T) {
+		explicit := opts
+		explicit.model = "claude-next"
+		changed := args
+		changed.Model = explicit.model
+		if _, err := validateResumeIdentity(context.Background(), changed, explicit); err != nil {
+			t.Fatalf("want accepted with --model, got: %v", err)
+		}
+
+		changed.Template.MainTask.Messages = []template.ChatMessage{{Role: "system", Content: "Review the public API."}}
+		_, err := validateResumeIdentity(context.Background(), changed, explicit)
+		if err == nil || !strings.Contains(err.Error(), "review prompt identity changed") || !strings.Contains(err.Error(), "omit --resume") {
+			t.Errorf("want prompt rejection with fresh-review hint despite --model, got: %v", err)
+		}
+	})
+
+	t.Run("legacy manifest without prompt identity is rejected", func(t *testing.T) {
+		legacyIdentity := sealed.Identity
+		legacyIdentity.ReviewPromptSHA256 = ""
+		legacy := opts
+		legacy.resume = writeVerifiableParent(t, repoDir, legacyIdentity, args.Provider, args.Model)
+		shown := captureStdout(t, func() {
+			if err := runSessionShowCompat([]string{"--repo", repoDir, "--json", legacy.resume}); err != nil {
+				t.Errorf("session show must accept a legacy manifest: %v", err)
+			}
+		})
+		if !strings.Contains(shown, legacy.resume) {
+			t.Errorf("session show did not display legacy session %q: %s", legacy.resume, shown)
+		}
+		legacyState, err := loadReviewResumeState(repoDir, legacy)
+		if err != nil {
+			t.Fatalf("legacy session must still load: %v", err)
+		}
+		legacyArgs := args
+		legacyArgs.Resume = legacyState
+		_, err = validateResumeIdentity(context.Background(), legacyArgs, legacy)
+		if err == nil || !strings.Contains(err.Error(), "no review prompt identity") || !strings.Contains(err.Error(), "omit --resume") {
+			t.Errorf("want missing prompt identity error with fresh-review hint, got: %v", err)
 		}
 	})
 
@@ -347,8 +390,7 @@ func TestValidateResumeIdentity(t *testing.T) {
 		commitFile(t, repoDir, "main.go",
 			"package main\n\nfunc main() { println(\"changed\") }\n", "change main")
 
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
+		_, err := validateResumeIdentity(context.Background(), args, opts)
 		if err == nil {
 			t.Fatal("want rejection after the same refs resolved to a different diff")
 		}
@@ -365,7 +407,7 @@ func TestValidateResumeIdentity(t *testing.T) {
 // the worktree is the input, so it must be unchanged, and there is no commit
 // endpoint to pin, which is why the base commit is compared instead.
 func TestValidateResumeIdentityWorkspace(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := initResumeRepo(t)
 	// An uncommitted edit is what a workspace run reviews; HEAD alone has no diff
 	// to offer.
@@ -373,14 +415,10 @@ func TestValidateResumeIdentityWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte(wip), 0o644); err != nil {
 		t.Fatalf("write workspace change: %v", err)
 	}
-	cc := resumeTestContext(repoDir)
 	opts := reviewOptions{}
+	args := resumeTestArgs(repoDir, opts)
 
-	sealed, err := agent.ResolveIdentity(context.Background(), agent.Args{
-		RepoDir:    repoDir,
-		ReviewMode: session.ReviewModeWorkspace,
-		Template:   *cc.Template,
-	})
+	sealed, err := agent.ResolveIdentity(context.Background(), args)
 	if err != nil {
 		t.Fatalf("ResolveIdentity: %v", err)
 	}
@@ -396,10 +434,10 @@ func TestValidateResumeIdentityWorkspace(t *testing.T) {
 	if state.ReviewMode != session.ReviewModeWorkspace {
 		t.Fatalf("state mode = %q, want workspace", state.ReviewMode)
 	}
+	args.Resume = state
 
 	t.Run("unchanged worktree is accepted", func(t *testing.T) {
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
+		if _, err := validateResumeIdentity(context.Background(), args, opts); err != nil {
 			t.Errorf("want accepted, got: %v", err)
 		}
 	})
@@ -409,8 +447,7 @@ func TestValidateResumeIdentityWorkspace(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte(wip+"// more\n"), 0o644); err != nil {
 			t.Fatalf("write workspace change: %v", err)
 		}
-		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
+		_, err := validateResumeIdentity(context.Background(), args, opts)
 		if err == nil {
 			t.Fatal("want rejection after the worktree changed")
 		}
