@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -31,6 +32,11 @@ type OpenAIResponsesClient struct {
 	cfg          ClientConfig
 	sdk          openai.Client
 	chatGPTToken func(context.Context) (string, error)
+	// query holds the query parameters parsed from a configured URL that
+	// carried them (e.g. a gateway route like ...?tenant=acme). They are
+	// re-applied to every request with option.WithQueryAdd, because the SDK
+	// drops a base URL's query when it resolves the request path.
+	query url.Values
 }
 
 // NewOpenAIResponsesClient creates a client for the OpenAI Responses API.
@@ -46,8 +52,16 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if cfg.SessionKey == "" {
 		cfg.SessionKey = NewSessionKey()
 	}
-	ensureResponsesEndpoint(&cfg)
-	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
+	var query url.Values
+	sdkBaseURL := ""
+	if baseURL, q, fullURL := normalizeEndpointURL(cfg.URL, "/responses"); q != nil {
+		cfg.URL = fullURL
+		query = q
+		sdkBaseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/responses")
+	} else {
+		ensureResponsesEndpoint(&cfg)
+		sdkBaseURL = strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
+	}
 
 	httpClient := httpClientWithHeaderTimeout(cfg.Timeout)
 	retries := 5
@@ -75,8 +89,9 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	}
 
 	client := &OpenAIResponsesClient{
-		cfg: cfg,
-		sdk: openai.NewClient(opts...),
+		cfg:   cfg,
+		sdk:   openai.NewClient(opts...),
+		query: query,
 	}
 	if cfg.ChatGPTPlan {
 		client.chatGPTToken = func(ctx context.Context) (string, error) {
@@ -156,6 +171,11 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 	}
 
 	var opts []openaiopt.RequestOption
+	for k, vs := range c.query {
+		for _, v := range vs {
+			opts = append(opts, openaiopt.WithQueryAdd(k, v))
+		}
+	}
 	if c.cfg.ChatGPTPlan {
 		opts = append(opts, openaiopt.WithAPIKey(planToken))
 	}
