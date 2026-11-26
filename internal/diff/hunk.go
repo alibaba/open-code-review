@@ -68,7 +68,8 @@ func HunkRanges(patch string) []Hunk {
 // ParseHunks parses raw unified diff text for a single file into a slice of Hunks.
 // Lines before the first @@ header (file-level headers like "diff --git", "---", "+++") are ignored.
 func ParseHunks(rawDiffText string) []Hunk {
-	lines := splitDiffLines(rawDiffText)
+	// A final line terminator does not introduce another context line.
+	lines := splitDiffLines(strings.TrimSuffix(rawDiffText, "\n"))
 	var hunks []Hunk
 	var current *Hunk
 

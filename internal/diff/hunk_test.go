@@ -4,6 +4,7 @@
 package diff
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -119,5 +120,38 @@ new file mode 100644
 		if l.Type != HunkAdded {
 			t.Errorf("expected all lines to be HunkAdded, got %d", l.Type)
 		}
+	}
+}
+
+func TestParseHunks_TerminalNewline(t *testing.T) {
+	tests := []struct {
+		name  string
+		patch string
+		want  []HunkLine
+	}{
+		{"LF", "@@ -1 +1 @@\n-old\n+new\n", []HunkLine{{HunkDeleted, "old"}, {HunkAdded, "new"}}},
+		{"CRLF", "@@ -1 +1 @@\r\n-old\r\n+new\r\n", []HunkLine{{HunkDeleted, "old"}, {HunkAdded, "new"}}},
+		{"blank context", "@@ -1,2 +1,2 @@\n-old\n+new\n \n", []HunkLine{{HunkDeleted, "old"}, {HunkAdded, "new"}, {HunkContext, ""}}},
+		{"unprefixed blank context", "@@ -1,2 +1,2 @@\n-old\n+new\n\n", []HunkLine{{HunkDeleted, "old"}, {HunkAdded, "new"}, {HunkContext, ""}}},
+		{"unterminated", "@@ -1 +1 @@\n-old\n+new", []HunkLine{{HunkDeleted, "old"}, {HunkAdded, "new"}}},
+		{"no newline marker", "@@ -1 +1 @@\n-old\n+new\n\\ No newline at end of file\n", []HunkLine{{HunkDeleted, "old"}, {HunkAdded, "new"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hunks := ParseHunks(tt.patch)
+			if len(hunks) != 1 {
+				t.Fatalf("got %d hunks, want 1", len(hunks))
+			}
+			if !reflect.DeepEqual(hunks[0].Lines, tt.want) {
+				t.Errorf("got %#v, want %#v", hunks[0].Lines, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseHunks_TerminalNewlineMultipleHunks(t *testing.T) {
+	hunks := ParseHunks("@@ -1 +1 @@\n-a\n+b\n@@ -4 +4 @@\n-c\n+d\n")
+	if len(hunks) != 2 || len(hunks[0].Lines) != 2 || len(hunks[1].Lines) != 2 {
+		t.Fatalf("unexpected hunks: %#v", hunks)
 	}
 }

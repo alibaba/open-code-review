@@ -128,9 +128,7 @@ func TestParseHunks_CRLFKeepsLineContentClean(t *testing.T) {
 		}
 		got = append(got, line.Content)
 	}
-	// The trailing newline of the last line yields one empty context line.
-	// That is existing behaviour, identical for LF input, and unrelated to CR.
-	want := []string{"kept", "added", "removed", ""}
+	want := []string{"kept", "added", "removed"}
 	if len(got) != len(want) {
 		t.Fatalf("got %d lines %q, want %d", len(got), got, len(want))
 	}
