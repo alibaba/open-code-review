@@ -51,15 +51,100 @@ func TestContractChangeMustOriginateInReviewedRange(t *testing.T) {
 		t.Fatal(err)
 	}
 	context := ReviewSnapshot(head)
-	if err := context.DescribeSchemaChanges(t.Context(), original, migrated, head); err != nil ||
+	if err := context.DescribeReviewChanges(t.Context(), original, migrated, head); err != nil ||
 		len(context) != 1 || context[0].CurrentSchema() || !strings.Contains(context[0].Claim, "mills") || !strings.Contains(context[0].Claim, "cents") {
 		t.Fatalf("contract migration: %+v, %v", context, err)
 	}
 	r.write("notes.md", "documentation")
 	later := r.commit("unrelated update")
 	context = ReviewSnapshot(head)
-	if err := context.DescribeSchemaChanges(t.Context(), migrated, later, head); err != nil || context[0].Claim != "" {
+	if err := context.DescribeReviewChanges(t.Context(), migrated, later, head); err != nil || context[0].Claim != "" {
 		t.Fatalf("old change attributed to new diff: %+v, %v", context, err)
+	}
+}
+
+func TestReviewTransitionKeepsOnlySurvivingWitnesses(t *testing.T) {
+	ctx := t.Context()
+	r := newLifecycleRepo(t)
+	r.write("fee.py", "def fee(kind):\n    if kind == 'pickup':\n        return 0\n    return 7\n")
+	r.write("test_fee.py", "assert fee('pickup') == 0\n")
+	base := r.commit("pickup orders carry no handling fee")
+	implementation, err := base.Cite(ctx, "fee.py", 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	test, err := base.Cite(ctx, "test_fee.py", 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := base.Prepare(ctx, Fact{Category: CategoryBusinessRule, Authority: AuthorityConfirmed, Source: "fee.py", Scope: ".",
+		Claim: "Pickup orders have no handling fee.", Citations: []Citation{implementation, test},
+		Conditions: []Condition{{Description: "The order is collected.", Citation: &implementation}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(before, after Tree) Fact {
+		t.Helper()
+		head, err := after.CheckReview(ctx, before.Commit, []Fact{f})
+		if err != nil || len(head) != 1 {
+			t.Fatalf("check review: %+v, %v", head, err)
+		}
+		s := ReviewSnapshot(head)
+		if err := s.DescribeReviewChanges(ctx, before, after, head); err != nil {
+			t.Fatal(err)
+		}
+		return s[0]
+	}
+	r.write("fee.py", "def fee(kind):\n    if kind == 'pickup':\n        return 4\n    return 7\n")
+	change := r.commit("apply a pickup surcharge")
+	got := check(base, change)
+	if got.ContextStatus() != StatusTransition || got.baseCommit != base.Commit || got.baseClaim != f.Claim ||
+		got.Claim != "" || got.Authority != AuthorityHistorical || len(got.baseConditions) != 1 || len(got.Conditions) != 0 ||
+		len(got.Citations) != 1 || got.Citations[0].CurrentPath != test.Path || got.Citations[0].Quote != test.Quote {
+		t.Fatalf("patch lost the surviving expectation or treated the old implementation as current: %+v", got)
+	}
+	raw := Snapshot{got}.ForPaths([]string{"fee.py"})
+	if !strings.Contains(raw, `"base_claim":"Pickup orders have no handling fee."`) || strings.Contains(raw, "return 0") {
+		t.Fatal(raw)
+	}
+	r.write("test_fee.py", "assert fee('pickup') == 4\n")
+	acceptedChange := r.commit("update the accepted policy")
+	if changed := check(base, acceptedChange); len(changed.Citations) != 0 || changed.ContextStatus() != StatusTransition {
+		t.Fatalf("changed expectations were offered as current witnesses: %+v", changed)
+	}
+	r.write("notes.md", "explain shipping\n")
+	if later := check(acceptedChange, r.commit("unrelated change")); later.baseClaim != "" || later.ContextStatus() != StatusChanged {
+		t.Fatalf("attributed an earlier policy change to this review: %+v", later)
+	}
+}
+
+func TestWholeFileDismissalSuppliesRecheckedReviewEvidence(t *testing.T) {
+	r := newLifecycleRepo(t)
+	r.write("policy.py", "def handling_fee(kind):\n    return 0 if kind == 'pickup' else 7\n")
+	r.write("checkout.py", "print(handling_fee(kind))\n")
+	base := r.commit("accept pickup exception")
+	f, err := base.Decide(t.Context(), "policy.py", "checkout.py", "MR-8", "Pickup should charge seven.", "Pickup carries no fee.")
+	if err != nil || len(f.Citations) != 0 {
+		t.Fatalf("whole-file decision: %+v, %v", f, err)
+	}
+	view := func(head Tree) Snapshot {
+		t.Helper()
+		checked, err := head.CheckReview(t.Context(), base.Commit, []Fact{f})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := ReviewSnapshot(checked)
+		if err := s.DescribeReviewChanges(t.Context(), base, head, checked); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if s := view(base); len(s) != 1 || len(s[0].Citations) != 1 || !strings.Contains(s[0].Citations[0].Quote, "kind == 'pickup'") {
+		t.Fatalf("stored decision has no verifiable current source: %+v", s)
+	}
+	r.write("policy.py", "def handling_fee(kind):\n    return 7\n")
+	if s := view(r.commit("remove the pickup exception")); len(s) != 0 {
+		t.Fatalf("old decision survived changed evidence: %+v", s)
 	}
 }
 

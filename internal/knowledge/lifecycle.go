@@ -22,6 +22,7 @@ const (
 	StatusCandidate  = "candidate"
 	StatusHistorical = "historical"
 	StatusChanged    = "changed"
+	StatusTransition = "changed_in_review"
 	StatusUnverified = "unverified"
 	StatusExpired    = "expired"
 	StatusSuperseded = "superseded"

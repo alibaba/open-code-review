@@ -640,6 +640,8 @@ record text suitable for the configured review model.
 
 Each review group retrieves records using paths and identifiers from its diff. For a JSON document explicitly mapped to a schema, OCR checks present property values against current `const` and `enum` constraints. When a schema changes, the reviewer also sees the previous and proposed property constraints so it can check affected consumers.
 
+If a code change edits a rule that held at the comparison base, the reviewer sees its previous meaning and the exact source lines still present in the reviewed version. This helps it trace a caller or test that depends on the old behavior. A prior claim cannot dismiss a current finding. When the first assessment proposes withdrawing a finding, a separate assessment checks that finding's full trigger and effect against current evidence. An inconclusive assessment keeps the finding.
+
 The agent completes its ordinary review, including code investigation, before checking the diff and provisional findings against the retrieved knowledge. A new business finding must identify the rule, quote the affected code and give current supporting evidence. Withdrawing an existing finding requires a refutation of its specific claim at the same location. An unconfirmed interpretation needs corroboration from another current source. `--no-filter` retains the original findings. If a model request or budget prevents the extra check, the report records a warning and preserves the ordinary review.
 
 Prior dismissals remain scoped to their review ID. A moved citation can remain applicable in Go and Python. Changing the cited guard or losing its supporting evidence withdraws the old rationale.

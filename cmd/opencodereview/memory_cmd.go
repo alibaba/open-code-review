@@ -188,7 +188,7 @@ func reviewMemory(ctx context.Context, cc *commonContext, opts reviewOptions, co
 	snapshot := knowledge.ReviewSnapshot(checked)
 	base := tree
 	base.Commit, base.Workspace = code.resolution.ResolvedBase, false
-	if err := snapshot.DescribeSchemaChanges(ctx, base, tree, checked); err != nil {
+	if err := snapshot.DescribeReviewChanges(ctx, base, tree, checked); err != nil {
 		return nil, err
 	}
 	return snapshot, nil

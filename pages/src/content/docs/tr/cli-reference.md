@@ -496,6 +496,8 @@ ocr memory feedback "$RULE_ID" --action confirm --reason "Matches the settlement
 
 ### İncelemede kuralların kullanımı {#how-review-uses-knowledge}
 
+Bir değişiklik temel sürümde geçerli olan kuralı etkilediğinde ajan eski davranışı ve yeni sürümde hâlâ bulunan kaynak satırlarını görür. Bu sayede hangi çağrıların veya testlerin eski davranışa bağlı olduğunu inceleyebilir. İlk değerlendirme bir bulgunun geri çekilmesini önerirse bağımsız bir değerlendirme bulgunun koşullarını ve sonucunu güncel kanıtla karşılaştırır. Kanıt yetersizse bulgu korunur.
+
 Ajan önce normal kod incelemesini tamamlar. Ardından ilgili kuralları ve güncel kaynak satırlarını kullanarak eksik bir iş kuralı ihlalini arar ve mevcut bulguların dayanaklarını sınar. Bir bulgunun geri çekilmesi için aynı konumdaki iddianın güncel kanıtla çelişmesi gerekir. `--no-filter` mevcut bulguları korur. Bir istisnanın koşulu değişirse önceki incelemenin gerekçesi geçerliliğini yitirir.
 
 ## `ocr rules` {#ocr-rules}

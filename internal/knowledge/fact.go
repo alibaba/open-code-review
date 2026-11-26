@@ -63,6 +63,9 @@ type Fact struct {
 
 	contextStatus    string
 	contextConflicts []string
+	baseClaim        string
+	baseCommit       string
+	baseConditions   []string
 }
 
 type Citation struct {

@@ -13,27 +13,42 @@ import (
 	"strings"
 )
 
-// DescribeSchemaChanges distinguishes a contract edited in this change from
-// an old record that had already stopped applying before the review.
-func (s Snapshot) DescribeSchemaChanges(ctx context.Context, before, after Tree, checked []Checked) error {
-	if before.Commit == "" {
-		return nil
-	}
-	var changed []Fact
-	for _, c := range checked {
-		if c.Status == StatusChanged && c.schema() {
-			changed = append(changed, c.Fact)
+// DescribeReviewChanges compares both ends of the review. A rule that stopped
+// applying before the base cannot identify a contract changed by this patch.
+func (s Snapshot) DescribeReviewChanges(ctx context.Context, before, after Tree, checked []Checked) error {
+	rechecker := newRechecker(ctx, after)
+	positions := map[string]int{}
+	for i, f := range s {
+		if f.contextStatus == StatusChanged {
+			positions[f.ID] = i
+		}
+		// Older decisions bind the whole source file instead of a range.
+		// Give the assessor current, quotable witnesses after its hash check.
+		if f.IsDecision() && f.contextStatus == StatusHistorical && len(f.Citations) == 0 {
+			s[i].Citations = rechecker.decisionExcerpts(f)
 		}
 	}
-	if len(changed) == 0 {
+	if before.Commit == "" || len(positions) == 0 {
 		return nil
 	}
-	base, err := before.Check(ctx, changed)
+	// Include other observations when resolving conflicts at the base.
+	var facts []Fact
+	for _, c := range checked {
+		facts = append(facts, c.Fact)
+	}
+	base, err := before.Check(ctx, facts)
 	if err != nil {
 		return err
 	}
-	details := make(map[string]string)
 	for _, c := range base {
+		i, changed := positions[c.ID]
+		if !changed {
+			continue
+		}
+		if (c.Status == StatusCurrent || c.Status == StatusCandidate) && !c.IsDecision() {
+			s[i] = rechecker.transition(c.Fact, before.Commit)
+			continue
+		}
 		if c.Status != StatusVerified {
 			continue
 		}
@@ -55,14 +70,68 @@ func (s Snapshot) DescribeSchemaChanges(ctx context.Context, before, after Tree,
 		if len(constraints) != 0 {
 			head = strings.Join(constraints, ", ")
 		}
-		details[c.ID] = fmt.Sprintf("Contract transition within this change for %q. Base %s %s; reviewed version: %s. Check affected consumers and intended migrations.", c.Property, c.Keyword, c.Value, head)
+		s[i].Claim = fmt.Sprintf("Contract transition within this change for %q. Base %s %s; reviewed version: %s. Check affected consumers and intended migrations.", c.Property, c.Keyword, c.Value, head)
 	}
-	for i := range s {
-		if detail, ok := details[s[i].ID]; ok {
-			s[i].Claim = detail
+	return ctx.Err()
+}
+
+func (r *rechecker) decisionExcerpts(f Fact) []Citation {
+	file := r.file(f.Source)
+	if file.err != nil || file.digest != f.SourceHash {
+		return nil
+	}
+	sources := discoveryExcerpts(file.data, discoverySource{Kind: discoveryKind(f.Source), Path: f.Source}, 1200, &DiscoveryResult{}, nil)
+	var citations []Citation
+	for _, s := range sources {
+		end := s.StartLine + strings.Count(s.Text, "\n")
+		c, err := file.cite(f.Source, f.Revision, s.StartLine, end)
+		if err == nil {
+			citations = append(citations, c.atCurrent(f.Source, lineAnchor{start: s.StartLine, end: end}))
 		}
 	}
-	return nil
+	return citations
+}
+
+// Surviving text can explain how a caller or test was affected. It does not
+// reinstate the authority of the old rule, even when every quote still exists.
+func (r *rechecker) transition(f Fact, base string) Fact {
+	prior := f
+	f.contextStatus, f.baseCommit, f.baseClaim = StatusTransition, base, prior.Claim
+	f.Claim, f.Reason, f.Authority, f.Value = "", "", AuthorityHistorical, nil
+	f.Citations, f.Conditions, f.Feedback = nil, nil, nil
+	for _, condition := range prior.Conditions {
+		f.baseConditions = append(f.baseConditions, shortText(condition.Description, 160))
+	}
+	prior.eachCitation(func(c Citation) {
+		if !c.live() {
+			return
+		}
+		current, _, _ := r.matchCitation(f.Revision, c)
+		p := current.CurrentPath
+		if p == "" {
+			p = c.Path
+		}
+		file := r.file(p)
+		if file.err != nil {
+			return
+		}
+		// Recover only a verbatim, unique complete-line witness at the head.
+		content := "\n" + file.text + "\n"
+		witness := "\n" + c.Quote + "\n"
+		pos := strings.Index(content, witness)
+		if c.Quote == "" || pos < 0 || strings.LastIndex(content, witness) != pos {
+			return
+		}
+		line := 1 + strings.Count(content[:pos], "\n")
+		current = c.atCurrent(p, lineAnchor{start: line, end: line + strings.Count(c.Quote, "\n")})
+		for _, included := range f.Citations {
+			if included.CurrentPath == current.CurrentPath && included.Quote == current.Quote {
+				return
+			}
+		}
+		f.Citations = append(f.Citations, current)
+	})
+	return f
 }
 
 // RefreshSchemas retains the source-to-consumer mapping supplied to learn.

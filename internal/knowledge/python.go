@@ -5,9 +5,11 @@ package knowledge
 
 import (
 	"context"
-	"github.com/tamnd/gopapy/v2/parser2"
+	"reflect"
 	"regexp"
 	"strings"
+
+	"github.com/tamnd/gopapy/v2/parser2"
 )
 
 var pythonName = regexp.MustCompile(`[\p{L}_][\p{L}\p{N}_]*`)
@@ -22,6 +24,42 @@ type pythonWitnesses struct {
 	fileDigest string
 	shared     string
 	functions  map[string]pythonDeclaration
+}
+
+// parser2 exposes the source position as P on every concrete AST node, while
+// its position accessor on the Stmt and Expr interfaces is package-private.
+func pythonNodeLine(node any) int {
+	v := reflect.Indirect(reflect.ValueOf(node))
+	if v.Kind() != reflect.Struct {
+		return 0
+	}
+	field := v.FieldByName("P")
+	if !field.IsValid() || !field.CanInterface() {
+		return 0
+	}
+	pos, _ := field.Interface().(parser2.Pos)
+	return pos.Line
+}
+
+func pythonStatementStart(stmt parser2.Stmt, lines []string) int {
+	var decorators []parser2.Expr
+	switch s := stmt.(type) {
+	case *parser2.FunctionDef:
+		decorators = s.DecoratorList
+	case *parser2.AsyncFunctionDef:
+		decorators = s.DecoratorList
+	case *parser2.ClassDef:
+		decorators = s.DecoratorList
+	}
+	if len(decorators) > 0 {
+		// The expression position can follow the @ in a multiline decorator.
+		for n := min(pythonNodeLine(decorators[0]), len(lines)); n > 0; n-- {
+			if strings.HasPrefix(strings.TrimLeft(lines[n-1], " \t"), "@") {
+				return n
+			}
+		}
+	}
+	return pythonNodeLine(stmt)
 }
 
 // Compare the complete cited function, including its guards and decorators.
@@ -47,16 +85,22 @@ func pythonWitnessesFor(ctx context.Context, data []byte) *pythonWitnesses {
 			shared.WriteByte(0)
 		}
 	}
-	var collect func([]parser2.Stmt, string)
-	collect = func(stmts []parser2.Stmt, prefix string) {
-		for _, stmt := range stmts {
+	var collect func([]parser2.Stmt, string, int)
+	collect = func(stmts []parser2.Stmt, prefix string, suiteEnd int) {
+		for i, stmt := range stmts {
+			// A following statement in the same suite bounds this declaration.
+			// Physical lines inside a string or a joined expression can start in column one.
+			end := suiteEnd
+			if i+1 < len(stmts) {
+				end = pythonStatementStart(stmts[i+1], lines) - 1
+			}
 			var name string
 			var start int
 			var body *[]parser2.Stmt
 			var decorated bool
 			switch s := stmt.(type) {
 			case *parser2.ClassDef:
-				collect(s.Body, prefix+s.Name+".")
+				collect(s.Body, prefix+s.Name+".", end)
 				continue
 			case *parser2.FunctionDef:
 				name, start, body, decorated = s.Name, s.P.Line, &s.Body, len(s.DecoratorList) > 0
@@ -70,17 +114,6 @@ func pythonWitnessesFor(ctx context.Context, data []byte) *pythonWitnesses {
 			}
 			qualified := prefix + name
 			full := parser2.DumpModule(&parser2.Module{Body: []parser2.Stmt{stmt}})
-			end := start
-			header := lines[start-1]
-			indent := len(header) - len(strings.TrimLeft(header, " \t"))
-			for end < len(lines) {
-				line := lines[end]
-				trimmed := strings.TrimLeft(line, " \t")
-				if strings.TrimSpace(trimmed) != "" && len(line)-len(trimmed) <= indent {
-					break
-				}
-				end++
-			}
 			d := pythonDeclaration{qualified, start, end, Digest([]byte(full))}
 			if _, duplicate := out.functions[qualified]; duplicate {
 				d = pythonDeclaration{}
@@ -92,7 +125,7 @@ func pythonWitnessesFor(ctx context.Context, data []byte) *pythonWitnesses {
 			}
 		}
 	}
-	collect(module.Body, "")
+	collect(module.Body, "", len(lines))
 	shared.WriteString(parser2.DumpModule(module))
 	out.shared = Digest([]byte(shared.String()))
 	return out
@@ -147,7 +180,7 @@ func (r *rechecker) relocatedPython(c Citation, current checkedFile) (lineAnchor
 		offset := now.start - old.start
 		start, end := c.StartLine+offset, c.EndLine+offset
 		lines := strings.Split(current.text, "\n")
-		if start >= 1 && end <= len(lines) && strings.Join(lines[start-1:end], "\n") == c.Quote {
+		if start >= now.start && end <= now.end && strings.Join(lines[start-1:end], "\n") == c.Quote {
 			return lineAnchor{start, end, c.Digest}, true
 		}
 		width := c.EndLine - c.StartLine + 1

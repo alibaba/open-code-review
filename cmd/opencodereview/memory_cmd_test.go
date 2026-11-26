@@ -165,7 +165,7 @@ func TestMemoryLateReviewPreservesIndependentFindings(t *testing.T) {
 		{name: "no-filter", noFilter: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var businessCalls, ordinaryCalls atomic.Int32
+			var businessCalls, ordinaryCalls, reassessments atomic.Int32
 			fallback := newFakeLLM()
 			startFakeLLM(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				body, err := io.ReadAll(req.Body)
@@ -187,6 +187,20 @@ func TestMemoryLateReviewPreservesIndependentFindings(t *testing.T) {
 				}
 				contains := func(s string) bool { return bytes.Contains(body, []byte(s)) }
 				switch {
+				case contains("Original findings:"):
+					reassessments.Add(1)
+					if tc.noFilter || !contains(badDraft) || contains(ordinary) {
+						t.Error("independent reassessment received the wrong candidates")
+					}
+					verdict, err := json.Marshal(map[string]any{"checks": []map[string]any{{
+						"id": rule["unit"], "outcome": "refuted", "path": doc, "line": 2, "quote": unitLine,
+						"candidate": "c-0", "refuted_text": badDraft, "trigger": "The unit is read.", "effect": "Seconds would mismeasure expiry.",
+						"reason": "The reviewed field contains minutes, as required by the current schema.",
+					}}})
+					if err != nil {
+						t.Error(err)
+					}
+					send("end_turn", map[string]any{"type": "text", "text": string(verdict)})
 				case contains("Provisional findings:"):
 					businessCalls.Add(1)
 					if !contains(badDraft) || !contains(ordinary) || !contains(rule["unit"]) || !contains(rule["channel"]) {
@@ -234,7 +248,11 @@ func TestMemoryLateReviewPreservesIndependentFindings(t *testing.T) {
 			if tc.noFilter {
 				wantCount++
 			}
-			if ordinaryCalls.Load() == 0 || businessCalls.Load() != 1 || len(report.Comments) != wantCount ||
+			wantReassessments := int32(1)
+			if tc.noFilter {
+				wantReassessments = 0
+			}
+			if ordinaryCalls.Load() == 0 || businessCalls.Load() != 1 || reassessments.Load() != wantReassessments || len(report.Comments) != wantCount ||
 				!has(4, ordinary) || !has(3, violation) || has(2, badDraft) != tc.noFilter {
 				t.Fatalf("unexpected report after %d ordinary and %d late requests: %+v", ordinaryCalls.Load(), businessCalls.Load(), report.Comments)
 			}

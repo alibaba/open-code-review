@@ -13,6 +13,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/knowledge"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func TestGroundBusinessChecksAtCurrentDiff(t *testing.T) {
@@ -103,6 +104,65 @@ func TestBusinessSchemaWitnessMatchesChangedProperty(t *testing.T) {
 	}
 }
 
+func TestDeletionWitnessStaysAtTheDeletedBoundary(t *testing.T) {
+	const file = "policy.go"
+	change := model.Diff{NewPath: file, Diff: "@@ -1,5 +1,4 @@\n prepare()\n oldContext()\n-requireApproval()\n persist()\n finish()"}
+	lines := reviewedLines([]model.Diff{change})[file]
+	for _, l := range lines {
+		if l.edited != (l.text == "persist()") {
+			t.Fatalf("unexpected deletion anchor: %+v", l)
+		}
+	}
+	change.Diff = "@@ -1,5 +1,3 @@\n keep()\n-old()\n-old2()\n+new()\n trailing()\n-cleanup()"
+	lines = reviewedLines([]model.Diff{change})[file]
+	if len(lines) != 3 || lines[0].edited || !lines[1].edited || !lines[2].edited {
+		t.Fatalf("mixed replacement and end-of-hunk deletion: %+v", lines)
+	}
+}
+
+func TestCrossFileContractUsesTheActualCallArguments(t *testing.T) {
+	const quote = "amount = settle("
+	for _, tc := range []struct {
+		path string
+		args []string
+		want bool
+	}{
+		{"invoice.py", []string{"min(item.balance, row.cap),", "row.cap,", ")"}, true},
+		{"invoice.py", []string{"amount=-history[row.balance] + 2,", ")"}, true},
+		{"invoice.py", []string{`payload={"currency": row.balance if active else 0},`, ")"}, true},
+		{"invoice.py", []string{"*row.balance,", ")"}, true},
+		{"invoice.go", []string{"round(item.balance),", ")"}, true},
+		{"invoice.py", []string{"row.total,", ")", "save(item.balance)"}, false},
+		{"invoice.py", []string{`"item.balance", # item.balance`, ")"}, false},
+		{"invoice.py", []string{"lambda: row.balance,", ")"}, false},
+		{"invoice.go", []string{"func() int { return row.balance },", ")"}, false},
+		{"invoice.go", []string{`"item.balance", // item.balance`, ")"}, false},
+		{"invoice.py", []string{"min(item.balance, row.cap),"}, false},
+	} {
+		lines := []changedLine{{9, quote, true}}
+		for i, next := range tc.args {
+			lines = append(lines, changedLine{10 + i, next, true})
+		}
+		check := businessCheck{Path: tc.path, Quote: quote, Line: 9, SourceQuote: "return ledger.balance"}
+		if got := usesCitedMember(check, lines); got != tc.want {
+			t.Errorf("%s %v: got %v, want %v", tc.path, tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestBusinessRetrievalRanksCodeSymbolsAndSkipsFileHeaders(t *testing.T) {
+	checked := []knowledge.Checked{
+		{Fact: knowledge.Fact{ID: "a-unrelated", Source: "payments/policy.go", Scope: "payments", Identifiers: []string{"settle"}}, Status: knowledge.StatusCandidate},
+		{Fact: knowledge.Fact{ID: "z-matching", Source: "payments/policy.go", Scope: "payments", Identifiers: []string{"refund"}}, Status: knowledge.StatusCandidate},
+		{Fact: knowledge.Fact{ID: "name-only", Source: "inventory/storage.go", Scope: "inventory", Identifiers: []string{"orders"}}, Status: knowledge.StatusCandidate},
+	}
+	changes := []model.Diff{{NewPath: "payments/orders.go", Diff: "--- a/payments/orders.go\n+++ b/payments/orders.go\n@@ -3 +3 @@\n-old()\n+refund()"}}
+	ctx := selectBusinessContext(knowledge.ReviewSnapshot(checked), changes)
+	if len(ctx.rules) != 2 || ctx.rules[0].ID != "z-matching" || ctx.rules[1].ID != "a-unrelated" {
+		t.Fatalf("ranked using metadata instead of touched code: %+v", ctx.rules)
+	}
+}
+
 func businessReply(t *testing.T, checks ...businessCheck) string {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{"checks": checks})
@@ -183,7 +243,7 @@ func TestBusinessExceptionRefutesOnlyTheLocatedDraft(t *testing.T) {
 		SourcePath: routingPolicy, SourceQuote: routingSource, Candidate: "c-0", RefutedText: disputed,
 		Reason: "The rush guard confines this call to orders that the policy explicitly allows in the express queue."}
 	add, remove, err := groundBusinessChecks(businessReply(t, valid), g, drafts)
-	if err != nil || len(add) != 0 || len(remove) != 1 || !remove[0] || !slices.Equal(drafts, original) {
+	if err != nil || len(add) != 0 || len(remove) != 1 || remove[0].Candidate != "c-0" || !slices.Equal(drafts, original) {
 		t.Fatalf("refutation affected unrelated drafts: add=%+v remove=%v err=%v", add, remove, err)
 	}
 	for _, tc := range []struct {
@@ -218,18 +278,6 @@ func TestBusinessExceptionRefutesOnlyTheLocatedDraft(t *testing.T) {
 	}
 }
 
-func TestIndependentFailureOnSameBusinessLineSurvives(t *testing.T) {
-	g := routingReviewGroup(knowledge.StatusCurrent)
-	const unrelated = "An empty work queue causes division by zero during batching."
-	draft := model.LlmComment{Path: routingReviewPath, StartLine: 9, EndLine: 9, ExistingCode: dispatchQuote, Content: unrelated}
-	check := businessCheck{ID: g.business.rules[0].ID, Outcome: "refuted", Path: routingReviewPath, Line: 9, Quote: dispatchQuote, SourcePath: routingPolicy, SourceQuote: routingSource,
-		Candidate: "c-0", RefutedText: unrelated, Reason: "Rush orders use express routing."}
-	_, remove, err := groundBusinessChecks(businessReply(t, check), g, []model.LlmComment{draft})
-	if err == nil || len(remove) != 0 {
-		t.Fatal("an applicable routing rule cannot disprove an unrelated failure on the same line")
-	}
-}
-
 func TestBusinessContextBudgetAndRoleIsolation(t *testing.T) {
 	snap := knowledge.ReviewSnapshot([]knowledge.Checked{{Fact: knowledge.Fact{
 		ID: "settlement", Source: "contract.go", Scope: "pay.go", Claim: "Orders settle after capture.",
@@ -254,6 +302,104 @@ func TestBusinessContextBudgetAndRoleIsolation(t *testing.T) {
 	other := []model.Diff{{NewPath: "other.go", Diff: "+unrelated()"}}
 	if got := selectBusinessContext(snap, other); len(got.rules) != 0 {
 		t.Fatal("unrelated group inherited a rule")
+	}
+}
+
+func TestBusinessRefutationsNeedIndependentEvidence(t *testing.T) {
+	g := routingReviewGroup(knowledge.StatusCurrent)
+	const validFinding = "Rush orders lose a queued express retry when the queue is full."
+	// A finding written in Chinese that rush orders must not use the express queue.
+	const falseFinding = "\u52a0\u6025\u8ba2\u5355\u4e0d\u80fd\u4f7f\u7528\u5feb\u901f\u961f\u5217\u3002"
+	base := businessCheck{ID: "express-policy", Outcome: "refuted", Path: routingReviewPath, Line: 9, Quote: dispatchQuote,
+		SourcePath: routingPolicy, SourceQuote: routingSource, Reason: "First assessor's proposed dismissal."}
+	one, two := base, base
+	one.Candidate, one.RefutedText = "c-0", validFinding
+	two.Candidate, two.RefutedText = "c-1", falseFinding
+	confirmed := two
+	confirmed.Trigger, confirmed.Effect = "A rush order reaches this branch.", "The finding says express routing is forbidden."
+	confirmed.Reason = "The branch and policy establish that this order is eligible for express routing."
+	otherSource := confirmed
+	otherSource.SourceQuote = "return true"
+	partial := confirmed
+	partial.RefutedText = strings.TrimSuffix(falseFinding, "\u3002")
+	noTrigger := confirmed
+	noTrigger.Trigger = ""
+	for _, tc := range []struct {
+		name   string
+		reply  string
+		remove bool
+	}{
+		{"independently disproven", businessReply(t, confirmed), true},
+		{"both findings possible", `{"checks":[]}`, false},
+		{"malformed assessment", "no verdict", false},
+		{"fabricated source", businessReply(t, otherSource), false},
+		{"partial original claim", businessReply(t, partial), false},
+		{"missing triggering input", businessReply(t, noTrigger), false},
+		{"duplicate verdict", businessReply(t, confirmed, confirmed), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := businessReply(t, one, two)
+			client := &fakeAgentClient{responses: []*llm.ChatResponse{
+				{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &first}}}},
+				{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &tc.reply}}}},
+			}}
+			a := New(Args{RepoDir: t.TempDir(), LLMClient: client, Template: template.Template{MaxTokens: 10000}})
+			for _, finding := range []string{validFinding, falseFinding} {
+				a.args.CommentCollector.Add(model.LlmComment{Path: routingReviewPath, StartLine: 9, EndLine: 9, ExistingCode: dispatchQuote, Content: finding})
+			}
+			a.verifyBusinessFindings(t.Context(), g, "Review all queue operations.", g.Diffs[0].Diff)
+			comments := a.args.CommentCollector.CommentsForPath(routingReviewPath)
+			wantCount := 2
+			if tc.remove {
+				wantCount = 1
+			}
+			if client.calls != 2 || len(comments) != wantCount || comments[0].Content != validFinding {
+				t.Fatalf("calls=%d comments=%+v", client.calls, comments)
+			}
+			tasks := a.session.GetOrCreateFileSession(fileGroupKey(g.Diffs)).TaskRecords[session.BusinessRefutationTask]
+			if len(tasks) != 1 {
+				t.Fatalf("missing independent session record: %d", len(tasks))
+			}
+			var request strings.Builder
+			for _, m := range tasks[0].RequestMessages {
+				request.WriteString(m.ExtractText())
+			}
+			if strings.Contains(request.String(), base.Reason) || !strings.Contains(request.String(), validFinding) ||
+				!strings.Contains(request.String(), falseFinding) || !strings.Contains(request.String(), dispatchQuote) {
+				t.Fatal("second assessment received the first verdict or lost an original finding or its changed code")
+			}
+		})
+	}
+}
+
+func TestBusinessReviewSkipsUnneededOrOverBudgetAdjudication(t *testing.T) {
+	g := routingReviewGroup(knowledge.StatusCurrent)
+	const finding = "Express routing is forbidden for rush orders."
+	proposal := businessCheck{ID: "express-policy", Outcome: "refuted", Path: routingReviewPath, Line: 9, Quote: dispatchQuote,
+		SourcePath: routingPolicy, SourceQuote: routingSource, Candidate: "c-0", RefutedText: finding, Reason: "The rush order is permitted."}
+	for _, tc := range []struct {
+		name   string
+		reply  string
+		skip   bool
+		budget int64
+	}{
+		{"no refutation proposed", `{"checks":[]}`, false, 0},
+		{"user keeps every ordinary finding", businessReply(t, proposal), true, 0},
+		{"budget consumed by first assessment", businessReply(t, proposal), false, 5000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeAgentClient{responses: []*llm.ChatResponse{
+				{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &tc.reply}}}, Usage: &llm.UsageInfo{PromptTokens: 4500, CompletionTokens: 500, TotalTokens: 5000}},
+			}}
+			a := New(Args{RepoDir: t.TempDir(), LLMClient: client, Template: template.Template{MaxTokens: 10000},
+				SkipFilter: tc.skip, MaxTokensBudget: tc.budget})
+			a.args.CommentCollector.Add(model.LlmComment{Path: routingReviewPath, StartLine: 9, EndLine: 9, ExistingCode: dispatchQuote, Content: finding})
+			a.verifyBusinessFindings(t.Context(), g, "Review routing.", g.Diffs[0].Diff)
+			tasks := a.session.GetOrCreateFileSession(fileGroupKey(g.Diffs)).TaskRecords
+			if client.calls != 1 || len(tasks[session.BusinessRefutationTask]) != 0 || len(a.args.CommentCollector.CommentsForPath(routingReviewPath)) != 1 {
+				t.Fatalf("calls=%d recorded tasks=%v", client.calls, tasks)
+			}
+		})
 	}
 }
 

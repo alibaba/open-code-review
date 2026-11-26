@@ -22,13 +22,14 @@ import (
 type TaskType string
 
 const (
-	PlanTask              TaskType = "plan_task"
-	MainTask              TaskType = "main_task"
-	MemoryCompressionTask TaskType = "memory_compression_task"
-	ReLocationTask        TaskType = "re_location_task"
-	ReviewFilterTask      TaskType = "review_filter_task"
-	BusinessReviewTask    TaskType = "business_review_task"
-	GroupingTask          TaskType = "grouping_task"
+	PlanTask               TaskType = "plan_task"
+	MainTask               TaskType = "main_task"
+	MemoryCompressionTask  TaskType = "memory_compression_task"
+	ReLocationTask         TaskType = "re_location_task"
+	ReviewFilterTask       TaskType = "review_filter_task"
+	BusinessReviewTask     TaskType = "business_review_task"
+	BusinessRefutationTask TaskType = "business_refutation_task"
+	GroupingTask           TaskType = "grouping_task"
 )
 
 const (

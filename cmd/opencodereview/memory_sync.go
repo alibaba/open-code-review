@@ -166,7 +166,7 @@ func syncKnowledge(ctx context.Context, store *knowledge.Store, tree knowledge.T
 		Live                               bool
 		Options                            knowledge.DiscoverOptions
 		Sources                            []string
-	}{Version: "business-discovery-v1", Revision: tree.Commit, Provider: rt.Provider, Model: rt.Model, Live: budget != nil, Options: opts, Sources: sources})
+	}{Version: "business-discovery-v2", Revision: tree.Commit, Provider: rt.Provider, Model: rt.Model, Live: budget != nil, Options: opts, Sources: sources})
 	if err != nil {
 		return out, err
 	}

@@ -419,6 +419,23 @@ func TestDiscoveryUsesLanguageTestConventions(t *testing.T) {
 	}
 }
 
+func TestCurrentExecutableContractCanSupplyExpectedBehavior(t *testing.T) {
+	const quote = "assert quote_fee('pickup') == 0"
+	sources := map[string]discoverySource{
+		"test": {Kind: "test", Path: "shipping/test_fees.py", StartLine: 3, Text: quote},
+		"note": {Kind: "discussion", Path: "shipping/fees.py", StartLine: 1, Text: "Collection is free."},
+	}
+	rule := discoveryRule{Category: CategoryBusinessRule, Scope: "shipping", Claim: "Collection carries no fee.", Identifiers: []string{"quote_fee"}, Citations: []discoveryQuote{{Source: "test", Quote: quote}}}
+	fact, err := rule.fact("", sources)
+	if err != nil || fact.Source != sources["test"].Path || fact.Authority != AuthorityInferred {
+		t.Fatalf("executable expectation lost: %+v, %v", fact, err)
+	}
+	rule.Citations = []discoveryQuote{{Source: "note", Quote: "Collection is free."}}
+	if _, err := rule.fact("", sources); err == nil {
+		t.Fatal("an isolated discussion became a current rule")
+	}
+}
+
 func TestDiscoveryWithholdsUnquotedLiteralCredentials(t *testing.T) {
 	for _, kind := range []string{"config", "history", "discussion"} {
 		s := discoverySource{Kind: kind}

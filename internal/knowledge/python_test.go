@@ -75,3 +75,60 @@ func TestPythonImplicitTruthinessIsPartOfTheBusinessGuard(t *testing.T) {
 		t.Fatal("changed implicit cart length must invalidate the pickup guard")
 	}
 }
+
+func TestPythonMultilineSuiteKeepsLaterCitations(t *testing.T) {
+	for name, setup := range map[string]string{
+		"docstring":   "        \"\"\"A literal can contain apparent top-level statements.\ndef other():\n\"\"\"\n",
+		"parentheses": "        choices = (\n2,\n3,\n)\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newLifecycleRepo(t)
+			const p = "pricing.py"
+			original := "class Cart:\n    def fee(self, pickup):\n" + setup + "        if pickup:\n            return 0\n        return 7\n\n    def weight(self):\n        return 4\n"
+			line := strings.Count(original[:strings.Index(original, "            return 0")], "\n") + 1
+			r.write(p, original)
+			base := r.commit("record the pickup fee")
+			citation, err := base.Cite(t.Context(), p, line, line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fact := prepareFact(t, base, Fact{Category: CategoryBusinessRule, Authority: AuthorityConfirmed, Source: p, Scope: p, Claim: "Pickup is free.", Citations: []Citation{citation}})
+			moved := "\n" + strings.Replace(original, "return 4", "return 8", 1)
+			r.write(p, moved)
+			current := checkedFacts(t, r.commit("change weight"), []Fact{fact})[0]
+			if current.Status != StatusCurrent || current.Citations[0].CurrentStartLine != line+1 {
+				t.Fatalf("unchanged fee: %s (%s), line %d", current.Status, current.Detail, current.Citations[0].CurrentStartLine)
+			}
+			r.write(p, strings.Replace(moved, "if pickup:", "if not pickup:", 1))
+			if changed := checkedFacts(t, r.commit("invert pickup guard"), []Fact{fact})[0]; changed.Status != StatusChanged {
+				t.Fatalf("changed guard: %s (%s)", changed.Status, changed.Detail)
+			}
+		})
+	}
+}
+
+func TestPythonDeclarationEndsAtItsNextSuiteStatement(t *testing.T) {
+	const source = `def first():
+    return 1
+@(
+    authorize
+)
+async def second():
+    return 2
+LIMIT = 10
+class Outer:
+    class Inner:
+        def last(self):
+            return 3
+    RATE = 4
+`
+	parsed := pythonWitnessesFor(t.Context(), []byte(source))
+	if parsed == nil {
+		t.Fatal("expected valid Python")
+	}
+	for name, end := range map[string]int{"first": 2, "second": 7, "Outer.Inner.last": 12} {
+		if got := parsed.functions[name].end; got != end {
+			t.Errorf("%s ends at %d, want %d", name, got, end)
+		}
+	}
+}
