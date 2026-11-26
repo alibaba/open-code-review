@@ -153,3 +153,53 @@ func TestResolveUsageResponsesAPIFieldNames(t *testing.T) {
 		t.Errorf("CacheReadTokens = %d, want 80 (from input_tokens_details.cached_tokens)", usage.CacheReadTokens)
 	}
 }
+
+func TestResolveUsageAnthropicPromptIncludesCache(t *testing.T) {
+	for _, wrapper := range []struct{ name, prefix, suffix string }{
+		{"usage", `{"usage":`, `}`},
+		{"root", "", ""},
+		{"data", `{"data":{"usage":`, `}}`},
+	} {
+		for _, fixture := range []struct {
+			name, usage string
+			want        UsageInfo
+		}{
+			{"input", `{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":40,"cache_creation_input_tokens":15}`,
+				UsageInfo{PromptTokens: 155, CompletionTokens: 20, TotalTokens: 175, CacheReadTokens: 40, CacheWriteTokens: 15}},
+			{"prompt", `{"prompt_tokens":100,"completion_tokens":20,"cache_read_input_tokens":40,"cache_creation_input_tokens":15}`,
+				UsageInfo{PromptTokens: 155, CompletionTokens: 20, TotalTokens: 175, CacheReadTokens: 40, CacheWriteTokens: 15}},
+			{"cache_only", `{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":40,"cache_creation_input_tokens":15}`,
+				UsageInfo{PromptTokens: 55, TotalTokens: 55, CacheReadTokens: 40, CacheWriteTokens: 15}},
+			{"explicit_total", `{"input_tokens":100,"output_tokens":20,"total_tokens":200,"cache_read_input_tokens":40,"cache_creation_input_tokens":15}`,
+				UsageInfo{PromptTokens: 155, CompletionTokens: 20, TotalTokens: 200, CacheReadTokens: 40, CacheWriteTokens: 15}},
+		} {
+			t.Run(wrapper.name+"/"+fixture.name, func(t *testing.T) {
+				got := resolveUsage([]byte(wrapper.prefix + fixture.usage + wrapper.suffix))
+				if got == nil || *got != fixture.want {
+					t.Fatalf("resolveUsage = %+v, want %+v", got, fixture.want)
+				}
+			})
+		}
+	}
+}
+
+func TestResolveUsageOpenAICacheAlreadyIncluded(t *testing.T) {
+	for _, fixture := range []struct {
+		name, raw string
+		want      UsageInfo
+	}{
+		{"chat", `{"usage":{"prompt_tokens":155,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":40,"cache_creation_tokens":15}}}`,
+			UsageInfo{PromptTokens: 155, CompletionTokens: 20, TotalTokens: 175, CacheReadTokens: 40, CacheWriteTokens: 15}},
+		{"responses", `{"usage":{"input_tokens":155,"output_tokens":20,"input_tokens_details":{"cached_tokens":40}}}`,
+			UsageInfo{PromptTokens: 155, CompletionTokens: 20, TotalTokens: 175, CacheReadTokens: 40}},
+		{"mixed_details", `{"usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":40,"prompt_tokens_details":{"cached_tokens":75,"cache_creation_tokens":15}}}`,
+			UsageInfo{PromptTokens: 140, CompletionTokens: 20, TotalTokens: 160, CacheReadTokens: 40, CacheWriteTokens: 15}},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			got := resolveUsage([]byte(fixture.raw))
+			if got == nil || *got != fixture.want {
+				t.Fatalf("resolveUsage = %+v, want %+v", got, fixture.want)
+			}
+		})
+	}
+}
