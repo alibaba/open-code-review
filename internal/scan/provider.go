@@ -110,8 +110,6 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		}
 	}
 
-	gitignorePatterns := diff.LoadGitignorePatterns(p.repoDir)
-
 	var out []model.ScanItem
 	for _, rel := range files {
 		// Per-iteration cancellation check: a large repo with thousands of
@@ -123,7 +121,10 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		if rel == "" {
 			continue
 		}
-		if diff.IsPathExcluded(p.repoDir, rel, gitignorePatterns) {
+		// Enumeration already applied the appropriate ignore rules. Reapplying
+		// root patterns here would override Git's nested negations and exclude
+		// tracked files. Only the provider's directory blocklist remains.
+		if diff.ProviderDirPrefix(rel) != "" {
 			continue
 		}
 		full := filepath.Join(p.repoDir, rel)
