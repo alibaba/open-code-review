@@ -482,7 +482,8 @@ Kuralları incelemek içindir; tek alt komutu vardır:
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git repository root (default: current dir)
+  --repo <path>    İncelenecek proje dizini (varsayılan: geçerli dizin).
+                   Bir Git çalışma ağacında kurallar çalışma ağacının kökünden yüklenir.
   --rule <path>    Path to a custom rule JSON file
 ```
 
