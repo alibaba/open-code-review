@@ -31,6 +31,10 @@ func ChatGPTModels(ctx context.Context) ([]chatgptauth.Model, error) {
 	return chatGPTModels(ctx, auth)
 }
 func resolveChatGPT(cfg configFile, entry providerEntryConfig, override string, ctx context.Context) (ResolvedEndpoint, bool, error) {
+	return resolveChatGPTWithInspection(cfg, entry, override, ctx, false)
+}
+
+func resolveChatGPTWithInspection(cfg configFile, entry providerEntryConfig, override string, ctx context.Context, inspectOnly bool) (ResolvedEndpoint, bool, error) {
 	if entry.URL != "" || entry.Protocol != "" || entry.APIKey != "" || entry.APIKeyCmd != "" || entry.AuthHeader != "" {
 		return ResolvedEndpoint{}, false, fmt.Errorf("chatgpt provider uses only its protected SIWC credential store and public Responses endpoint; url, protocol and credential overrides are not allowed")
 	}
@@ -46,6 +50,20 @@ func resolveChatGPT(cfg configFile, entry providerEntryConfig, override string, 
 	if err != nil {
 		return ResolvedEndpoint{}, false, err
 	}
+	model := cfg.Model
+	if entry.Model != "" {
+		model = entry.Model
+	}
+	if override != "" {
+		model = override
+	}
+	if inspectOnly {
+		return ResolvedEndpoint{
+			Provider: "chatgpt", Model: model, Protocol: ProtocolOpenAIResponses,
+			Source: "provider:chatgpt", Timeout: timeout, ChatGPTPlan: true,
+			credentialStatus: "oauth_not_resolved",
+		}, true, nil
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -54,13 +72,6 @@ func resolveChatGPT(cfg configFile, entry providerEntryConfig, override string, 
 	auth, err := chatGPTCredentials(ctx, "")
 	if err != nil {
 		return ResolvedEndpoint{}, false, err
-	}
-	model := cfg.Model
-	if entry.Model != "" {
-		model = entry.Model
-	}
-	if override != "" {
-		model = override
 	}
 	if model == "" {
 		models, err := chatGPTModels(ctx, auth)

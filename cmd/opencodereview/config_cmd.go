@@ -91,6 +91,7 @@ var configModelCmd = &cobra.Command{
 }
 
 func init() {
+	configCmd.AddCommand(newConfigShowCmd())
 	configCmd.AddCommand(configSetCmd)
 	configCmd.AddCommand(configUnsetCmd)
 	configCmd.AddCommand(configProviderCmd)
