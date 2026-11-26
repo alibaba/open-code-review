@@ -258,6 +258,18 @@ By default the review runs with the machine-oriented `agent` audience and stays 
     stream_progress: 'true'
 ```
 
+### Keep artifact names unique across jobs
+
+Artifact names include the run id, run attempt, and calling job id, so separate jobs in one workflow can each upload their review output. Matrix legs share the same job id; when a matrix or repeated action use needs distinct artifacts, pass `artifact_name_suffix` with a value that is unique within the run attempt and valid in a GitHub artifact name:
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    artifact_name_suffix: ${{ matrix.rule-set }}
+```
+
+If the matrix dimension is a path or another value that can contain characters GitHub rejects in artifact names, add a safe display name to the matrix and use that instead. Set `upload_artifacts: 'false'` only when the run does not need the raw result and stderr artifacts.
+
 ### Add custom review rules
 
 ```yaml
@@ -625,7 +637,7 @@ OCR supports both OpenAI and Anthropic API formats:
 
 The action does not use an `OCR_DEBUG` flag. To diagnose a run:
 
-- **Artifacts**: with `upload_artifacts: 'true'` (the default), the raw `ocr-result.json` and `ocr-stderr.log` are uploaded as workflow artifacts named `ocr-review-result-<run_id>-<run_attempt>`. Download them from the run's **Artifacts** section.
+- **Artifacts**: with `upload_artifacts: 'true'` (the default), the raw `ocr-result.json` and `ocr-stderr.log` are uploaded as workflow artifacts named `ocr-review-result-<run_id>-<run_attempt>-<job-or-suffix>`. Download them from the run's **Artifacts** section.
 - **Step log**: the "Run OpenCodeReview" step prints both the JSON result and stderr to the workflow log.
 - **Action outputs**: the step exposes `comments_total`, `comments_inline`, `comments_skipped`, `comments_routed`, `comments_failed`, `comments_resolved`, `comments_resolved_preview`, and `summary_comment_url` outputs — inspect them in the job's step outputs.
 - **GitHub step debug**: for verbose Actions runner diagnostics, enable the repository secret `ACTIONS_STEP_DEBUG=true` (standard GitHub Actions mechanism).
