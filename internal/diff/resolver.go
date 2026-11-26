@@ -120,7 +120,7 @@ func RelocateAcrossFiles(cm *model.LlmComment, diffs []model.Diff) (string, bool
 			continue
 		}
 		path := d.NewPath
-		if path == "" {
+		if path == "" || path == "/dev/null" {
 			path = d.OldPath
 		}
 		hits = append(hits, hit{path: path, start: probe.StartLine, end: probe.EndLine})

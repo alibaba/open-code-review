@@ -4,10 +4,59 @@
 package diff
 
 import (
+	"context"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
 )
+
+func TestRelocateAcrossFiles_DeletedFileUsesOriginalPath(t *testing.T) {
+	const removed = `diff --git a/src/legacy.c b/src/legacy.c
+deleted file mode 100644
+--- a/src/legacy.c
++++ /dev/null
+@@ -1,3 +0,0 @@
+-void close_handle(void) {
+-    release(handle);
+-}
+`
+	diffs, err := ParseDiffText(context.Background(), removed, t.TempDir(), "", nil)
+	if err != nil || len(diffs) != 1 || !diffs[0].IsDeleted || diffs[0].NewPath != "/dev/null" {
+		t.Fatalf("parsed deletion = %+v, err = %v", diffs, err)
+	}
+
+	t.Run("unique deleted file", func(t *testing.T) {
+		cm := &model.LlmComment{Path: "src/caller.c", ExistingCode: "release(handle);"}
+		path, ok := RelocateAcrossFiles(cm, diffs)
+		if !ok || path != "src/legacy.c" || cm.Path != path || cm.StartLine != 2 || cm.EndLine != 2 {
+			t.Fatalf("relocated to %q, ok = %v, comment = %+v", path, ok, cm)
+		}
+	})
+	t.Run("original path is still excluded", func(t *testing.T) {
+		cm := model.LlmComment{Path: "src/legacy.c", ExistingCode: "release(handle);"}
+		before := cm
+		if path, ok := RelocateAcrossFiles(&cm, diffs); ok || path != "" || cm != before {
+			t.Fatalf("own file changed comment to %+v, path = %q, ok = %v", cm, path, ok)
+		}
+	})
+	t.Run("deleted and surviving matches stay ambiguous", func(t *testing.T) {
+		candidates := append([]model.Diff{}, diffs...)
+		candidates = append(candidates, model.Diff{NewPath: "src/replacement.c", NewFileContent: "release(handle);\n"})
+		cm := model.LlmComment{Path: "src/caller.c", ExistingCode: "release(handle);", StartLine: 7, EndLine: 8}
+		before := cm
+		if path, ok := RelocateAcrossFiles(&cm, candidates); ok || path != "" || cm != before {
+			t.Fatalf("ambiguous match changed comment to %+v, path = %q, ok = %v", cm, path, ok)
+		}
+	})
+	t.Run("renamed file keeps its new path", func(t *testing.T) {
+		cm := &model.LlmComment{Path: "src/caller.c", ExistingCode: "release(handle);"}
+		renamed := model.Diff{OldPath: "src/legacy.c", NewPath: "src/renamed.c", IsRenamed: true, NewFileContent: "release(handle);\n"}
+		path, ok := RelocateAcrossFiles(cm, []model.Diff{renamed})
+		if !ok || path != "src/renamed.c" || cm.Path != path || cm.StartLine != 1 || cm.EndLine != 1 {
+			t.Fatalf("renamed file location = %+v, path = %q, ok = %v", cm, path, ok)
+		}
+	})
+}
 
 // headerDiff declares the function; sourceDiff implements it. This is the split
 // that produces mis-filed comments in practice: the Agent reviews the header,
