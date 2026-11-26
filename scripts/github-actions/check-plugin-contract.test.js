@@ -774,6 +774,17 @@ function testRealAgentPluginManifestPinsTheFixedLayout() {
   );
 }
 
+function testAntigravityPluginLoadsFromRepoRoot() {
+  const root = path.resolve(__dirname, "../..");
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, ".antigravity-plugin/plugin.json"), "utf8"));
+  assert.strictEqual(manifest.name, "open-code-review");
+  assert.strictEqual(manifest.$schema, "https://antigravity.google/schemas/v1/plugin.json");
+  assert.ok(fs.statSync(path.join(root, manifest.logo)).isFile());
+  for (const name of ["open-code-review", "open-code-review-delegate"]) {
+    assert.ok(fs.statSync(path.join(root, "skills", name, "SKILL.md")).isFile());
+  }
+}
+
 function testRealAgentPluginManifestDeclaresNameAndSchema() {
   // The registry test above only covers the layout assumption; this reads the
   // shipped manifest so a name that drifts outside the §5.5 grammar, or a
@@ -1118,6 +1129,7 @@ function main_() {
   testAgentPluginManifestRejectsLayoutDrift();
   testRealAgentPluginManifestPinsTheFixedLayout();
   testRealAgentPluginManifestDeclaresNameAndSchema();
+  testAntigravityPluginLoadsFromRepoRoot();
   testPluginEntriesToleratesMalformedShapes();
   testMarketplaceReadersDoNotThrowOnMalformedInput();
   testListEntriesResolvesSymlinks();

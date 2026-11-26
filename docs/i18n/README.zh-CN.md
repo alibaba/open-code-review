@@ -113,7 +113,7 @@ Open Code Review 的核心设计理念是将确定性工程与 Agent 结合，�
 
 ### Agent Skills
 
-可用于 Claude Code、Codex、Cursor、Kimi Code，以及其他支持 Agent Skills 且能执行本地命令的 Agent。两种模式都需要 **Git >= 2.41** 和 **`ocr` CLI**；只有原生模式需要配置 OCR 的模型供应商。
+可用于 Claude Code、Codex、Cursor、Google Antigravity、Kimi Code，以及其他支持 Agent Skills 且能执行本地命令的 Agent。两种模式都需要 **Git >= 2.41** 和 **`ocr` CLI**；只有原生模式需要配置 OCR 的模型供应商。
 
 #### 1. 安装 Skills
 
@@ -219,6 +219,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) —— 安装包含评审斜杠命令的插件
   - [Codex](../../plugins/open-code-review/README.md#codex) —— 安装包含可调用评审 Skill 的插件
   - [Cursor](../../plugins/open-code-review/README.md#cursor) —— 安装包含可移植评审 Skill 的插件
+  - [Google Antigravity](../../plugins/open-code-review/README.md#google-antigravity) —— 使用 OCR 配置的模型或 Antigravity 会话模型审查代码
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) —— 安装包含评审斜杠命令与 Skill 的插件
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) —— 安装原生评审工具和斜杠命令
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) —— 使用 QCA 宿主模型运行委托模式，并提供可发布的模板

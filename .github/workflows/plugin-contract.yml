@@ -24,6 +24,8 @@ on:
   push:
     branches: [main]
     paths:
+      - ".antigravity-plugin/**"
+      - "imgs/logo.svg"
       - ".claude-plugin/**"
       - ".agents/**"
       - ".kimi-plugin/**"
@@ -38,6 +40,8 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - ".antigravity-plugin/**"
+      - "imgs/logo.svg"
       - ".claude-plugin/**"
       - ".agents/**"
       - ".kimi-plugin/**"

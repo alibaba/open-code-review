@@ -113,7 +113,7 @@ The agent's strengths are concentrated where they matter most — dynamic decisi
 
 ### Agent Skills
 
-Use the skills in Claude Code, Codex, Cursor, Kimi Code, or another agent that supports Agent Skills and can run local commands. Both modes require **Git >= 2.41** and the **`ocr` CLI**; only native mode requires an OCR model provider.
+Use the skills in Claude Code, Codex, Cursor, Google Antigravity, Kimi Code, or another agent that supports Agent Skills and can run local commands. Both modes require **Git >= 2.41** and the **`ocr` CLI**; only native mode requires an OCR model provider.
 
 #### 1. Install the Skills
 
@@ -219,6 +219,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
   - [Claude Code](plugins/open-code-review/README.md#claude-code) — install a plugin with review slash commands
   - [Codex](plugins/open-code-review/README.md#codex) — install a plugin with callable review skills
   - [Cursor](plugins/open-code-review/README.md#cursor) — install a plugin with portable review skills
+  - [Google Antigravity](plugins/open-code-review/README.md#google-antigravity) — review with the OCR or Antigravity model
   - [Kimi Code](plugins/open-code-review/README.md#kimi-code) — install a plugin with review slash commands and skills
   - [OpenCode](plugins/open-code-review/opencode/README.md) — install native review tools and slash commands
   - [QCA Forward](plugins/open-code-review/qca/README.md) — run delegation mode with the QCA host model and a ready-to-publish template

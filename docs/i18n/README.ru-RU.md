@@ -113,7 +113,7 @@ Open Code Review — это CLI-инструмент для код-ревью н
 
 ### Agent Skills
 
-Навыки работают в Claude Code, Codex, Cursor, Kimi Code и других агентах с поддержкой Agent Skills и выполнением локальных команд. Для обоих режимов нужны **Git >= 2.41** и **CLI `ocr`**; провайдер модели в OCR требуется только для нативного режима.
+Навыки работают в Claude Code, Codex, Cursor, Google Antigravity, Kimi Code и других агентах с поддержкой Agent Skills и выполнением локальных команд. Для обоих режимов нужны **Git >= 2.41** и **CLI `ocr`**; провайдер модели в OCR требуется только для нативного режима.
 
 #### 1. Установите навыки
 
@@ -219,6 +219,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — установка плагина со slash-командами для ревью
   - [Codex](../../plugins/open-code-review/README.md#codex) — установка плагина с вызываемыми навыками ревью
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — установка плагина с переносимыми навыками ревью
+  - [Google Antigravity](../../plugins/open-code-review/README.md#google-antigravity) — ревью с моделью, настроенной в OCR, или с моделью сеанса Antigravity
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — установка плагина со slash-командами и навыками ревью
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — установка нативных инструментов ревью и slash-команд
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — запуск режима делегирования с хост-моделью QCA и готовым к публикации шаблоном

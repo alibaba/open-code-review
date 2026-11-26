@@ -113,7 +113,7 @@ Les points forts de l'agent sont concentrés là où ils sont les plus important
 
 ### Compétences des agents
 
-Utilisez les compétences de Claude Code, Codex, Cursor, Kimi Code ou de tout autre agent prenant en charge les compétences d'agent et capable d'exécuter des commandes locales. Les deux modes nécessitent **Git >= 2.41** et la **`ocr` CLI** ; seul le mode natif nécessite un fournisseur de modèles pour OCR.
+Utilisez les compétences de Claude Code, Codex, Cursor, Google Antigravity, Kimi Code ou de tout autre agent prenant en charge les compétences d'agent et capable d'exécuter des commandes locales. Les deux modes nécessitent **Git >= 2.41** et la **`ocr` CLI** ; seul le mode natif nécessite un fournisseur de modèles pour OCR.
 
 #### 1. Installez les compétences
 
@@ -219,6 +219,7 @@ La documentation complète est disponible à l'adresse **[open-codereview.ai/doc
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — installer un plugin proposant des commandes « / » pour la révision
   - [Codex](../../plugins/open-code-review/README.md#codex) — installer un plugin proposant des fonctionnalités d'évaluation accessibles par appel
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — installer un plugin doté de fonctionnalités de révision portables
+  - [Google Antigravity](../../plugins/open-code-review/README.md#google-antigravity) — réviser le code avec le modèle configuré dans OCR ou celui de la session Antigravity
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — installer un plugin proposant des commandes de révision « slash » et des compétences
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — installer des outils de révision natifs et des commandes « slash »
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — exécuter le mode de délégation avec le modèle hôte QCA et un modèle prêt à être publié

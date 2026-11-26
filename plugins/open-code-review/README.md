@@ -1,7 +1,7 @@
 # Coding agent plugins
 
 Open Code Review ships platform-specific integrations for Claude Code, Codex,
-Cursor, Kimi Code, and QCA Forward. Choose your platform below instead of
+Cursor, Google Antigravity, Kimi Code, and QCA Forward. Choose your platform below instead of
 adapting installation instructions written for a different agent.
 
 All integrations require Git 2.41 or later. Install the `ocr` CLI first:
@@ -97,6 +97,22 @@ portable OCR review skills from the bundled `skills/` directory.
 
 See the [Cursor plugin documentation](https://cursor.com/docs/plugins) for
 plugin loading and management details.
+
+## Google Antigravity
+
+Install the plugin from the repository with the Antigravity CLI:
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+```
+
+To try a local checkout, run `agy plugin install .` from the repository root.
+Run `agy plugin list --json` to see the two installed skills. In an Antigravity
+session, choose the skill for the model you want to use:
+
+- `/open-code-review` runs the review with the model configured in OCR.
+- `/open-code-review-delegate` uses the Antigravity session's model and only
+  needs the local OCR CLI for file selection and review rules.
 
 ## Kimi Code
 

@@ -113,7 +113,7 @@ Ajanın güçlü yanları, dinamik kararlar ve dinamik bağlam getirme üzerinde
 
 ### Ajan becerileri
 
-Becerileri Claude Code, Codex, Cursor, Kimi Code veya Agent Skills destekleyen ve yerel komut çalıştırabilen başka bir ajanda kullanın. Her iki mod da **Git >= 2.41** ve **`ocr` CLI** gerektirir; yalnızca yerel OCR modu bir OCR model sağlayıcısı ister.
+Becerileri Claude Code, Codex, Cursor, Google Antigravity, Kimi Code veya Agent Skills destekleyen ve yerel komut çalıştırabilen başka bir ajanda kullanın. Her iki mod da **Git >= 2.41** ve **`ocr` CLI** gerektirir; yalnızca yerel OCR modu bir OCR model sağlayıcısı ister.
 
 #### 1. Becerileri kurun
 
@@ -219,6 +219,7 @@ Tüm belgeler **[open-codereview.ai/docs](https://open-codereview.ai/docs)** adr
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — inceleme komutları sağlayan eklenti
   - [Codex](../../plugins/open-code-review/README.md#codex) — çağrılabilir inceleme becerileri sağlayan eklenti
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — taşınabilir inceleme becerileri sağlayan eklenti
+  - [Google Antigravity](../../plugins/open-code-review/README.md#google-antigravity) — OCR için yapılandırılan modelle veya Antigravity oturumundaki modelle kod incelemesi
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — inceleme komutları ve becerileri sağlayan eklenti
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — yerel inceleme araçları ve komutları
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA modeli ve yayıma hazır şablonla görev devri modu
