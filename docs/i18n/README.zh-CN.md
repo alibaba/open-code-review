@@ -221,6 +221,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Cursor](../../plugins/open-code-review/README.md#cursor) —— 安装包含可移植评审 Skill 的插件
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) —— 安装包含评审斜杠命令与 Skill 的插件
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) —— 安装原生评审工具和斜杠命令
+  - [Pi](../../plugins/open-code-review/README.md#pi) —— 安装包含评审工具和斜杠命令的扩展
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) —— 使用 QCA 宿主模型运行委托模式，并提供可发布的模板
   - [兼容 Skill 的 Agent](https://open-codereview.ai/docs/agent-skill) —— 安装可移植的 Agent Skill
 - 评审执行模式 —— 完成集成后，选择由哪个 LLM 执行评审

@@ -218,6 +218,7 @@ Tài liệu đầy đủ có tại **[open-codereview.ai/docs](https://open-code
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — cài plugin với các skill rà soát di động
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — cài plugin với các lệnh gạch chéo và skill rà soát
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — cài công cụ rà soát native và các lệnh gạch chéo
+  - [Pi](../../plugins/open-code-review/README.md#pi) — cài extension với công cụ rà soát và các lệnh gạch chéo
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — chạy chế độ ủy quyền với mô hình chủ QCA và mẫu sẵn sàng để xuất bản
   - [Skill-compatible agents](https://open-codereview.ai/docs/agent-skill) — cài agent skill di động
 - Chế độ thực thi rà soát — sau khi tích hợp, chọn LLM nào thực hiện rà soát

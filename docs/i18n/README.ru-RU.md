@@ -221,6 +221,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — установка плагина с переносимыми навыками ревью
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — установка плагина со slash-командами и навыками ревью
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — установка нативных инструментов ревью и slash-команд
+  - [Pi](../../plugins/open-code-review/README.md#pi) — установка расширения с инструментами ревью и slash-командами
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — запуск режима делегирования с хост-моделью QCA и готовым к публикации шаблоном
   - [Агенты с поддержкой Skill](https://open-codereview.ai/docs/agent-skill) — установка переносимого навыка агента
 - Режимы выполнения ревью — после интеграции выберите, какая LLM выполняет ревью

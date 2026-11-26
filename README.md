@@ -221,6 +221,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
   - [Cursor](plugins/open-code-review/README.md#cursor) — install a plugin with portable review skills
   - [Kimi Code](plugins/open-code-review/README.md#kimi-code) — install a plugin with review slash commands and skills
   - [OpenCode](plugins/open-code-review/opencode/README.md) — install native review tools and slash commands
+  - [Pi](plugins/open-code-review/README.md#pi) — install an extension with review tools and slash commands
   - [QCA Forward](plugins/open-code-review/qca/README.md) — run delegation mode with the QCA host model and a ready-to-publish template
   - [Skill-compatible agents](https://open-codereview.ai/docs/agent-skill) — install the portable agent skill
 - Review Execution Modes — after integration, choose which LLM performs the review

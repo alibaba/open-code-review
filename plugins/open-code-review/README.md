@@ -123,6 +123,30 @@ See the
 [Kimi Code plugin documentation](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/plugins.html)
 for details.
 
+## Pi
+
+Pi loads this integration as a Pi package from
+[`plugins/open-code-review/pi/`](pi/). It registers the two LLM-callable
+tools `ocr_review` and `ocr_delegate`, and the two commands `/ocr-review` and
+`/ocr-review-delegate`.
+
+Install it from a clone of this repository:
+
+```bash
+git clone https://github.com/alibaba/open-code-review
+pi install ./open-code-review/plugins/open-code-review/pi
+```
+
+Start a new Pi session, or restart Pi, to load it.
+
+The `ocr` CLI must be on `PATH`; the extension runs it and never installs it.
+`ocr_review` uses the LLM configured for `ocr`, as described above. Delegation
+mode needs no OCR LLM endpoint at all: `ocr_delegate` returns the files to
+review and their rules, and Pi performs the review with its own model.
+
+See the [Pi package README](pi/README.md) for tool parameters, command syntax,
+and troubleshooting.
+
 ## QCA Forward
 
 QCA Forward uses the host model through OCR delegation mode. Publish the
