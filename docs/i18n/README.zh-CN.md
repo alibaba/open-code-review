@@ -125,6 +125,17 @@ npx skills add alibaba/open-code-review
 
 如果缺少 `ocr`，skills 会引导 Agent 在环境权限允许的情况下安装它。也可以提前运行 `npm install -g @alibaba-group/open-code-review`。偏好插件或手动安装？参见[各 Agent 的安装指南](../../plugins/open-code-review/README.md)，或将 [`skills/`](../../skills/) 中所需的文件夹复制到 Agent 的 skill 目录。
 
+##### Google Antigravity
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+`/open-code-review` 使用 OCR 配置的模型，`/open-code-review-delegate` 使用当前 Antigravity 会话的模型。
+
+如需从本地提交安装，在 OCR 仓库根目录运行 `bash .antigravity-plugin/install-local.sh`（Windows 使用 Git Bash）。脚本仅安装 `HEAD` 中的插件文件。
+
 #### 2. 选择审查模式
 
 | | 原生模式 | 委托模式 |
@@ -219,7 +230,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) —— 安装包含评审斜杠命令的插件
   - [Codex](../../plugins/open-code-review/README.md#codex) —— 安装包含可调用评审 Skill 的插件
   - [Cursor](../../plugins/open-code-review/README.md#cursor) —— 安装包含可移植评审 Skill 的插件
-  - [Google Antigravity](../../plugins/open-code-review/README.md#google-antigravity) —— 使用 OCR 配置的模型或 Antigravity 会话模型审查代码
+  - [Google Antigravity](#google-antigravity) —— 使用 OCR 配置的模型或 Antigravity 会话模型审查代码
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) —— 安装包含评审斜杠命令与 Skill 的插件
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) —— 安装原生评审工具和斜杠命令
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) —— 使用 QCA 宿主模型运行委托模式，并提供可发布的模板

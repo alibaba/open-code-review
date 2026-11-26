@@ -221,6 +221,8 @@ const AGENT_PLUGIN_MANIFESTS = [
   },
 ];
 
+const ANTIGRAVITY_MANIFEST = ".antigravity-plugin/plugin.json";
+
 // Skill trees. Each direct subdirectory must hold a SKILL.md whose frontmatter
 // `name` equals the directory name — `npx skills add --skill <name>` and every
 // skill loader address a skill by that name.
@@ -720,6 +722,35 @@ function checkAgentPluginManifests(specs, readJson, listDirs, readFile) {
   return { errors };
 }
 
+function checkAntigravityManifest(manifest, isFile) {
+  const file = ANTIGRAVITY_MANIFEST;
+  if (manifest === null) {
+    return [{ file, message: "Antigravity plugin manifest is missing or is not valid JSON." }];
+  }
+
+  const errors = [];
+  if (manifest.name !== "open-code-review") {
+    errors.push({ file, message: 'Expected Antigravity plugin name "open-code-review".' });
+  }
+  if (manifest.$schema !== "https://antigravity.google/schemas/v1/plugin.json") {
+    errors.push({ file, message: "Expected the Antigravity v1 plugin schema." });
+  }
+  const logo = "imgs/logo.svg";
+  const bundledLogo =
+    typeof manifest.logo === "string" &&
+    resolveDeclaredPath(file, "plugin-root", manifest.logo) === logo;
+  if (!bundledLogo || !isFile(logo)) {
+    errors.push({ file, message: `Antigravity must reference the bundled logo at ${logo}.` });
+  }
+  for (const name of ["open-code-review", "open-code-review-delegate"]) {
+    const skill = `skills/${name}/SKILL.md`;
+    if (!isFile(skill)) {
+      errors.push({ file: skill, message: `Missing Antigravity skill entry point: ${skill}.` });
+    }
+  }
+  return errors;
+}
+
 // ---------------------------------------------------------------------------
 // GitHub Actions annotation + IO helpers
 // ---------------------------------------------------------------------------
@@ -1019,6 +1050,12 @@ function runManifestsCheck({ repoRoot = process.cwd() } = {}) {
   errors.push(...agent.errors);
   checked += AGENT_PLUGIN_MANIFESTS.length;
 
+  errors.push(...checkAntigravityManifest(
+    readJsonOrNull(repoRoot, ANTIGRAVITY_MANIFEST),
+    (file) => probeKind(repoRoot, file) === "file"
+  ));
+  checked++;
+
   // Skill trees: non-empty, and every SKILL.md well-formed.
   for (const root of SKILL_ROOTS) {
     const dirs = listEntries(repoRoot, root, "dir");
@@ -1155,6 +1192,7 @@ module.exports = {
   agentPluginNameProblem,
   validateAgentPluginManifest,
   checkAgentPluginManifests,
+  checkAntigravityManifest,
   pluginEntries,
   listEntries,
   readFileOrNull,

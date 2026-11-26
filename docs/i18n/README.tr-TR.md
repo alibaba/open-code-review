@@ -125,6 +125,17 @@ npx skills add alibaba/open-code-review
 
 Beceriler, ortam izinlerine bağlı olarak eksikse `ocr` kurması için ajanınızı yönlendirir. Önceden `npm install -g @alibaba-group/open-code-review` ile de kurabilirsiniz. Eklenti veya elle kurulum için [ajana özel kurulum kılavuzuna](../../plugins/open-code-review/README.md) bakın ya da [`skills/`](../../skills/) içindeki istediğiniz klasörleri ajanınızın beceri dizinine kopyalayın.
 
+##### Google Antigravity
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+`/open-code-review` OCR'de yapılandırılan modeli, `/open-code-review-delegate` ise geçerli Antigravity oturumunun modelini kullanır.
+
+Yerel bir commit'ten kurmak için OCR deposunun kök dizininde `bash .antigravity-plugin/install-local.sh` komutunu çalıştırın (Windows'ta Git Bash kullanın). Betik yalnızca `HEAD` içindeki eklenti dosyalarını kurar.
+
 #### 2. İnceleme modunu seçin
 
 | | Yerel OCR modu | Görev devri modu |
@@ -219,7 +230,7 @@ Tüm belgeler **[open-codereview.ai/docs](https://open-codereview.ai/docs)** adr
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — inceleme komutları sağlayan eklenti
   - [Codex](../../plugins/open-code-review/README.md#codex) — çağrılabilir inceleme becerileri sağlayan eklenti
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — taşınabilir inceleme becerileri sağlayan eklenti
-  - [Google Antigravity](../../plugins/open-code-review/README.md#google-antigravity) — OCR için yapılandırılan modelle veya Antigravity oturumundaki modelle kod incelemesi
+  - [Google Antigravity](#google-antigravity) — OCR için yapılandırılan modelle veya Antigravity oturumundaki modelle kod incelemesi
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — inceleme komutları ve becerileri sağlayan eklenti
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — yerel inceleme araçları ve komutları
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA modeli ve yayıma hazır şablonla görev devri modu

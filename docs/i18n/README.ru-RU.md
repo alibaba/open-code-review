@@ -125,6 +125,17 @@ npx skills add alibaba/open-code-review
 
 Если `ocr` отсутствует, навыки подскажут агенту установить его с учётом разрешений среды. Можно установить заранее: `npm install -g @alibaba-group/open-code-review`. Для плагинов и ручной установки см. [инструкции по агентам](../../plugins/open-code-review/README.md) или скопируйте нужные папки из [`skills/`](../../skills/) в каталог навыков своего агента.
 
+##### Google Antigravity
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+Команда `/open-code-review` использует модель, настроенную в OCR, а `/open-code-review-delegate` — модель текущего сеанса Antigravity.
+
+Для установки из локального коммита выполните `bash .antigravity-plugin/install-local.sh` в корне репозитория OCR (в Windows используйте Git Bash). Скрипт устанавливает только файлы плагина из `HEAD`.
+
 #### 2. Выберите режим ревью
 
 | | Нативный режим | Режим делегирования |
@@ -219,7 +230,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — установка плагина со slash-командами для ревью
   - [Codex](../../plugins/open-code-review/README.md#codex) — установка плагина с вызываемыми навыками ревью
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — установка плагина с переносимыми навыками ревью
-  - [Google Antigravity](../../plugins/open-code-review/README.md#google-antigravity) — ревью с моделью, настроенной в OCR, или с моделью сеанса Antigravity
+  - [Google Antigravity](#google-antigravity) — ревью с моделью, настроенной в OCR, или с моделью сеанса Antigravity
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — установка плагина со slash-командами и навыками ревью
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — установка нативных инструментов ревью и slash-команд
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — запуск режима делегирования с хост-моделью QCA и готовым к публикации шаблоном

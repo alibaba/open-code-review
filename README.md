@@ -125,6 +125,17 @@ npx skills add alibaba/open-code-review
 
 The skills guide your agent to install `ocr` if it is missing, subject to your environment's permissions. You can also install it ahead of time with `npm install -g @alibaba-group/open-code-review`. Prefer a plugin or manual installation? See the [agent-specific setup guide](plugins/open-code-review/README.md), or copy the desired folders from [`skills/`](skills/) into your agent's skill directory.
 
+##### Google Antigravity
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+Use `/open-code-review` with the model configured in OCR, or `/open-code-review-delegate` with the Antigravity session's model.
+
+To install from a local commit, run `bash .antigravity-plugin/install-local.sh` from the OCR repository root (Git Bash on Windows). It installs only the plugin files from `HEAD`.
+
 #### 2. Choose a Review Mode
 
 | | Native mode | Delegation mode |
@@ -219,7 +230,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
   - [Claude Code](plugins/open-code-review/README.md#claude-code) — install a plugin with review slash commands
   - [Codex](plugins/open-code-review/README.md#codex) — install a plugin with callable review skills
   - [Cursor](plugins/open-code-review/README.md#cursor) — install a plugin with portable review skills
-  - [Google Antigravity](plugins/open-code-review/README.md#google-antigravity) — review with the OCR or Antigravity model
+  - [Google Antigravity](#google-antigravity) — review with the OCR or Antigravity model
   - [Kimi Code](plugins/open-code-review/README.md#kimi-code) — install a plugin with review slash commands and skills
   - [OpenCode](plugins/open-code-review/opencode/README.md) — install native review tools and slash commands
   - [QCA Forward](plugins/open-code-review/qca/README.md) — run delegation mode with the QCA host model and a ready-to-publish template

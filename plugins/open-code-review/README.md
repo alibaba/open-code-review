@@ -106,7 +106,14 @@ Install the plugin from the repository with the Antigravity CLI:
 agy plugin install https://github.com/alibaba/open-code-review
 ```
 
-To try a local checkout, run `agy plugin install .` from the repository root.
+To install a local commit, run the following from the repository root in Bash
+(Git Bash on Windows). The script stages the manifest, skills, logo and license
+from `HEAD` in a temporary directory before installing them.
+
+```bash
+bash .antigravity-plugin/install-local.sh
+```
+
 Run `agy plugin list --json` to see the two installed skills. In an Antigravity
 session, choose the skill for the model you want to use:
 

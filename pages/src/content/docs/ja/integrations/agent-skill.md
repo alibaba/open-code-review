@@ -40,6 +40,19 @@ cp -R /path/to/open-code-review/skills/open-code-review ~/.claude/skills/
 
 これにより、マシン上のすべてのプロジェクトで skill が利用可能になります。
 
+### Google Antigravity
+
+どちらのスキルにも Git 2.41 以降と `ocr` CLI が必要です。
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+`/open-code-review` は OCR に設定したモデルを使い、`/open-code-review-delegate` は現在の Antigravity セッションのモデルを使います。
+
+ローカルのコミットからインストールするには、OCR リポジトリのルートで `bash .antigravity-plugin/install-local.sh` を実行します（Windows では Git Bash を使用）。このスクリプトは `HEAD` に含まれるプラグイン用のファイルだけをインストールします。
+
 ## skill が行うこと
 
 SKILL.md は一つの prompt です。呼び出し側の agent がそれをロードすると、agent 自身が手順を実行します。完全な `/open-code-review`（または同等）のリクエストは、次のように展開されます。

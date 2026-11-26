@@ -26,6 +26,7 @@ on:
     paths:
       - ".antigravity-plugin/**"
       - "imgs/logo.svg"
+      - "LICENSE"
       - ".claude-plugin/**"
       - ".agents/**"
       - ".kimi-plugin/**"
@@ -42,6 +43,7 @@ on:
     paths:
       - ".antigravity-plugin/**"
       - "imgs/logo.svg"
+      - "LICENSE"
       - ".claude-plugin/**"
       - ".agents/**"
       - ".kimi-plugin/**"
@@ -88,3 +90,19 @@ jobs:
       # every skill/command must carry loadable frontmatter.
       - name: Check plugin manifest contract
         run: node scripts/github-actions/check-plugin-contract.js manifests
+
+      - name: Check local Antigravity install contents
+        shell: bash
+        run: |
+          marker=$(mktemp --suffix=.pyc skills/open-code-review/scripts/untracked-XXXXXX)
+          contents=$(mktemp)
+          trap 'rm -f -- "$marker" "$contents"' EXIT
+          export contents
+          agy() {
+            [[ $# == 3 && $1 == plugin && $2 == install ]] || return 1
+            (cd "$3" && find . ! -type d -printf '%P\n' | sort) > "$contents"
+          }
+          export -f agy
+          bash .antigravity-plugin/install-local.sh
+          git ls-tree -r --name-only HEAD -- .antigravity-plugin/plugin.json skills imgs/logo.svg LICENSE |
+            sort | diff -u - "$contents"

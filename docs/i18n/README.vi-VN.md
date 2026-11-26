@@ -122,6 +122,17 @@ npx skills add alibaba/open-code-review
 
 Các skill sẽ hướng dẫn agent của bạn cài đặt `ocr` nếu nó chưa có, tùy thuộc vào quyền của môi trường của bạn. Bạn cũng có thể cài đặt trước bằng `npm install -g @alibaba-group/open-code-review`. Muốn cài qua plugin hoặc cài thủ công? Xem [hướng dẫn thiết lập theo từng agent](../../plugins/open-code-review/README.md), hoặc sao chép các thư mục mong muốn từ [`skills/`](../../skills/) vào thư mục skill của agent của bạn.
 
+##### Google Antigravity
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+`/open-code-review` dùng mô hình đã cấu hình trong OCR, còn `/open-code-review-delegate` dùng mô hình của phiên Antigravity hiện tại.
+
+Để cài từ commit cục bộ, chạy `bash .antigravity-plugin/install-local.sh` tại thư mục gốc của kho mã OCR (dùng Git Bash trên Windows). Tập lệnh chỉ cài các tệp của plugin trong `HEAD`.
+
 #### 2. Chọn chế độ rà soát
 
 | | Chế độ native | Chế độ ủy quyền (delegation) |
@@ -216,7 +227,7 @@ Tài liệu đầy đủ có tại **[open-codereview.ai/docs](https://open-code
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — cài plugin với các lệnh gạch chéo rà soát
   - [Codex](../../plugins/open-code-review/README.md#codex) — cài plugin với các skill rà soát có thể gọi
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — cài plugin với các skill rà soát di động
-  - [Google Antigravity](../../plugins/open-code-review/README.md#google-antigravity) — rà soát mã bằng mô hình đã cấu hình trong OCR hoặc mô hình của phiên Antigravity
+  - [Google Antigravity](#google-antigravity) — rà soát mã bằng mô hình đã cấu hình trong OCR hoặc mô hình của phiên Antigravity
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — cài plugin với các lệnh gạch chéo và skill rà soát
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — cài công cụ rà soát native và các lệnh gạch chéo
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — chạy chế độ ủy quyền với mô hình chủ QCA và mẫu sẵn sàng để xuất bản
