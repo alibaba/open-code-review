@@ -716,21 +716,17 @@ async function testZeroFindingSummaryRendersWarnings() {
     );
   }
 
-  // A narrowed range note stays after the warning list, matching the
-  // with-comments summary (formatWarnings, then rangeNote).
+  // A narrowed scope stays visible even without a manifest.
   {
     const { github } = await run({
       result: { comments: [], message: completedMessage, warnings: completedWarnings },
       opts: ckRunOptions({ rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW }),
     });
-    const rangeNote = `\n\n_Reviewed \`${CK_OLD.slice(0, 7)}..${CK_NEW.slice(0, 7)}\` only; earlier commits in this PR were reviewed in a previous run._`;
-    const warningBlock = formatWarnings(completedWarnings);
-    const body = postedBody(github);
-    assert.strictEqual(
-      body,
-      `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${completedMessage}${warningBlock}\n\n<details>\n<summary>Review info</summary>\n\n${rangeNote.trim()}\n\n</details>`
-    );
-    assert.ok(body.indexOf(warningBlock) < body.indexOf(rangeNote.trim()), "warnings appear before the range note");
+    const [visible, details] = postedBody(github).split("<details>");
+    assert.ok(visible.includes(completedMessage));
+    assert.ok(visible.replace(/<!--[\s\S]*?(?:--!?>|$)/g, "").includes("_Incremental review only._"));
+    assert.ok(visible.includes(formatWarnings(completedWarnings)));
+    assert.ok(details.includes(`**Reviewed commits:** \`${CK_OLD}\` → \`${CK_NEW}\``));
   }
 
   // No warnings: byte-identical to the historical clean summary.
@@ -826,9 +822,10 @@ async function testZeroFindingWarningsDoNotBlockCheckpoint() {
 
 async function testReviewCoverage() {
   const coverage = {
-    selected: ["a", "b", "c", "d"].map(path => ({ path })),
+    selected: ["a", "b", "c", "d", "e", "f"].map(path => ({ path })),
     completed: [{ path: "a" }], reused: [{ path: "b" }],
-    failed: [{ path: "c", classification: "budget", reason: "token limit" }],
+    failed: [{ path: "c", classification: "budget", reason: "token limit" },
+      { path: "e", classification: "budget", reason: "round limit" }, { path: "f", classification: "timeout" }],
     waived: [{ path: "d", reason: "empty diff" }], excluded: [{ path: "excluded.go" }],
   };
   const findings = [{ path: "a", content: "inline finding", end_line: 1 }, { path: "a", content: "summary finding" }];
@@ -841,12 +838,13 @@ async function testReviewCoverage() {
       for (const { body } of [...github.issueComments, ...github.updatedComments]) {
         const title = state === "partial" ? "Partial review" : "Failed review";
         assert.match(body.replace(/<!--.*?-->\s*/g, ""), new RegExp("^⚠️ \\*\\*OpenCodeReview · " + title));
-        assert.ok(body.includes("2 of 4 selected files covered"));
+        assert.ok(body.includes("2 of 6 selected files covered"));
+        assert.ok(body.split("<details>")[0].includes("Not reviewed: 2 files (budget exhausted), 1 file (timeout)."));
         assert.ok(body.includes(`<code>c</code> | Not reviewed — budget: token limit`));
         assert.ok(body.includes("Waived — empty diff"));
         assert.ok(body.includes("Covered by a previous run (result reused)"));
         assert.ok(body.indexOf("<code>c") < body.indexOf("<code>a"));
-        assert.ok(body.includes(`**Reviewed commits:** \`${CK_OLD.slice(0, 7)}\` → \`${CK_NEW.slice(0, 7)}\``));
+        assert.ok(body.includes(`**Reviewed commits:** \`${CK_OLD}\` → \`${CK_NEW}\``));
         assert.doesNotMatch(body, /✅|Looks good to me|excluded.go/);
         if (comments.length) assert.ok(body.includes("summary finding"));
       }
@@ -854,6 +852,11 @@ async function testReviewCoverage() {
       if (state === "failed") assert.deepStrictEqual(github.graphqlCalls, []);
     }
   }
+  const beforeSelection = ckManifest({
+    terminal_state: "failed", run_failure: { classification: "input", reason: "diff resolution failed" },
+  });
+  const { github: failed } = await run({ result: { manifest: beforeSelection, comments: [], warnings: [] } });
+  assert.ok(lastSummaryBody(failed).split("<details>")[0].includes("Review failed (input): diff resolution failed"));
   const completed = Array.from({ length: 2000 }, (_, i) => ({ path: `reviewed/file-${i}.go` }));
   const manifest = ckManifest({ coverage: { selected: completed, completed, reused: [], failed: [], waived: [] } });
   const { github: complete } = await run({ result: { comments: [], manifest }, opts: ckRunOptions({}) });
@@ -5608,61 +5611,22 @@ async function testCheckpointAdvanceRequiresAFingerprint() {
 // forty-commit PR is misleading unless it says so. One visible line, only when
 // the range really was narrowed.
 async function testSummaryShowsNarrowedRangeLabel() {
-  const withRange = async (over, result) => {
-    const gh = makeGithub({});
-    await runPostReviewComments(
-      Object.assign(
-        { github: gh, context, core: { setOutput() {} }, fs: mockFs(JSON.stringify(result), "") },
-        ckRunOptions(over)
-      )
-    );
-    return lastSummaryBody(gh);
-  };
-  const findings = {
-    comments: [{ path: "src/a.js", content: "c1", start_line: 1, end_line: 1 }],
-    manifest: ckManifest(),
-  };
-  const label = `Reviewed \`${CK_OLD.slice(0, 7)}..${CK_NEW.slice(0, 7)}\``;
-
-  const narrowed = await withRange({ rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW }, findings);
-  assert.strictEqual(narrowed.includes(label), true, "a narrowed run must name the range it reviewed");
-  assert.strictEqual(narrowed.includes("reviewed in a previous run"), true);
-  // Visible to a reader: not hidden inside an HTML comment. Scanned with
-  // indexOf, deliberately without a regex — HTML closes a comment on "--!>" as
-  // well as on "-->", and a pattern that knows only the common one silently
-  // reports a body as safe when it is not. An unterminated "<!--" hides
-  // everything after it, so running off the end counts as inside.
-  const insideComment = (text, at) => {
-    let i = 0;
-    while (i <= at) {
-      const open = text.indexOf("<!--", i);
-      if (open === -1 || open > at) return false;
-      const ends = ["-->", "--!>"].map((t) => text.indexOf(t, open + 4)).filter((e) => e !== -1);
-      const close = ends.length === 0 ? text.length : Math.min(...ends);
-      if (at < close) return true;
-      i = close + 1;
+  const opts = { rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW };
+  const manifest = ckManifest({ input: { resolved_base: CK_MB, resolved_head: CK_RESOLVED } });
+  const finding = { path: "src/a.js", content: "c1", start_line: 1, end_line: 1 };
+  for (const comments of [[], [finding]]) {
+    const { github } = await run({ result: { comments, manifest }, opts: ckRunOptions(opts) });
+    for (const { body } of [...github.issueComments, ...github.updatedComments]) {
+      const [visible, details] = body.split("<details>");
+      assert.ok(visible.replace(/<!--[\s\S]*?(?:--!?>|$)/g, "").includes("_Incremental review only._"));
+      assert.ok(!visible.includes(CK_MB));
+      assert.ok(details.includes(`**Reviewed commits:** \`${CK_MB}\` → \`${CK_RESOLVED}\``));
     }
-    return false;
-  };
-  assert.strictEqual(
-    insideComment(narrowed, narrowed.indexOf(label)),
-    false,
-    "the label must be outside the HTML comments"
-  );
-  // Also on the zero-findings path, which is where a narrowed range is most
-  // likely to be mistaken for "the whole PR is clean".
-  const clean = await withRange({ rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW }, {
-    comments: [],
-    manifest: ckManifest(),
-  });
-  assert.strictEqual(clean.includes(label), true);
-
-  const full = await withRange({ rangeMode: "full", rangeFrom: "", rangeTo: CK_NEW }, findings);
-  assert.strictEqual(full.includes("Reviewed `"), false, "a full run must not claim a narrowed range");
-  const empty = await withRange({ rangeMode: "checkpoint", rangeFrom: CK_NEW, rangeTo: CK_NEW }, findings);
-  assert.strictEqual(empty.includes("Reviewed `"), false, "an empty range has nothing to label");
-  const off = await withRange({ checkpointEnabled: false, rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW }, findings);
-  assert.strictEqual(off.includes("Reviewed `"), false, "opt-out runs render today's body");
+  }
+  for (const overrides of [{ rangeMode: "full" }, { rangeFrom: CK_NEW }, { checkpointEnabled: false }]) {
+    const { github } = await run({ result: { comments: [], manifest }, opts: ckRunOptions({ ...opts, ...overrides }) });
+    assert.ok(!lastSummaryBody(github).includes("Incremental review only"));
+  }
 }
 
 // The resolve step only chooses where the review starts; every failure it

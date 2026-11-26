@@ -496,6 +496,22 @@ class PublishTest(unittest.TestCase):
                          "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
                          "✅ **OpenCodeReview**: Looks good to me.")
 
+    def test_failure_before_file_selection_keeps_run_diagnostic_visible(self):
+        coverage = {key: [] for key in ("selected", "completed", "reused", "failed", "waived")}
+        message = "Review failed (input): 0 finding(s); 0 of 0 selected item(s) failed."
+        for failure in ({"classification": "input", "reason": "diff resolution failed"}, None):
+            with self.subTest(failure=failure):
+                manifest = {"terminal_state": "failed", "coverage": coverage, "run_failure": failure}
+                _, rec = run_publish({"status": "failed", "manifest": manifest, "message": message,
+                                      "warnings": [], "comments": []})
+                visible = rec.final_summary_body.split("<details>")[0]
+                self.assertIn("Failed review: 0 of 0 selected files covered", visible)
+                self.assertIn("Review failed (input)", visible)
+                if failure:
+                    self.assertIn("diff resolution failed", visible)
+                self.assertNotIn("Not reviewed:", visible)
+                self.assertNotIn("✅", visible)
+
     def test_incomplete_review_without_coverage(self):
         for status in ("partial", "failed", "completed_with_errors"):
             with self.subTest(status=status):
@@ -509,9 +525,11 @@ class PublishTest(unittest.TestCase):
 
     def test_review_coverage_with_and_without_findings(self):
         coverage = {
-            "selected": [{"path": p} for p in "abcd"],
+            "selected": [{"path": p} for p in "abcdef"],
             "completed": [{"path": "a"}], "reused": [{"path": "b"}],
-            "failed": [{"path": "c", "classification": "budget", "reason": "token limit"}],
+            "failed": [{"path": "c", "classification": "budget", "reason": "token limit"},
+                       {"path": "e", "classification": "budget", "reason": "round limit"},
+                       {"path": "f", "classification": "timeout"}],
             "waived": [{"path": "d", "reason": "empty diff"}], "excluded": [{"path": "excluded.py"}],
         }
         for state, label in (("partial", "Partial review"), ("failed", "Failed review")):
@@ -524,7 +542,8 @@ class PublishTest(unittest.TestCase):
                     self.assertEqual(stats["inline"], 1 if comments else 0)
                     for body in (rec.note_calls[0], rec.final_summary_body):
                         self.assertTrue(body.split("-->")[-1].lstrip().startswith(
-                            "⚠️ **OpenCodeReview · %s: 2 of 4 selected files covered" % label))
+                            "⚠️ **OpenCodeReview · %s: 2 of 6 selected files covered" % label))
+                        self.assertIn("Not reviewed: 2 files (budget exhausted), 1 file (timeout).", body.split("<details>")[0])
                         self.assertIn("<code>c</code> | Not reviewed — budget: token limit", body)
                         self.assertIn("Waived — empty diff", body)
                         self.assertIn("Covered by a previous run (result reused)", body)

@@ -400,6 +400,7 @@ def format_review_coverage(result):
     shas = _extract_expected_shas(result)
     if shas.get("base") and shas.get("head"):
         info.append("**Reviewed commits:** `%s` → `%s`" % (shas["base"][:7], shas["head"][:7]))
+    failed_causes = {}
     rows = []
     for key, label in outcomes:
         if not isinstance(coverage.get(key), list):
@@ -407,9 +408,30 @@ def format_review_coverage(result):
         for item in coverage[key]:
             if not isinstance(item, dict) or not item.get("path"):
                 continue
+            if incomplete and key == "failed":
+                cause = str(item.get("classification") or item.get("reason") or "reason not recorded")
+                if cause == "budget":
+                    cause = "budget exhausted"
+                failed_causes[cause] = failed_causes.get(cause, 0) + 1
             reason = ": ".join(coverage_cell(item[k]) for k in ("classification", "reason") if item.get(k))
             rows.append("| <code>%s</code> | %s%s |" % (
                 coverage_cell(item["path"]), label, " — " + reason if reason else ""))
+    if state == "failed":
+        failure = manifest.get("run_failure")
+        message = result.get("message")
+        if isinstance(failure, dict) and failure.get("classification"):
+            heading += "\n\nReview failed (%s)" % coverage_cell(failure["classification"])
+            if failure.get("reason"):
+                heading += ": " + coverage_cell(failure["reason"])
+        elif isinstance(message, str) and message.startswith("Review failed ("):
+            heading += "\n\n" + coverage_cell(message)
+    if failed_causes:
+        groups = list(failed_causes.items())
+        shown = ["%d file%s (%s)" % (n, "" if n == 1 else "s", coverage_cell(cause))
+                 for cause, n in groups[:3]]
+        if len(groups) > len(shown):
+            shown.append("other causes in Review info")
+        heading += "\n\nNot reviewed: %s." % ", ".join(shown)
     if rows:
         info.append("\n".join(["| File | Result |", "| --- | --- |"] + rows))
     details = "\n\n<details>\n<summary>Review info</summary>\n\n%s\n\n</details>" % "\n\n".join(info) if info else ""

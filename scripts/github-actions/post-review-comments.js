@@ -264,13 +264,11 @@ async function runPostReviewComments({
   // being replaced already had (preserveCheckpointMarker).
   const preserveMarker = checkpointEnabled && stickySummary;
 
-  // One human-visible line naming the range this run actually reviewed, so a
-  // reader of the summary is never left thinking the findings cover the whole
-  // PR. Only rendered when the range really was narrowed.
-  const rangeNote =
+  const checkpointRange =
     checkpointEnabled && rangeMode === "checkpoint" && rangeFrom && rangeTo && rangeFrom !== rangeTo
-      ? `\n\n_Reviewed \`${rangeFrom.slice(0, 7)}..${rangeTo.slice(0, 7)}\` only; earlier commits in this PR were reviewed in a previous run._`
-      : "";
+      ? { resolved_base: rangeFrom, resolved_head: rangeTo }
+      : null;
+  const scopeNote = checkpointRange ? "\n\n_Incremental review only._" : "";
 
   // A rerun on the same head reviewed an empty range, so this run has nothing
   // to say about the PR — and the sticky summary is rewritten wholesale, so
@@ -333,7 +331,7 @@ async function runPostReviewComments({
 
   const comments = result.comments || [];
   const warnings = result.warnings || [];
-  const { heading, details } = formatReviewCoverage(result, rangeNote);
+  const { heading, details } = formatReviewCoverage(result, checkpointRange);
   stats.total = comments.length;
 
   // No comments: post a summary. Warnings, when present, are part of it:
@@ -354,7 +352,7 @@ async function runPostReviewComments({
     const icon = warningBlock ? "⚠️" : "✅";
     // A clean run is still a complete run: this path advances the checkpoint.
     // Warnings are not an input to that decision.
-    const summary = heading ? findingCount(0, heading) : `${icon} **OpenCodeReview**: ${message}`;
+    const summary = heading ? findingCount(0, heading, scopeNote) : `${icon} **OpenCodeReview**: ${message}${scopeNote}`;
     const body = appendCheckpoint(
       `${SUMMARY_MARKER}\n${summary}${warningBlock}`,
       result.manifest
@@ -498,7 +496,7 @@ async function runPostReviewComments({
     appSlug,
     resolveSelfLogin: authenticatedLogin,
     body: appendReviewInfo(wrapSummary(
-      buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings, heading)
+      buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings, heading, scopeNote)
     ), details),
     log,
   });
@@ -575,6 +573,7 @@ async function runPostReviewComments({
     failed: failedCount,
     warnings,
     heading,
+    scopeNote,
   });
   summaryBody += formatSummaryComments(commentsWithoutLine);
   summaryBody += formatSummaryComments(commentsRouted);
@@ -2453,8 +2452,8 @@ function formatCommentMarkdown(comment, error) {
 //   skipped — comments suppressed by incremental overlap filtering
 //   failed  — comments that had line info but could not be posted (also
 //             rendered in the body below, each tagged with its failure reason)
-function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed, warnings, heading }) {
-  let body = findingCount(total, heading);
+function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed, warnings, heading, scopeNote = "" }) {
+  let body = findingCount(total, heading, scopeNote);
   if (total > 0) {
     body += `\n- Successfully posted inline: ${inline} comment(s)`;
     if (summary > 0) {
@@ -2488,9 +2487,9 @@ function appendReviewInfo(body, details) {
     : body;
 }
 
-function findingCount(total, heading) {
-  return heading ? `${heading}\n\n${total} finding${total === 1 ? "" : "s"}.`
-    : `🔍 **OpenCodeReview** found **${total}** issue(s) in this PR.`;
+function findingCount(total, heading, scopeNote = "") {
+  return heading ? `${heading}${scopeNote}\n\n${total} finding${total === 1 ? "" : "s"}.`
+    : `🔍 **OpenCodeReview** found **${total}** issue(s) in this PR.${scopeNote}`;
 }
 
 function coverageCell(value) {
@@ -2498,7 +2497,7 @@ function coverageCell(value) {
     .replace(/\|/g, "&#124;").replace(/[\r\n]/g, " ");
 }
 
-function formatReviewCoverage(result, rangeNote) {
+function formatReviewCoverage(result, checkpointRange) {
   const manifest = result.manifest || {};
   const state = manifest.terminal_state || result.status;
   const coverage = manifest.coverage || {};
@@ -2523,22 +2522,44 @@ function formatReviewCoverage(result, rangeNote) {
     const waived = coverage.waived?.length ? ` · ${coverage.waived.length} waived` : "";
     heading = `${incomplete ? "⚠️ " : ""}**OpenCodeReview · ${label}: ${count}${waived}**`;
   }
-  const input = manifest.input || {};
+  const range = [manifest.input, checkpointRange].find(pair =>
+    /^[0-9a-f]{40}$/.test(pair?.resolved_base) && /^[0-9a-f]{40}$/.test(pair?.resolved_head)
+  );
   const info = [];
-  if (/^[0-9a-f]{40}$/.test(input.resolved_base) && /^[0-9a-f]{40}$/.test(input.resolved_head)) {
-    info.push(`**Reviewed commits:** \`${input.resolved_base.slice(0, 7)}\` → \`${input.resolved_head.slice(0, 7)}\``);
-    if (rangeNote) info.push("Earlier commits in this PR were reviewed in a previous run.");
-  } else if (rangeNote) {
-    info.push(rangeNote.trim());
+  if (range) {
+    info.push(`**Reviewed commits:** \`${range.resolved_base}\` → \`${range.resolved_head}\``);
   }
+  const failedCauses = new Map();
   const rows = [];
   for (const [key, label] of outcomes) {
     if (!Array.isArray(coverage[key])) continue;
     for (const item of coverage[key]) {
       if (!item?.path) continue;
+      if (incomplete && key === "failed") {
+        const cause = item.classification || item.reason || "reason not recorded";
+        failedCauses.set(cause, (failedCauses.get(cause) || 0) + 1);
+      }
       const reason = [item.classification, item.reason].filter(Boolean).map(coverageCell).join(": ");
       rows.push(`| <code>${coverageCell(item.path)}</code> | ${label}${reason ? " — " + reason : ""} |`);
     }
+  }
+  if (state === "failed") {
+    const failure = manifest.run_failure;
+    if (failure?.classification) {
+      heading += `\n\nReview failed (${coverageCell(failure.classification)})`;
+      if (failure.reason) heading += `: ${coverageCell(failure.reason)}`;
+    } else if (typeof result.message === "string" && result.message.startsWith("Review failed (")) {
+      heading += `\n\n${coverageCell(result.message)}`;
+    }
+  }
+  if (failedCauses.size) {
+    const groups = [...failedCauses];
+    const shown = groups.slice(0, 3).map(([cause, n]) => {
+      const label = cause === "budget" ? "budget exhausted" : coverageCell(cause);
+      return `${n} file${n === 1 ? "" : "s"} (${label})`;
+    });
+    if (groups.length > shown.length) shown.push("other causes in Review info");
+    heading += `\n\nNot reviewed: ${shown.join(", ")}.`;
   }
   if (rows.length) info.push(["| File | Result |", "| --- | --- |", ...rows].join("\n"));
   const details = info.length ? `\n\n<details>\n<summary>Review info</summary>\n\n${info.join("\n\n")}\n\n</details>` : "";
@@ -2553,8 +2574,8 @@ function formatReviewCoverage(result, rangeNote) {
 // finalize. Routed findings are known before the review (the policy decision is
 // made in the partition loop) so they are rendered here too, keeping the
 // pre-review anchor accurate.
-function buildPreReviewSummaryBody(totalCount, summaryComments, routedComments, warnings, heading) {
-  let body = findingCount(totalCount, heading);
+function buildPreReviewSummaryBody(totalCount, summaryComments, routedComments, warnings, heading, scopeNote = "") {
+  let body = findingCount(totalCount, heading, scopeNote);
   if (totalCount > 0) {
     body += `\n- ⏳ _Posting review comments…_`;
     if (routedComments && routedComments.length > 0) {
