@@ -511,6 +511,55 @@ func TestGroupDiffs_BundleSplitByMaxFilesPerGroup(t *testing.T) {
 	}
 }
 
+func TestGroupDiffs_OverridePerFileSkipsLLM(t *testing.T) {
+	// With GroupingMinFiles at its default behaviour a large change set goes to
+	// the LLM. --grouping per-file must give every file its own group instead,
+	// with no grouping call.
+	diffs := make([]model.Diff, 12)
+	for i := range diffs {
+		diffs[i] = model.Diff{NewPath: fmt.Sprintf("f%d.go", i), Insertions: 1, Diff: "d"}
+	}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":[0]}]`}
+	tpl := groupingSkipTemplate(4, 200)
+	per := template.GroupingPerFile
+	tpl.GroupingOverride = &per
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0, nil)
+	restore()
+
+	if client.called {
+		t.Error("grouping LLM was called despite --grouping per-file")
+	}
+	if len(result.groups) != len(diffs) {
+		t.Fatalf("got %d groups, want %d (one per file)", len(result.groups), len(diffs))
+	}
+}
+
+func TestGroupDiffs_OverrideBundleAllSkipsLLM(t *testing.T) {
+	diffs := make([]model.Diff, 6)
+	for i := range diffs {
+		diffs[i] = model.Diff{NewPath: fmt.Sprintf("f%d.go", i), Insertions: 5000, Diff: "d"}
+	}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":[0]}]`}
+	tpl := groupingSkipTemplate(4, 200)
+	bundle := template.GroupingBundleAll
+	tpl.GroupingOverride = &bundle
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0, nil)
+	restore()
+
+	if client.called {
+		t.Error("grouping LLM was called despite --grouping bundle-all")
+	}
+	if len(result.groups) != 1 {
+		t.Fatalf("got %d groups, want 1 (all files bundled)", len(result.groups))
+	}
+}
+
 func TestCallGroupingLLM_EmptyResponse(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}}
 	client := &fakeGroupingClient{response: ""}

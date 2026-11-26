@@ -567,3 +567,53 @@ func TestPlanRequired(t *testing.T) {
 		})
 	}
 }
+
+func TestParseGroupingOverride(t *testing.T) {
+	cases := []struct {
+		in   string
+		want GroupingStrategy
+		none bool
+	}{
+		{"", 0, true},
+		{"llm", GroupingViaLLM, false},
+		{"bundle-all", GroupingBundleAll, false},
+		{"per-file", GroupingPerFile, false},
+		{"PER-FILE", GroupingPerFile, false},
+	}
+	for _, c := range cases {
+		got, err := ParseGroupingOverride(c.in)
+		if err != nil {
+			t.Fatalf("ParseGroupingOverride(%q) error: %v", c.in, err)
+		}
+		if c.none {
+			if got != nil {
+				t.Fatalf("ParseGroupingOverride(%q) = %v, want nil", c.in, *got)
+			}
+			continue
+		}
+		if got == nil || *got != c.want {
+			t.Fatalf("ParseGroupingOverride(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	if _, err := ParseGroupingOverride("nope"); err == nil {
+		t.Fatal("expected an error for an unknown grouping value")
+	}
+}
+
+func TestGroupingPlanOverride(t *testing.T) {
+	tpl := Template{GroupingMinFiles: 4, GroupingBundleLineThreshold: 200}
+	// Without an override the thresholds decide.
+	if got := tpl.GroupingPlan(30, 5000); got != GroupingViaLLM {
+		t.Fatalf("default plan = %v, want llm", got)
+	}
+	for _, want := range []GroupingStrategy{GroupingPerFile, GroupingBundleAll, GroupingViaLLM} {
+		w := want
+		tpl.GroupingOverride = &w
+		// The override wins whatever the file count and churn say.
+		for _, files := range []int{1, 3, 30} {
+			if got := tpl.GroupingPlan(files, 5000); got != want {
+				t.Fatalf("override %v: GroupingPlan(%d, 5000) = %v", want, files, got)
+			}
+		}
+	}
+}

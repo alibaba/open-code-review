@@ -30,6 +30,11 @@ type Template struct {
 	ReLocationTask              *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask            *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 	GroupingTask                *LlmConversation `json:"GROUPING_TASK,omitempty"`
+
+	// GroupingOverride forces one grouping strategy for the run. It is a runtime
+	// override set from the command line, not part of task_template.json. Nil
+	// keeps the configured thresholds in charge.
+	GroupingOverride *GroupingStrategy `json:"-"`
 }
 
 // ScanTemplate holds the full-file scan task template configuration loaded
@@ -128,6 +133,9 @@ func (s GroupingStrategy) String() string {
 // Either threshold at or below 0 disables its own step: GroupingMinFiles keeps
 // grouping unconditional, GroupingBundleLineThreshold never bundles.
 func (t Template) GroupingPlan(fileCount int, totalChanged int64) GroupingStrategy {
+	if t.GroupingOverride != nil {
+		return *t.GroupingOverride
+	}
 	if t.GroupingMinFiles <= 0 || fileCount >= t.GroupingMinFiles {
 		return GroupingViaLLM
 	}
@@ -135,6 +143,30 @@ func (t Template) GroupingPlan(fileCount int, totalChanged int64) GroupingStrate
 		return GroupingBundleAll
 	}
 	return GroupingPerFile
+}
+
+// GroupingOverrideNames lists the values --grouping accepts.
+func GroupingOverrideNames() []string {
+	return []string{"llm", "bundle-all", "per-file"}
+}
+
+// ParseGroupingOverride validates a user-supplied grouping value. An empty
+// string means no override and returns nil.
+func ParseGroupingOverride(s string) (*GroupingStrategy, error) {
+	var g GroupingStrategy
+	switch strings.ToLower(s) {
+	case "":
+		return nil, nil
+	case "llm":
+		g = GroupingViaLLM
+	case "bundle-all":
+		g = GroupingBundleAll
+	case "per-file":
+		g = GroupingPerFile
+	default:
+		return nil, fmt.Errorf("invalid grouping %q: must be one of %s", s, strings.Join(GroupingOverrideNames(), ", "))
+	}
+	return &g, nil
 }
 
 // CompletionTokenLimit returns the output cap for LLM requests. Runtime
