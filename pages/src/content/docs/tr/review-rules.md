@@ -89,6 +89,32 @@ Alan, üç kullanıcı katmanından da okunur: `--rule`, projenin `.opencoderevi
 
 Birleştirme yalnızca **sistem** katmanına uygulanır. Kendi girdilerinizden ikisi aynı dosyayla eşleşirse ilk girdi kullanılır; `merge_system_rule` bunları birbiriyle birleştirmez.
 
+### Yalnızca kural ihlallerini raporlamak: `scope` {#reporting-only-rule-breaches-scope}
+
+Bir kural girdisi OCR'a neyi denetleyeceğini söyler, neyi dışarıda bırakacağını söylemez. İnceleyici fark ettiği her hatayı veya riski raporlamaya devam eder; bu yüzden yalnızca kendi kurallarınızı denetlemek için yazılmış bir kural dosyası da `bug` ve `security` bulguları alır.
+
+Bir girdide `"scope": "rules_only"` ayarlayarak, eşleştiği dosyaların incelemesini yalnızca o kuralın ihlalleriyle sınırlayabilirsiniz:
+
+```json
+{
+  "rules": [
+    {
+      "path": "src/**/*.ts",
+      "rule": "Exported functions declare an explicit return type. Errors are returned as values, never thrown.",
+      "scope": "rules_only"
+    }
+  ]
+}
+```
+
+OCR bu durumda kural metninin üstüne zorunlu bir kapsam yönergesi ekler: yalnızca kuralları ihlal eden kodu raporla, ihlal yoksa hiçbir şey raporlama. `ocr rules check`, yönergeyi çözümlenen kuralın parçası olarak gösterir.
+
+- Alan isteğe bağlıdır. Ayarlanmazsa inceleme değişmez.
+- Kabul edilen tek değer `rules_only`'dir. Başka bir değer, kural dosyası yüklenirken çalışmayı başarısız kılar.
+- `merge_system_rule: true` ile birlikte kullanıldığında kapsam birleştirilmiş metni kapsar; yerleşik dil kuralları da kural sayılır.
+- Kapsam girdiye aittir ve yalnızca o girdinin kazandığı dosyalara uygulanır. Aynı incelemedeki diğer dosyalar tam incelemeden geçer.
+- Kapsam bir istem yönergesidir. Modelin raporladıklarını daraltır; bulgular üzerinde sonradan çalışan bir filtre değildir.
+
 ### Glob özellikleri {#glob-features}
 
 OCR, eşleştirme için [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4) kullanır:

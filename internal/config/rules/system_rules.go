@@ -202,11 +202,34 @@ func expandBraces(s string) []string {
 	return results
 }
 
+// RuleScopeRulesOnly restricts findings to breaches of the resolved rule.
+const RuleScopeRulesOnly = "rules_only"
+
+// rulesOnlyPreamble sits inside the rule text, not in the prompt templates, so
+// it reaches every prompt that embeds the rule and stays tied to the files the
+// rule covers when a review group mixes rules.
+const rulesOnlyPreamble = "## Review Scope (Mandatory)\n\n" +
+	"Report only code that breaches the rules below. " +
+	"Do not report bugs, security, performance, style or any other issue these rules do not name, even if it looks serious. " +
+	"This scope overrides any broader review instruction. " +
+	"If no rule is breached, report nothing.\n\n---\n\n"
+
 // ProjectRuleEntry is a single entry in .opencodereview/rule.json.
 type ProjectRuleEntry struct {
 	Path            string `json:"path"`
 	Rule            string `json:"rule"`
 	MergeSystemRule bool   `json:"merge_system_rule,omitempty"`
+	// Scope is empty for a full review, or RuleScopeRulesOnly.
+	Scope string `json:"scope,omitempty"`
+}
+
+func validateRuleEntries(entries []ProjectRuleEntry) error {
+	for _, e := range entries {
+		if e.Scope != "" && e.Scope != RuleScopeRulesOnly {
+			return fmt.Errorf("rule for path %q: unsupported scope %q, want %q", e.Path, e.Scope, RuleScopeRulesOnly)
+		}
+	}
+	return nil
 }
 
 // ProjectRule holds rules loaded from <repoDir>/.opencodereview/rule.json.
@@ -385,6 +408,9 @@ func loadGlobalRule() (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal global rule: %w", err)
 	}
+	if err := validateRuleEntries(pr.Rules); err != nil {
+		return nil, fmt.Errorf("global rule %s: %w", path, err)
+	}
 	resolveRuleEntries(pr.Rules, filepath.Dir(path), "")
 	return &pr, nil
 }
@@ -397,6 +423,9 @@ func loadRuleFile(path string) (*ProjectRule, error) {
 	var pr ProjectRule
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal rule file %s: %w", path, err)
+	}
+	if err := validateRuleEntries(pr.Rules); err != nil {
+		return nil, fmt.Errorf("rule file %s: %w", path, err)
 	}
 	resolveRuleEntries(pr.Rules, filepath.Dir(path), "")
 	return &pr, nil
@@ -437,6 +466,9 @@ func loadProjectRule(repoDir string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal project rule: %w", err)
 	}
+	if err := validateRuleEntries(pr.Rules); err != nil {
+		return nil, fmt.Errorf("project rule %s: %w", path, err)
+	}
 	resolveRuleEntries(pr.Rules, repoDir, confineRoot)
 	return &pr, nil
 }
@@ -447,13 +479,24 @@ func loadProjectRule(repoDir string) (*ProjectRule, error) {
 func (c *composedResolver) Resolve(path string) string {
 	for _, layer := range []*ProjectRule{c.custom, c.project, c.global} {
 		if entry := matchProjectRuleEntry(layer, path); entry != nil {
-			if entry.MergeSystemRule {
-				return c.mergeWithSystemRule(path, entry.Rule)
-			}
-			return entry.Rule
+			return c.entryRule(path, entry)
 		}
 	}
 	return c.system.Resolve(path)
+}
+
+// entryRule renders a matched user entry: merged with the system rule when it
+// sets merge_system_rule, then prefixed with the scope directive when it sets
+// scope.
+func (c *composedResolver) entryRule(path string, entry *ProjectRuleEntry) string {
+	rule := entry.Rule
+	if entry.MergeSystemRule {
+		rule = c.mergeWithSystemRule(path, rule)
+	}
+	if entry.Scope == RuleScopeRulesOnly {
+		rule = rulesOnlyPreamble + rule
+	}
+	return rule
 }
 
 // CanonicalConfig returns a deterministic, order-stable field list describing the
@@ -475,6 +518,10 @@ func (c *composedResolver) CanonicalConfig() []string {
 				merge = "1"
 			}
 			fields = append(fields, "layer", name, "path", e.Path, "rule", e.Rule, "merge", merge)
+			// Appended only when set, so configs without a scope keep their hash.
+			if e.Scope != "" {
+				fields = append(fields, "scope", e.Scope)
+			}
 		}
 	}
 	appendLayer("custom", c.custom)
@@ -525,11 +572,7 @@ func (c *composedResolver) matchProjectRuleDetail(pr *ProjectRule, path, source 
 	if entry == nil {
 		return nil
 	}
-	rule := entry.Rule
-	if entry.MergeSystemRule {
-		rule = c.mergeWithSystemRule(path, rule)
-	}
-	return &RuleDetail{Rule: rule, Source: source, Pattern: entry.Path}
+	return &RuleDetail{Rule: c.entryRule(path, entry), Source: source, Pattern: entry.Path}
 }
 
 func matchProjectRuleEntry(pr *ProjectRule, path string) *ProjectRuleEntry {

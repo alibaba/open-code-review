@@ -127,6 +127,40 @@ Security review: flag hardcoded secrets, unvalidated redirects, and missing auth
 일치하면 앞선 항목이 여전히 완전히 이깁니다. `merge_system_rule`는 그것들을 서로
 합치지 않습니다.
 
+### 규칙 위반만 보고하기: `scope` {#reporting-only-rule-breaches-scope}
+
+규칙 항목은 OCR에 무엇을 검사할지 알려 줄 뿐, 무엇을 빼야 할지는 알려 주지 않습니다.
+리뷰어는 눈에 띄는 버그나 위험을 그대로 보고하므로, 팀의 규약만 검사하려고 쓴 규칙
+파일에도 `bug`와 `security` 지적이 나옵니다.
+
+항목에 `"scope": "rules_only"`를 설정하면, 그 항목이 일치한 파일의 리뷰를 해당 규칙
+위반으로만 한정합니다:
+
+```json
+{
+  "rules": [
+    {
+      "path": "src/**/*.ts",
+      "rule": "Exported functions declare an explicit return type. Errors are returned as values, never thrown.",
+      "scope": "rules_only"
+    }
+  ]
+}
+```
+
+그러면 OCR은 규칙 텍스트 위에 필수 범위 지시를 넣습니다. 규칙을 위반한 코드만 보고하고,
+위반이 없으면 아무것도 보고하지 말라는 지시입니다. `ocr rules check`는 이 지시를 해석된
+규칙의 일부로 보여 줍니다.
+
+- 이 필드는 선택 사항입니다. 설정하지 않으면 리뷰는 그대로입니다.
+- 허용되는 값은 `rules_only`뿐입니다. 다른 값은 규칙 파일을 읽을 때 실행을 실패시킵니다.
+- `merge_system_rule: true`와 함께 쓰면 범위가 합쳐진 텍스트 전체에 적용되므로, 내장
+  언어 규칙도 규칙으로 취급됩니다.
+- 범위는 항목에 속하므로 그 항목이 이긴 파일에만 적용됩니다. 같은 리뷰의 다른 파일은
+  계속 전체 리뷰를 받습니다.
+- 범위는 프롬프트 지시입니다. 모델이 보고하는 내용을 좁힐 뿐, 지적 결과에 대한 후처리
+  필터가 아닙니다.
+
 ### glob 기능 {#glob-features}
 
 OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)로
