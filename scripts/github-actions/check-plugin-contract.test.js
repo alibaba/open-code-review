@@ -787,6 +787,44 @@ function testAntigravityManifestContract() {
   const isFile = (asset) => assets.has(asset);
   assert.deepStrictEqual(checkAntigravityManifest(manifest, isFile), []);
 
+  const { name, $schema, logo } = manifest;
+  const checkMetadata = (metadata) =>
+    checkAntigravityManifest({ name, $schema, logo, ...metadata }, isFile);
+  for (const metadata of [
+    {},
+    { author: "Alibaba" },
+    { author: { name: "Alibaba", url: "https://github.com/alibaba" } },
+    { keywords: [], suggestedPrompts: [] },
+  ]) {
+    assert.deepStrictEqual(checkMetadata(metadata), []);
+  }
+  for (const [metadata, field] of [
+    [{ displayName: false }, "displayName"],
+    [{ version: 1 }, "version"],
+    [{ description: {} }, "description"],
+    [{ homepage: null }, "homepage"],
+    [{ repository: [] }, "repository"],
+    [{ license: 2 }, "license"],
+    [{ keywords: "git" }, "keywords"],
+    [{ keywords: ["git", 42] }, "keywords"],
+    [{ suggestedPrompts: null }, "suggestedPrompts"],
+    [{ suggestedPrompts: [false] }, "suggestedPrompts"],
+    [{ author: [] }, "author"],
+    [{ author: null }, "author"],
+    [{ author: { name: 42 } }, "author.name"],
+    [{ author: { email: false } }, "author.email"],
+    [{ author: { url: [] } }, "author.url"],
+  ]) {
+    const errors = checkMetadata(metadata);
+    assert.deepStrictEqual(errors.map((error) => error.file), [file], field);
+    assert.ok(errors[0].message.includes(`\`${field}\``), errors[0].message);
+  }
+  for (const invalidRoot of [[], true]) {
+    const errors = checkAntigravityManifest(invalidRoot, isFile);
+    assert.deepStrictEqual(errors.map((error) => error.file), [file]);
+    assert.match(errors[0].message, /JSON object/);
+  }
+
   for (const change of [{ name: "other" }, { $schema: "other" }, { logo: "/imgs/logo.svg" }]) {
     const errors = checkAntigravityManifest({ ...manifest, ...change }, isFile);
     assert.deepStrictEqual(errors.map((error) => error.file), [file]);

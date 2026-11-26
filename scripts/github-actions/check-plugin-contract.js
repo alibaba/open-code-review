@@ -724,8 +724,9 @@ function checkAgentPluginManifests(specs, readJson, listDirs, readFile) {
 
 function checkAntigravityManifest(manifest, isFile) {
   const file = ANTIGRAVITY_MANIFEST;
-  if (manifest === null) {
-    return [{ file, message: "Antigravity plugin manifest is missing or is not valid JSON." }];
+  const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  if (!isObject(manifest)) {
+    return [{ file, message: "Antigravity plugin manifest is missing or is not a valid JSON object." }];
   }
 
   const errors = [];
@@ -735,6 +736,27 @@ function checkAntigravityManifest(manifest, isFile) {
   if (manifest.$schema !== "https://antigravity.google/schemas/v1/plugin.json") {
     errors.push({ file, message: "Expected the Antigravity v1 plugin schema." });
   }
+
+  function checkStringFields(metadata, fields, prefix = "") {
+    for (const field of fields) {
+      if (metadata[field] !== undefined && typeof metadata[field] !== "string") {
+        errors.push({ file, message: `Antigravity \`${prefix}${field}\` must be a string.` });
+      }
+    }
+  }
+  checkStringFields(manifest, ["displayName", "version", "description", "homepage", "repository", "license"]);
+  if (isObject(manifest.author)) {
+    checkStringFields(manifest.author, ["name", "email", "url"], "author.");
+  } else if (manifest.author !== undefined && typeof manifest.author !== "string") {
+    errors.push({ file, message: "Antigravity `author` must be a string or an object." });
+  }
+  for (const field of ["keywords", "suggestedPrompts"]) {
+    const value = manifest[field];
+    if (value !== undefined && !(Array.isArray(value) && value.every((item) => typeof item === "string"))) {
+      errors.push({ file, message: `Antigravity \`${field}\` must be an array of strings.` });
+    }
+  }
+
   const logo = "imgs/logo.svg";
   const bundledLogo =
     typeof manifest.logo === "string" &&

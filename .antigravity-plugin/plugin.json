@@ -7,6 +7,8 @@
   "author": { "name": "Alibaba" },
   "repository": "https://github.com/alibaba/open-code-review",
   "homepage": "https://open-codereview.ai",
+  "license": "Apache-2.0",
+  "keywords": ["code-review", "ocr", "git", "ai-review"],
   "logo": "imgs/logo.svg",
   "suggestedPrompts": [
     "/open-code-review Review my current changes",
