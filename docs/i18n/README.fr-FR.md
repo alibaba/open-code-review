@@ -113,7 +113,7 @@ Les points forts de l'agent sont concentrés là où ils sont les plus important
 
 ### Compétences des agents
 
-Utilisez les compétences de Claude Code, Codex, Cursor, Kimi Code ou de tout autre agent prenant en charge les compétences d'agent et capable d'exécuter des commandes locales. Les deux modes nécessitent **Git >= 2.41** et la **`ocr` CLI** ; seul le mode natif nécessite un fournisseur de modèles pour OCR.
+Utilisez les compétences de Claude Code, Codex, Cursor, Google Antigravity, Kimi Code ou de tout autre agent prenant en charge les compétences d'agent et capable d'exécuter des commandes locales. Les deux modes nécessitent **Git >= 2.41** et la **`ocr` CLI** ; seul le mode natif nécessite un fournisseur de modèles pour OCR.
 
 #### 1. Installez les compétences
 
@@ -124,6 +124,17 @@ npx skills add alibaba/open-code-review
 ```
 
 La compétence guide votre agent pour installer `ocr` s'il n'est pas présent, sous réserve des autorisations de votre environnement. Vous pouvez également l'installer à l'avance à l'aide de `npm install -g @alibaba-group/open-code-review`. Vous préférez un plugin ou une installation manuelle ? Consultez le [Guide de configuration spécifique à l'agent](../../plugins/open-code-review/README.md), ou copiez les dossiers souhaités depuis [`skills/`](../../skills/) vers le répertoire des compétences de votre agent.
+
+##### Google Antigravity
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+`/open-code-review` utilise le modèle configuré dans OCR et `/open-code-review-delegate` celui de la session Antigravity en cours.
+
+Pour installer le plugin à partir d’un commit local, exécutez `bash .antigravity-plugin/install-local.sh` à la racine du dépôt OCR (avec Git Bash sous Windows). Le script installe uniquement les fichiers du plugin présents dans `HEAD`.
 
 #### 2. Choisissez un mode de révision
 
@@ -219,6 +230,7 @@ La documentation complète est disponible à l'adresse **[open-codereview.ai/doc
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — installer un plugin proposant des commandes « / » pour la révision
   - [Codex](../../plugins/open-code-review/README.md#codex) — installer un plugin proposant des fonctionnalités d'évaluation accessibles par appel
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — installer un plugin doté de fonctionnalités de révision portables
+  - [Google Antigravity](#google-antigravity) — réviser le code avec le modèle configuré dans OCR ou celui de la session Antigravity
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — installer un plugin proposant des commandes de révision « slash » et des compétences
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — installer des outils de révision natifs et des commandes « slash »
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — exécuter le mode de délégation avec le modèle hôte QCA et un modèle prêt à être publié

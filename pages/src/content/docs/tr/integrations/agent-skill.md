@@ -35,6 +35,19 @@ cp -R /path/to/open-code-review/skills/open-code-review ~/.claude/skills/
 
 Böylece beceri makinedeki tüm projelerde kullanılabilir.
 
+### Google Antigravity
+
+Her iki beceri için Git 2.41 veya üzeri ve `ocr` komut satırı aracı gerekir.
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+`/open-code-review` OCR'de yapılandırılan modeli, `/open-code-review-delegate` ise geçerli Antigravity oturumunun modelini kullanır.
+
+Yerel bir commit'ten kurmak için OCR deposunun kök dizininde `bash .antigravity-plugin/install-local.sh` komutunu çalıştırın (Windows'ta Git Bash kullanın). Betik yalnızca `HEAD` içindeki eklenti dosyalarını kurar.
+
 ## Beceri ne yapar? {#what-the-skill-does}
 
 SKILL.md bir istemdir: çağıran ajan dosyayı yüklediğinde adımları kendisi yürütür. Tek bir `/open-code-review` (veya eşdeğeri) isteği şu şekilde ilerler:

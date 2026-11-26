@@ -1,0 +1,17 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "open-code-review",
+  "displayName": "Open Code Review",
+  "version": "1.0.0",
+  "description": "Review Git changes with the Open Code Review CLI. Use the model configured in OCR or delegate the review to your Antigravity session.",
+  "author": { "name": "Alibaba" },
+  "repository": "https://github.com/alibaba/open-code-review",
+  "homepage": "https://open-codereview.ai",
+  "license": "Apache-2.0",
+  "keywords": ["code-review", "ocr", "git", "ai-review"],
+  "logo": "imgs/logo.svg",
+  "suggestedPrompts": [
+    "/open-code-review Review my current changes",
+    "/open-code-review-delegate Review this branch against main"
+  ]
+}

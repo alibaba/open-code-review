@@ -44,6 +44,7 @@ const {
   agentPluginNameProblem,
   validateAgentPluginManifest,
   checkAgentPluginManifests,
+  checkAntigravityManifest,
   pluginEntries,
   listEntries,
   readFileOrNull,
@@ -774,6 +775,67 @@ function testRealAgentPluginManifestPinsTheFixedLayout() {
   );
 }
 
+function testAntigravityManifestContract() {
+  const file = ".antigravity-plugin/plugin.json";
+  const root = path.resolve(__dirname, "../..");
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
+  const assets = new Set([
+    "imgs/logo.svg",
+    "skills/open-code-review/SKILL.md",
+    "skills/open-code-review-delegate/SKILL.md",
+  ]);
+  const isFile = (asset) => assets.has(asset);
+  assert.deepStrictEqual(checkAntigravityManifest(manifest, isFile), []);
+
+  const { name, $schema, logo } = manifest;
+  const checkMetadata = (metadata) =>
+    checkAntigravityManifest({ name, $schema, logo, ...metadata }, isFile);
+  for (const metadata of [
+    {},
+    { author: "Alibaba" },
+    { author: { name: "Alibaba", url: "https://github.com/alibaba" } },
+    { keywords: [], suggestedPrompts: [] },
+  ]) {
+    assert.deepStrictEqual(checkMetadata(metadata), []);
+  }
+  for (const [metadata, field] of [
+    [{ displayName: false }, "displayName"],
+    [{ version: 1 }, "version"],
+    [{ description: {} }, "description"],
+    [{ homepage: null }, "homepage"],
+    [{ repository: [] }, "repository"],
+    [{ license: 2 }, "license"],
+    [{ keywords: "git" }, "keywords"],
+    [{ keywords: ["git", 42] }, "keywords"],
+    [{ suggestedPrompts: null }, "suggestedPrompts"],
+    [{ suggestedPrompts: [false] }, "suggestedPrompts"],
+    [{ author: [] }, "author"],
+    [{ author: null }, "author"],
+    [{ author: { name: 42 } }, "author.name"],
+    [{ author: { email: false } }, "author.email"],
+    [{ author: { url: [] } }, "author.url"],
+  ]) {
+    const errors = checkMetadata(metadata);
+    assert.deepStrictEqual(errors.map((error) => error.file), [file], field);
+    assert.ok(errors[0].message.includes(`\`${field}\``), errors[0].message);
+  }
+  for (const invalidRoot of [[], true]) {
+    const errors = checkAntigravityManifest(invalidRoot, isFile);
+    assert.deepStrictEqual(errors.map((error) => error.file), [file]);
+    assert.match(errors[0].message, /JSON object/);
+  }
+
+  for (const change of [{ name: "other" }, { $schema: "other" }, { logo: "/imgs/logo.svg" }]) {
+    const errors = checkAntigravityManifest({ ...manifest, ...change }, isFile);
+    assert.deepStrictEqual(errors.map((error) => error.file), [file]);
+  }
+  for (const missing of assets) {
+    const errors = checkAntigravityManifest(manifest, (asset) => asset !== missing && isFile(asset));
+    assert.strictEqual(errors.length, 1, missing);
+    assert.ok(errors[0].message.includes(missing));
+  }
+}
+
 function testRealAgentPluginManifestDeclaresNameAndSchema() {
   // The registry test above only covers the layout assumption; this reads the
   // shipped manifest so a name that drifts outside the §5.5 grammar, or a
@@ -1027,6 +1089,17 @@ function testManifestsRunnerReportsMissingManifests() {
   });
 }
 
+function testManifestsCommandRejectsInvalidAntigravityJson() {
+  withTempDir((tmp) => {
+    const file = ".antigravity-plugin/plugin.json";
+    fs.mkdirSync(path.join(tmp, ".antigravity-plugin"));
+    fs.writeFileSync(path.join(tmp, file), "{");
+    const { code, lines } = withCapturedStdout(() => main(["manifests"], { OCR_REPO_ROOT: tmp }));
+    assert.strictEqual(code, 1);
+    assert.ok(lines.some((line) => line.startsWith(`::error file=${file}::`) && line.includes("valid JSON")));
+  });
+}
+
 function testAnnotationDataIsEscaped() {
   // GitHub truncates an annotation at an unescaped newline, losing exactly the
   // part worth reading. Manifest values and frontmatter scalars are
@@ -1118,6 +1191,7 @@ function main_() {
   testAgentPluginManifestRejectsLayoutDrift();
   testRealAgentPluginManifestPinsTheFixedLayout();
   testRealAgentPluginManifestDeclaresNameAndSchema();
+  testAntigravityManifestContract();
   testPluginEntriesToleratesMalformedShapes();
   testMarketplaceReadersDoNotThrowOnMalformedInput();
   testListEntriesResolvesSymlinks();
@@ -1130,6 +1204,7 @@ function main_() {
   testLinksRunnerPassesAndReportsCounts();
   testLinksRunnerTripsTheFloorOnAnEmptyTree();
   testManifestsRunnerReportsMissingManifests();
+  testManifestsCommandRejectsInvalidAntigravityJson();
   testAnnotationDataIsEscaped();
   testUnknownModeIsAnError();
   testMainDispatchesEachMode();

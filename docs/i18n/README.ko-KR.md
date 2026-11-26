@@ -113,7 +113,7 @@ agent의 강점은 동적 판단과 동적 context 검색이 중요한 지점에
 
 ### Agent Skills
 
-Claude Code, Codex, Cursor, Kimi Code 등 Agent Skills를 지원하고 로컬 명령을 실행할 수 있는 에이전트에서 사용할 수 있습니다. 두 모드 모두 **Git >= 2.41**과 **`ocr` CLI**가 필요하며, OCR 모델 공급자 설정은 네이티브 모드에만 필요합니다.
+Claude Code, Codex, Cursor, Google Antigravity, Kimi Code 등 Agent Skills를 지원하고 로컬 명령을 실행할 수 있는 에이전트에서 사용할 수 있습니다. 두 모드 모두 **Git >= 2.41**과 **`ocr` CLI**가 필요하며, OCR 모델 공급자 설정은 네이티브 모드에만 필요합니다.
 
 #### 1. 스킬 설치
 
@@ -124,6 +124,17 @@ npx skills add alibaba/open-code-review
 ```
 
 `ocr`가 없으면 스킬이 환경 권한에 따라 에이전트의 설치를 안내합니다. `npm install -g @alibaba-group/open-code-review`로 미리 설치할 수도 있습니다. 플러그인이나 수동 설치는 [에이전트별 설정 가이드](../../plugins/open-code-review/README.md)를 참고하거나, [`skills/`](../../skills/)에서 필요한 폴더를 에이전트의 스킬 디렉터리에 복사하세요.
+
+##### Google Antigravity
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+`/open-code-review`는 OCR에 설정한 모델을 사용하고, `/open-code-review-delegate`는 현재 Antigravity 세션의 모델을 사용합니다.
+
+로컬 커밋에서 설치하려면 OCR 저장소 루트에서 `bash .antigravity-plugin/install-local.sh`를 실행하세요. Windows에서는 Git Bash를 사용하세요. 이 스크립트는 `HEAD`의 플러그인 파일만 설치합니다.
 
 #### 2. 리뷰 모드 선택
 
@@ -219,6 +230,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — 리뷰 슬래시 명령이 포함된 플러그인 설치
   - [Codex](../../plugins/open-code-review/README.md#codex) — 호출 가능한 리뷰 스킬이 포함된 플러그인 설치
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — 이식 가능한 리뷰 스킬이 포함된 플러그인 설치
+  - [Google Antigravity](#google-antigravity) — OCR에 설정한 모델이나 Antigravity 세션 모델로 코드 리뷰
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — 리뷰 슬래시 명령과 스킬이 포함된 플러그인 설치
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — 네이티브 리뷰 도구와 슬래시 명령 설치
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA 호스트 모델과 게시 가능한 템플릿으로 위임 모드 실행

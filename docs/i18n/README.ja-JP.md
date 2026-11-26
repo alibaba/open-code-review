@@ -113,7 +113,7 @@ Open Code Reviewのコア哲学は、決定論的エンジニアリングとエ�
 
 ### Agent Skills
 
-Claude Code、Codex、Cursor、Kimi Codeなど、Agent Skillsに対応しローカルコマンドを実行できるエージェントで利用できます。両モードとも **Git >= 2.41** と **`ocr` CLI** が必要ですが、OCRのモデルプロバイダー設定が必要なのはネイティブモードだけです。
+Claude Code、Codex、Cursor、Google Antigravity、Kimi Codeなど、Agent Skillsに対応しローカルコマンドを実行できるエージェントで利用できます。両モードとも **Git >= 2.41** と **`ocr` CLI** が必要ですが、OCRのモデルプロバイダー設定が必要なのはネイティブモードだけです。
 
 #### 1. スキルをインストール
 
@@ -124,6 +124,17 @@ npx skills add alibaba/open-code-review
 ```
 
 `ocr` がなければ、スキルは環境の権限に従ってエージェントにインストールを案内します。事前に `npm install -g @alibaba-group/open-code-review` を実行しても構いません。プラグインや手動インストールについては[エージェント別ガイド](../../plugins/open-code-review/README.md)を参照するか、[`skills/`](../../skills/) 内の必要なフォルダーをエージェントのスキルディレクトリにコピーしてください。
+
+##### Google Antigravity
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+`/open-code-review` は OCR に設定したモデルを使い、`/open-code-review-delegate` は現在の Antigravity セッションのモデルを使います。
+
+ローカルのコミットからインストールするには、OCR リポジトリのルートで `bash .antigravity-plugin/install-local.sh` を実行します（Windows では Git Bash を使用）。このスクリプトは `HEAD` に含まれるプラグイン用のファイルだけをインストールします。
 
 #### 2. レビューモードを選択
 
@@ -219,6 +230,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — レビュー用スラッシュコマンドを含むプラグインをインストール
   - [Codex](../../plugins/open-code-review/README.md#codex) — 呼び出し可能なレビュースキルを含むプラグインをインストール
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — 移植可能なレビュースキルを含むプラグインをインストール
+  - [Google Antigravity](#google-antigravity) — OCR に設定したモデルまたは Antigravity のセッションモデルでレビュー
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — レビュー用スラッシュコマンドとスキルを含むプラグインをインストール
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — ネイティブレビュー・ツールとスラッシュコマンドをインストール
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA ホストモデルと公開可能なテンプレートで委任モードを実行

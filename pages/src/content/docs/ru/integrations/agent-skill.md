@@ -53,6 +53,19 @@ cp -R /path/to/open-code-review/skills/open-code-review ~/.claude/skills/
 
 После этого навык будет доступен каждому проекту на компьютере.
 
+### Google Antigravity
+
+Для обоих навыков нужны Git 2.41 или новее и утилита `ocr`.
+
+```bash
+agy plugin install https://github.com/alibaba/open-code-review
+agy plugin list --json
+```
+
+Команда `/open-code-review` использует модель, настроенную в OCR, а `/open-code-review-delegate` — модель текущего сеанса Antigravity.
+
+Для установки из локального коммита выполните `bash .antigravity-plugin/install-local.sh` в корне репозитория OCR (в Windows используйте Git Bash). Скрипт устанавливает только файлы плагина из `HEAD`.
+
 ## Что делает навык {#what-the-skill-does}
 
 SKILL.md — это промпт: когда вызывающий агент загружает его, агент сам
