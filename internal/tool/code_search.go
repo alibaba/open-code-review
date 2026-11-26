@@ -153,6 +153,9 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	if p.FileReader.Mode == ModeEmpty {
 		return "No matches found", nil
 	}
+	if usePerlRegexp {
+		searchText = translatePerlUnicodeEscapes(searchText)
+	}
 	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
 	if cmdArgs == nil {
 		return "Error: ref must not start with '-'", nil
@@ -286,6 +289,38 @@ func isNotGitRepoError(err error, stderr string) bool {
 		return true
 	}
 	return false
+}
+
+// translatePerlUnicodeEscapes rewrites JSON/Go/JavaScript style \uXXXX escapes
+// in a Perl-regexp pattern to PCRE's \x{XXXX} form. Models routinely send
+// \u00A0 for a non-breaking space, but PCRE2 rejects \u outright, which made
+// git grep exit 128 and burned the model's tool-call budget on a retry loop
+// (#2104). An escaped backslash (\\u00A0) is left alone, as are surrogate
+// halves, which have no valid code point on their own.
+func translatePerlUnicodeEscapes(pattern string) string {
+	if !strings.Contains(pattern, `\u`) {
+		return pattern
+	}
+	var b strings.Builder
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] != '\\' || i+1 >= len(pattern) {
+			b.WriteByte(pattern[i])
+			continue
+		}
+		if pattern[i+1] == 'u' && i+6 <= len(pattern) {
+			if r, err := strconv.ParseUint(pattern[i+2:i+6], 16, 32); err == nil &&
+				!(r >= 0xD800 && r <= 0xDFFF) {
+				fmt.Fprintf(&b, `\x{%04X}`, r)
+				i += 5
+				continue
+			}
+		}
+		// Copy the escape pair as is so \\u is not read as an escape.
+		b.WriteByte(pattern[i])
+		b.WriteByte(pattern[i+1])
+		i++
+	}
+	return b.String()
 }
 
 func isPerlRegexpCompileError(stderr string) bool {
