@@ -338,17 +338,24 @@ async function runPostReviewComments({
   // Resolution requires a run that actually produced findings.
   if (comments.length === 0) {
     const warningBlock = formatWarnings(warnings);
-    const incomplete = isIncompleteRunStatus(resolveRunStatus(result));
-    const message = result.message
-      || (incomplete
-        ? `Review did not complete (status=${resolveRunStatus(result) || "unknown"}).`
-        : warningBlock
-          ? "No comments generated. See warnings below."
-          : "No comments generated. Looks good to me.");
+    const runStatus = resolveRunStatus(result);
+    const incomplete = isIncompleteRunStatus(runStatus);
+    let message;
+    if (result.message) {
+      message = result.message;
+    } else if (incomplete) {
+      message = `Review did not complete (status=${runStatus || "unknown"}).`;
+    } else if (warningBlock) {
+      message = "No comments generated. See warnings below.";
+    } else {
+      message = "No comments generated. Looks good to me.";
+    }
     // An incomplete run leads with the coverage banner (never a check mark or
-    // an LGTM fallback); a complete run renders exactly as before.
+    // an LGTM fallback); a complete run renders exactly as before. The banner
+    // is always non-empty on an incomplete run, so withBanner is the plain
+    // prepend with the shared separator.
     const lead = incomplete
-      ? `${coverageBanner}\n\n${message}`
+      ? withBanner(message)
       : `${warningBlock ? "⚠️" : "✅"} **OpenCodeReview**: ${message}`;
     // Checkpoint advancement is decided by the manifest's terminal state alone
     // (buildAdvanceMarker): an incomplete run carries the previous marker
@@ -2446,11 +2453,17 @@ function isIncompleteRunStatus(status) {
 }
 
 // One coverage item that never got reviewed, as `- `path` (class: reason)`.
-// Classification and reason are optional. The reason is the only free-form
-// text shown here; the CLI already sanitizes it before publishing the JSON.
+// Classification and reason are optional. Rendered values go through the
+// control-character sanitizer here too — the summary is what reviewers read,
+// and this script cannot see whether the producer sanitized — and backticks
+// are dropped so a hostile path cannot break out of the code span.
 function formatUnfinishedCoverageItem(item) {
-  const path = item && item.path ? `\`${item.path}\`` : "`(unknown path)`";
-  const details = [item && item.classification, item && item.reason].filter(Boolean).join(": ");
+  const rawPath = item && item.path ? sanitizeMetadata(item.path) : "(unknown path)";
+  const path = `\`${rawPath.replace(/`/g, "")}\``;
+  const details = [item && item.classification, item && item.reason]
+    .filter(Boolean)
+    .map((value) => sanitizeMetadata(value))
+    .join(": ");
   return details ? `${path} (${details})` : path;
 }
 

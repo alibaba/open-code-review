@@ -606,6 +606,11 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(pr.build_coverage_banner({"status": "success"}), "")
         self.assertEqual(pr.build_coverage_banner({"status": "skipped"}), "")
         self.assertEqual(pr.build_coverage_banner({}), "")
+        # Rendered fields cannot carry control characters into the summary,
+        # and a backtick cannot break the path's code span.
+        self.assertEqual(
+            pr.format_unfinished_item({"path": "a\x01b`c.go", "classification": "budget\r\nx"}),
+            "`abc.go` (budgetx)")
 
     def test_findings_partial_banner_precedes_findings(self):
         result = {

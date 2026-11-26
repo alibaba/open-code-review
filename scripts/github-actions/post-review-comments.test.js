@@ -996,6 +996,12 @@ function testCoverageBannerUnitHelpers() {
   assert.strictEqual(formatUnfinishedCoverageItem({ path: "x.go" }), "`x.go`");
   assert.strictEqual(formatUnfinishedCoverageItem({}), "`(unknown path)`");
   assert.strictEqual(formatUnfinishedCoverageItem(null), "`(unknown path)`");
+  // Rendered fields cannot carry control characters into the summary, and a
+  // backtick cannot break the path's code span.
+  assert.strictEqual(
+    formatUnfinishedCoverageItem({ path: "a\x01b`c.go", classification: "budget\r\nx" }),
+    "`abc.go` (budgetx)"
+  );
   assert.strictEqual(resolveRunStatus({ manifest: { terminal_state: "partial" }, status: "success" }), "partial");
   assert.strictEqual(resolveRunStatus({ status: "success" }), "success");
   assert.strictEqual(resolveRunStatus({}), "");

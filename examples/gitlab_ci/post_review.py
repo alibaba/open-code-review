@@ -376,13 +376,16 @@ def is_incomplete_run_status(status):
 def format_unfinished_item(item):
     """One coverage item that never got reviewed, as `` `path` (class: reason)``.
 
-    Classification and reason are optional. The reason is the only free-form
-    text shown here; the CLI already sanitizes it before publishing the JSON.
+    Classification and reason are optional. Rendered values go through the
+    control-character sanitizer here too — the summary is the record reviewers
+    read, and this script cannot see whether the producer sanitized — and
+    backticks are dropped so a hostile path cannot break out of the code span.
     """
     if not isinstance(item, dict):
         return "`(unknown path)`"
-    shown = "`%s`" % item["path"] if item.get("path") else "`(unknown path)`"
-    details = [str(v) for v in (item.get("classification"), item.get("reason")) if v]
+    raw_path = sanitize_metadata(item.get("path")) if item.get("path") else "(unknown path)"
+    shown = "`%s`" % raw_path.replace("`", "")
+    details = [sanitize_metadata(v) for v in (item.get("classification"), item.get("reason")) if v]
     if details:
         return "%s (%s)" % (shown, ": ".join(details))
     return shown
