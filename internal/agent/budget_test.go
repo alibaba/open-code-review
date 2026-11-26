@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -487,9 +488,29 @@ func (f *fakeProviderBudgetClient) CompletionsWithCtx(_ context.Context, _ llm.C
 	return nil, f.err
 }
 
+func assertSafeProviderBudgetWarning(t *testing.T, warnings []AgentWarning, rawSecret string) {
+	t.Helper()
+	var count int
+	for _, w := range warnings {
+		if w.Type != "provider_budget_exceeded" {
+			continue
+		}
+		count++
+		if w.Message != providerBudgetExceededReason {
+			t.Errorf("provider_budget_exceeded warning message = %q, want %q", w.Message, providerBudgetExceededReason)
+		}
+		if rawSecret != "" && strings.Contains(w.Message, rawSecret) {
+			t.Errorf("provider_budget_exceeded warning leaked raw provider error: %q", w.Message)
+		}
+	}
+	if count != 1 {
+		t.Errorf("provider_budget_exceeded warnings = %d, want 1", count)
+	}
+}
+
 func TestDispatchSubtasks_GroupingBudgetExceededAbortsWithoutPerFileFallback(t *testing.T) {
 	setTestHome(t, t.TempDir())
-	fake := &fakeProviderBudgetClient{err: fakeProviderBudgetError{msg: "429 budget_exceeded: max budget 10.0 reached"}}
+	fake := &fakeProviderBudgetClient{err: fakeProviderBudgetError{msg: "429 budget_exceeded: secret=DO_NOT_EXPOSE max budget 10.0 reached"}}
 	tpl := budgetAgentTestTemplate()
 	tpl.GroupingMinFiles = 2
 	tpl.GroupingBundleLineThreshold = 0
@@ -528,6 +549,7 @@ func TestDispatchSubtasks_GroupingBudgetExceededAbortsWithoutPerFileFallback(t *
 	if !a.BudgetExceeded() {
 		t.Error("expected BudgetExceeded()==true")
 	}
+	assertSafeProviderBudgetWarning(t, a.Warnings(), "DO_NOT_EXPOSE")
 
 	if err := a.finalizeManifest(); err != nil {
 		t.Fatalf("finalize manifest: %v", err)
@@ -540,15 +562,112 @@ func TestDispatchSubtasks_GroupingBudgetExceededAbortsWithoutPerFileFallback(t *
 		t.Fatalf("failed coverage = %d, want %d", got, want)
 	}
 	for _, item := range manifest.Coverage.Failed {
-		if item.Classification != session.FailureBudget {
-			t.Fatalf("item %s classification = %q, want budget", item.Path, item.Classification)
+		if item.Classification != session.FailureProvider {
+			t.Fatalf("item %s classification = %q, want provider", item.Path, item.Classification)
+		}
+		if item.Reason != providerBudgetExceededReason {
+			t.Fatalf("item %s reason = %q, want %q", item.Path, item.Reason, providerBudgetExceededReason)
+		}
+	}
+}
+
+func TestDispatchSubtasks_GroupingBudgetExceededPreservesResumedFindings(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := makeBudgetDiffs(3)
+	fp := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	resume := &session.ResumeState{
+		SessionID:  "prior-session",
+		Model:      "fake",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items: map[string]session.ResumeItem{
+			fp: {
+				FilePath:    diffs[0].NewPath,
+				OldPath:     diffs[0].OldPath,
+				NewPath:     diffs[0].NewPath,
+				Fingerprint: fp,
+				Comments: []model.LlmComment{{
+					Path:    diffs[0].NewPath,
+					Content: "cached finding from prior run",
+				}},
+			},
+		},
+		Manifest: &session.RunManifest{
+			Coverage: session.Coverage{
+				Completed: []session.CoverageItem{{ItemID: fp, Fingerprint: fp}},
+			},
+		},
+	}
+
+	fake := &fakeProviderBudgetClient{err: fakeProviderBudgetError{msg: "429 budget_exceeded: secret=DO_NOT_EXPOSE max budget 10.0 reached"}}
+	tpl := budgetAgentTestTemplate()
+	tpl.GroupingMinFiles = 2
+	tpl.GroupingBundleLineThreshold = 0
+	tpl.GroupingTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{
+			{Role: "user", Content: "group {{file_list}}"},
+		},
+	}
+
+	a := New(Args{
+		From:             "main",
+		To:               "feature",
+		ReviewMode:       session.ReviewModeRange,
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   4,
+		Resume:           resume,
+		Template:         tpl,
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = diffs
+	a.currentDate = "2026-01-01 09:00"
+	a.args.Tools.Freeze()
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err == nil {
+		t.Fatal("expected budget error from dispatchSubtasks, got nil")
+	}
+	if !llm.IsBudgetExceededError(err) {
+		t.Fatalf("expected error to wrap budget exceeded, got: %v", err)
+	}
+	if len(comments) != 1 || comments[0].Content != "cached finding from prior run" {
+		t.Fatalf("comments = %+v, want 1 preserved resumed finding", comments)
+	}
+	if got := fake.calls.Load(); got != 1 {
+		t.Fatalf("LLM calls = %d, want 1", got)
+	}
+	assertSafeProviderBudgetWarning(t, a.Warnings(), "DO_NOT_EXPOSE")
+
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.TerminalState != session.StatePartial {
+		t.Fatalf("manifest terminal = %+v, want partial", manifest)
+	}
+	if got := len(manifest.Coverage.Reused); got != 1 {
+		t.Fatalf("reused coverage = %d, want 1", got)
+	}
+	if got := len(manifest.Coverage.Failed); got != 2 {
+		t.Fatalf("failed coverage = %d, want 2", got)
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureProvider {
+			t.Fatalf("item %s classification = %q, want provider", item.Path, item.Classification)
+		}
+		if item.Reason != providerBudgetExceededReason {
+			t.Fatalf("item %s reason = %q, want %q", item.Path, item.Reason, providerBudgetExceededReason)
 		}
 	}
 }
 
 func TestDispatchSubtasks_SubtaskBudgetExceededCancelsRemainingGroups(t *testing.T) {
 	setTestHome(t, t.TempDir())
-	fake := &fakeProviderBudgetClient{err: fakeProviderBudgetError{msg: "429 budget_exceeded: max budget 10.0 reached"}}
+	fake := &fakeProviderBudgetClient{err: fakeProviderBudgetError{msg: "429 budget_exceeded: secret=DO_NOT_EXPOSE max budget 10.0 reached"}}
 	a := New(Args{
 		LLMClient:        fake,
 		Model:            "fake",
@@ -575,6 +694,7 @@ func TestDispatchSubtasks_SubtaskBudgetExceededCancelsRemainingGroups(t *testing
 	if !a.BudgetExceeded() {
 		t.Error("expected BudgetExceeded()==true")
 	}
+	assertSafeProviderBudgetWarning(t, a.Warnings(), "DO_NOT_EXPOSE")
 
 	if err := a.finalizeManifest(); err != nil {
 		t.Fatalf("finalize manifest: %v", err)
@@ -587,8 +707,101 @@ func TestDispatchSubtasks_SubtaskBudgetExceededCancelsRemainingGroups(t *testing
 		t.Fatalf("failed coverage = %d, want %d", got, want)
 	}
 	for _, item := range manifest.Coverage.Failed {
-		if item.Classification != session.FailureBudget {
-			t.Fatalf("item %s classification = %q, want budget", item.Path, item.Classification)
+		if item.Classification != session.FailureProvider {
+			t.Fatalf("item %s classification = %q, want provider", item.Path, item.Classification)
+		}
+		if item.Reason != providerBudgetExceededReason {
+			t.Fatalf("item %s reason = %q, want %q", item.Path, item.Reason, providerBudgetExceededReason)
+		}
+	}
+}
+
+type fakePartialThenProviderBudgetClient struct {
+	calls atomic.Int64
+	path  string
+	err   error
+}
+
+func (f *fakePartialThenProviderBudgetClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	if f.calls.Add(1) == 1 {
+		return &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{Role: "assistant", ToolCalls: []llm.ToolCall{
+					{ID: "1", Type: "function", Function: llm.FunctionCall{
+						Name:      "code_comment",
+						Arguments: `{"comments":[{"path":"` + f.path + `","content":"finding before quota exhaustion"}]}`,
+					}},
+					{ID: "2", Type: "function", Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"}},
+				}},
+				FinishReason: "tool_calls",
+			}},
+			Model: "fake",
+			Usage: &llm.UsageInfo{PromptTokens: 100, TotalTokens: 100},
+		}, nil
+	}
+	return nil, f.err
+}
+
+func TestDispatchSubtasks_PartialSuccessThenProviderBudgetExceededClassifiesProvider(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := makeBudgetDiffs(4)
+	fake := &fakePartialThenProviderBudgetClient{
+		path: diffs[0].NewPath,
+		err:  fakeProviderBudgetError{msg: "429 insufficient_quota: secret=DO_NOT_EXPOSE quota exhausted"},
+	}
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+
+	a := New(Args{
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: collector,
+		Tools:            reg,
+		MaxConcurrency:   1,
+		SkipFilter:       true,
+		Template:         budgetAgentTestTemplate(),
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment", Description: "comment"}},
+		},
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = diffs
+	a.currentDate = "2026-01-01 09:00"
+	a.args.Tools.Freeze()
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if got := fake.calls.Load(); got != 2 {
+		t.Fatalf("LLM calls = %d, want 2 (1 completed group + 1 quota failure; remaining 2 skipped)", got)
+	}
+	if len(comments) != 1 || comments[0].Content != "finding before quota exhaustion" {
+		t.Fatalf("comments = %+v, want 1 finding from completed group", comments)
+	}
+	assertSafeProviderBudgetWarning(t, a.Warnings(), "DO_NOT_EXPOSE")
+
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.TerminalState != session.StatePartial {
+		t.Fatalf("manifest terminal = %+v, want partial", manifest)
+	}
+	if got := len(manifest.Coverage.Completed); got != 1 {
+		t.Fatalf("completed coverage = %d, want 1", got)
+	}
+	if got := len(manifest.Coverage.Failed); got != 3 {
+		t.Fatalf("failed coverage = %d, want 3", got)
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureProvider {
+			t.Fatalf("item %s classification = %q, want provider (must not use budget and mask non-zero exit)", item.Path, item.Classification)
+		}
+		if item.Reason != providerBudgetExceededReason {
+			t.Fatalf("item %s reason = %q, want %q", item.Path, item.Reason, providerBudgetExceededReason)
 		}
 	}
 }

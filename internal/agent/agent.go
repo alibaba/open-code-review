@@ -682,13 +682,13 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 	if groupResult.err != nil {
 		a.budgetExceeded.Store(true)
-		a.recordWarning("provider_budget_exceeded", "", groupResult.err.Error())
+		a.recordWarning("provider_budget_exceeded", "", providerBudgetExceededReason)
 		if b := a.session.Manifest(); b != nil {
-			if err := b.SetPendingFailureCause(session.FailureBudget, "provider budget or quota exceeded"); err != nil {
+			if err := b.SetPendingFailureCause(session.FailureProvider, providerBudgetExceededReason); err != nil {
 				a.recordWarning("manifest_error", "", err.Error())
 			}
 		}
-		return nil, fmt.Errorf("provider budget exceeded: %w", groupResult.err)
+		return a.args.CommentCollector.Comments(), fmt.Errorf("provider budget exceeded: %w", groupResult.err)
 	}
 	groups := groupResult.groups
 	a.fileGroups = groups
@@ -796,9 +796,9 @@ dispatchLoop:
 					errCopy := err
 					if providerBudgetErr.CompareAndSwap(nil, &errCopy) {
 						a.budgetExceeded.Store(true)
-						a.recordWarning("provider_budget_exceeded", g.Label, err.Error())
+						a.recordWarning("provider_budget_exceeded", g.Label, providerBudgetExceededReason)
 						if b := a.session.Manifest(); b != nil {
-							if setErr := b.SetPendingFailureCause(session.FailureBudget, "provider budget or quota exceeded"); setErr != nil {
+							if setErr := b.SetPendingFailureCause(session.FailureProvider, providerBudgetExceededReason); setErr != nil {
 								a.recordWarning("manifest_error", "", setErr.Error())
 							}
 						}
@@ -807,8 +807,8 @@ dispatchLoop:
 				}
 				class, reason := classifyItemError(err)
 				if !isBudget && errors.Is(err, context.Canceled) && ctx.Err() == nil && providerBudgetErr.Load() != nil {
-					class = session.FailureBudget
-					reason = "provider budget or quota exceeded"
+					class = session.FailureProvider
+					reason = providerBudgetExceededReason
 				}
 				for _, d := range g.Diffs {
 					fingerprint := reviewItemFingerprint(a.reviewMode(), d)
@@ -1246,6 +1246,12 @@ func (a *Agent) markFailed(d model.Diff, class session.FailureClass, reason stri
 	}
 }
 
+// providerBudgetExceededReason is the safe, stable diagnostic message used in
+// manifests and public warnings when a provider or gateway rejects requests
+// with a terminal budget or quota error. It deliberately omits raw error text
+// so provider payloads, headers, or credentials cannot leak into outputs.
+const providerBudgetExceededReason = "provider budget or quota exceeded"
+
 // errMainTaskEmpty is returned when the review template carries no main_task
 // messages. It is a sentinel so callers classify it with errors.Is instead of
 // matching error text, which silently breaks the moment the wording changes.
@@ -1260,7 +1266,7 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 func classifyItemError(err error) (session.FailureClass, string) {
 	switch {
 	case llm.IsBudgetExceededError(err):
-		return session.FailureBudget, "provider budget or quota exceeded"
+		return session.FailureProvider, providerBudgetExceededReason
 	case errors.Is(err, llm.ErrRequestTimeout):
 		return session.FailureTimeout, "LLM request timed out; configure OCR_LLM_TIMEOUT or provider timeout_sec"
 	case errors.Is(err, context.DeadlineExceeded):
