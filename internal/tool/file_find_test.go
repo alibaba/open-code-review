@@ -73,6 +73,56 @@ func TestFileFind_NonGitDirectoryFallback(t *testing.T) {
 	}
 }
 
+func TestFileFind_NonGitSymlinkRoot(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "source")
+	if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"server.go": "package main\n", "pkg/helper.go": "package pkg\n",
+		"ignored.go": "package ignored\n", ".gitignore": "ignored.go\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alias := filepath.Join(parent, "alias")
+	if err := os.Symlink(dir, alias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(".", filepath.Join(dir, "loop")); err != nil {
+		t.Fatal(err)
+	}
+	p := NewFileFind(&FileReader{RepoDir: alias, Mode: ModeWorkspace})
+	got, err := p.Execute(context.Background(), map[string]any{"query_name": ".go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "pkg/helper.go\nserver.go"; got != want {
+		t.Fatalf("file_find through directory link = %q, want %q", got, want)
+	}
+}
+
+func TestFileFind_NonGitInvalidSymlinkRoot(t *testing.T) {
+	for _, target := range []string{"missing", "alias"} {
+		t.Run(target, func(t *testing.T) {
+			alias := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(target, alias); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			p := NewFileFind(&FileReader{RepoDir: alias, Mode: ModeWorkspace})
+			got, err := p.Execute(context.Background(), map[string]any{"query_name": ".go"})
+			if err == nil || got != "" {
+				t.Fatalf("invalid root returned (%q, %v), want an error", got, err)
+			}
+			if target == "missing" && !os.IsNotExist(err) {
+				t.Fatalf("broken root error = %v, want a missing-target error", err)
+			}
+		})
+	}
+}
+
 // TestFileFind_NonGitDirectoryNoMatch verifies the not-found path in a
 // non-git dir returns the sentinel rather than an error.
 func TestFileFind_NonGitDirectoryNoMatch(t *testing.T) {
