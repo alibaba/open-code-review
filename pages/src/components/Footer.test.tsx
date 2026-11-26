@@ -12,6 +12,7 @@ import { ja } from '../i18n/ja';
 import { ko } from '../i18n/ko';
 import { ru } from '../i18n/ru';
 import { vi as viLang } from '../i18n/vi';
+import { id } from '../i18n/id';
 import Footer from './Footer';
 
 function renderFooter() {
@@ -29,7 +30,7 @@ afterEach(() => {
 });
 
 describe.each([375, 1440])('Footer at %dpx', (width) => {
-  it.each(Object.entries({ en, zh, ja, ko, ru, vi: viLang }))('links to the contact profile in %s', (language, translations) => {
+  it.each(Object.entries({ en, zh, ja, ko, ru, vi: viLang, id }))('links to the contact profile in %s', (language, translations) => {
     vi.stubGlobal('innerWidth', width);
     localStorage.setItem('ocr-lang', language);
     renderFooter();
@@ -69,4 +70,19 @@ it('updates the contact label when switching languages', async () => {
 
   expect(screen.getByRole('link', { name: 'Contact us' }))
     .toHaveAttribute('href', 'https://github.com/lizhengfeng101');
+});
+
+it('selects and persists Indonesian from the footer', async () => {
+  localStorage.setItem('ocr-lang', 'en');
+  const user = userEvent.setup();
+  const { unmount } = renderFooter();
+
+  await user.click(screen.getByRole('button', { name: 'English' }));
+  await user.click(screen.getByRole('button', { name: 'Bahasa Indonesia' }));
+
+  expect(localStorage.getItem('ocr-lang')).toBe('id');
+  unmount();
+  renderFooter();
+  expect(screen.getByRole('button', { name: 'Bahasa Indonesia' })).toBeVisible();
+  expect(screen.getByRole('link', { name: id['footer.contact'] })).toBeVisible();
 });
