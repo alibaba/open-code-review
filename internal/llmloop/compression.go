@@ -341,27 +341,45 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	// The byte budget is a cheap ceiling; the actual token count is validated
 	// below so dense token streams (digits, CJK, code at 2.4–3.9 bytes/token)
 	// cannot still overflow the model's limit.
-	compressZone, err := fitCompressionInput(msgs[part.frozenEnd:part.compressEnd],
-		r.task.Compression.Messages, r.task.MaxContextTokens*4)
-	if err != nil {
-		return msgs, fmt.Errorf("memory compression: %w", err)
-	}
-	contextXML := buildMessageXML(compressZone)
+	//
+	// The byte budget is only a heuristic, not proof that a request fits: CJK
+	// and other dense content can tokenize well past 4 bytes/token, so a
+	// request under the byte ceiling can still exceed MaxContextTokens. Rather
+	// than rejecting it outright, scale the byte budget down by the observed
+	// token density and refit. The scale factor is < 1 whenever the token
+	// count is over budget, so the budget strictly shrinks each pass and
+	// fitCompressionInput eventually either fits or reports the markup/template
+	// alone is too large — there is no unbounded loop.
+	var (
+		byteBudget      = r.task.MaxContextTokens * 4
+		compressZone    []llm.Message
+		compressionMsgs []llm.Message
+		contextXML      string
+		requestTokens   int
+	)
+	for {
+		var err error
+		compressZone, err = fitCompressionInput(msgs[part.frozenEnd:part.compressEnd],
+			r.task.Compression.Messages, byteBudget)
+		if err != nil {
+			return msgs, fmt.Errorf("memory compression: %w", err)
+		}
+		contextXML = buildMessageXML(compressZone)
 
-	compressionMsgs := make([]llm.Message, 0, len(r.task.Compression.Messages))
-	for _, m := range r.task.Compression.Messages {
-		content := strings.ReplaceAll(m.Content, "{{context}}", contextXML)
-		compressionMsgs = append(compressionMsgs, llm.NewTextMessage(m.Role, content))
-	}
+		compressionMsgs = make([]llm.Message, 0, len(r.task.Compression.Messages))
+		for _, m := range r.task.Compression.Messages {
+			content := strings.ReplaceAll(m.Content, "{{context}}", contextXML)
+			compressionMsgs = append(compressionMsgs, llm.NewTextMessage(m.Role, content))
+		}
 
-	// Verify the final request stays within the token budget, not just the byte
-	// budget. Dense content (digits, CJK, code) can tokenize past MaxContextTokens
-	// even when the rendered byte size is under budget, and a summarization
-	// request that exceeds the window is rejected outright — the exact failure
-	// this path exists to prevent.
-	if requestTokens := CountMessagesTokens(compressionMsgs); requestTokens > r.task.MaxContextTokens {
-		return msgs, fmt.Errorf("memory compression: %w: %d tokens over a %d-token window",
-			errCompressionInputTooLarge, requestTokens, r.task.MaxContextTokens)
+		requestTokens = CountMessagesTokens(compressionMsgs)
+		if requestTokens <= r.task.MaxContextTokens {
+			break
+		}
+		// Shrink the byte budget in proportion to the observed token density so
+		// the next fit targets a request that actually stays under the window.
+		// requestTokens > MaxContextTokens guarantees the factor is < 1.
+		byteBudget = byteBudget * r.task.MaxContextTokens / requestTokens
 	}
 
 	// The task record is created before the request, not after it, because the

@@ -467,6 +467,53 @@ func TestRunCompression_EmptySummary(t *testing.T) {
 	}
 }
 
+// A compress zone dense in CJK/other multi-byte content can tokenize past
+// MaxContextTokens even when its rendered byte size sits under the
+// MaxContextTokens×4 byte budget (CJK measures ~3 bytes/token, not 4). The
+// token check must then tighten the byte budget and refit rather than reject
+// the request outright — otherwise a compressible history is dropped for no
+// reason. This pins that behavior: the compression call must succeed and reach
+// the LLM, not fail with errCompressionInputTooLarge.
+func TestRunCompression_TightensBudgetForDenseContent(t *testing.T) {
+	t_tempDir = t.TempDir()
+	summaryText := "compressed summary"
+	client := &fakeLLMClient{
+		response: &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{Content: &summaryText},
+			}},
+			Usage: &llm.UsageInfo{PromptTokens: 50, CompletionTokens: 10},
+		},
+	}
+	tpl := Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
+		},
+		MaxContextTokens: 200,
+	}
+	r := newTestRunner(client, tpl)
+
+	// CJK text tokenizes at ~3 bytes/token. ~700 bytes of CJK sits under the
+	// 800-byte budget but yields ~233 tokens, over the 200-token window.
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		msg("assistant", "下面是工具返回的结果"),
+		msg("tool", strings.Repeat("压缩测试数据", 100)), // 1800 bytes / ~600 tokens
+	}
+
+	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	if err != nil {
+		t.Fatalf("runCompression rejected dense content instead of tightening the budget: %v", err)
+	}
+	if len(got) < 2 {
+		t.Fatalf("expected at least 2 rebuilt messages, got %d", len(got))
+	}
+	if !strings.Contains(got[1].ExtractText(), "summary") {
+		t.Errorf("expected summary in rebuilt messages, got: %s", got[1].ExtractText())
+	}
+}
+
 func TestTriggerAsyncCompression(t *testing.T) {
 	t_tempDir = t.TempDir()
 	summaryText := "async summary"
