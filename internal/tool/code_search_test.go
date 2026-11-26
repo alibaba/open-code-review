@@ -883,3 +883,42 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
 }
+
+func TestTranslatePerlUnicodeEscapes(t *testing.T) {
+	for _, test := range []struct{ in, want string }{
+		{`a\u00A0b`, `a\x{00A0}b`},
+		{`\u00a0|\u2003`, `\x{00A0}|\x{2003}`},
+		{`no escapes here`, `no escapes here`},
+		{`\\u00A0`, `\\u00A0`}, // escaped backslash then literal u00A0
+		{`\ud83d`, `\ud83d`},   // surrogate half has no code point
+		{`\u00G0`, `\u00G0`},   // not hex, left for git to report
+		{`\u00`, `\u00`},       // too short
+		{`\d+\u00A0\w`, `\d+\x{00A0}\w`},
+		{`trailing\`, `trailing\`},
+	} {
+		if got := translatePerlUnicodeEscapes(test.in); got != test.want {
+			t.Errorf("translatePerlUnicodeEscapes(%q) = %q, want %q", test.in, got, test.want)
+		}
+	}
+}
+
+func TestGitGrep_PerlRegexp_UnicodeEscape(t *testing.T) {
+	// git grep -P only treats \x{00A0} as a code point (not a single byte) in a
+	// UTF-8 locale, and `make test` runs with LC_ALL=C.
+	t.Setenv("LC_ALL", "C.UTF-8")
+	dir := setupTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "nbsp.txt"), []byte("a\u00A0b\nplain\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "add", "nbsp.txt").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	provider := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	result, err := provider.gitGrep(context.Background(), `a\u00A0b`, true, true, nil)
+	if err != nil {
+		t.Fatalf("gitGrep with \\u00A0 failed: %v", err)
+	}
+	if !strings.Contains(result, "1|a\u00A0b") {
+		t.Errorf("gitGrep result = %q, want it to contain the non-breaking-space line", result)
+	}
+}
