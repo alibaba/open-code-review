@@ -142,12 +142,14 @@ with `from`/`to`, `commit`, or `exclude`.
 
 ```bash
 npm install
+npm run lint        # eslint with neostandard
 npm run typecheck   # tsc --noEmit, no build output
 npm test            # node --test, with pi.exec mocked
 npm run build       # writes dist/package, the publishable tree
 npm run release     # builds, then publishes dist/package
 ```
 
+`npm run check` runs lint, typecheck and tests in sequence.
 
 `src/ocr.ts` holds the host-neutral logic (argument building, validation, output
 reading), so the tests exercise it without Pi and without a real `ocr` binary. To load
