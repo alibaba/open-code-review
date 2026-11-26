@@ -354,6 +354,8 @@ src/main/java/com/example/internal/UserServiceImpl.java
 | `case_sensitive`  | いいえ | `false`        | —                                                                |
 | `use_perl_regexp` | いいえ | `false`        | `true` の場合、`search_text` は正規表現として扱われます。        |
 
+Unicode コードポイントには `\x{00A0}` などの PCRE2 エスケープを使用してください。JavaScript 形式の `\u00A0` は使用できません。
+
 ### 出力
 
 結果はファイルごとにグループ化されます。各グループは `File: <path>` と `Match lines: <n>` で始まり、続いて各ヒットが
