@@ -8,7 +8,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
@@ -120,10 +122,28 @@ func (a *Agent) runIdentity() session.RunIdentity {
 		ResolvedHead:         a.inputResolution.ResolvedHead,
 		SourceArtifactSHA256: a.sourceArtifactSHA256(),
 		RuleConfigSHA256:     a.ruleConfigSHA256(),
+		ReviewPromptSHA256:   a.reviewPromptSHA256(),
 	}
 	if raw := a.repoRemoteIdentity; raw != "" {
 		sum := sha256.Sum256([]byte(raw))
 		id.RepositorySHA256 = hex.EncodeToString(sum[:])
 	}
 	return id
+}
+
+func (a *Agent) reviewPromptSHA256() string {
+	var planMessages []template.ChatMessage
+	if plan := a.args.Template.PlanTask; plan != nil {
+		planMessages = plan.Messages
+	}
+	fields := []string{a.args.Background}
+	// Count messages to preserve task boundaries. Hash the templates before
+	// rendering so values such as the current date do not change the identity.
+	for _, messages := range [][]template.ChatMessage{planMessages, a.args.Template.MainTask.Messages} {
+		fields = append(fields, strconv.Itoa(len(messages)))
+		for _, message := range messages {
+			fields = append(fields, message.Role, message.Content)
+		}
+	}
+	return hashFields(fields...)
 }

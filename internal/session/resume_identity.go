@@ -15,6 +15,7 @@ type RunIdentity struct {
 	ResolvedHead         string
 	SourceArtifactSHA256 string // manifest input.source_artifact_sha256
 	RuleConfigSHA256     string // manifest execution.rule_config_sha256
+	ReviewPromptSHA256   string // manifest execution.review_prompt_sha256
 	RepositorySHA256     string // manifest repository.identity_sha256; empty when the repo has no remote
 }
 
@@ -146,6 +147,12 @@ func (s *ResumeState) validateInputIdentity(id RunIdentity) error {
 		// The digest is one aggregate, so it can only be attributed to a layer,
 		// never to a specific rule or pattern.
 		return fmt.Errorf("resume rejected: review rule identity changed — either a rule text layer (custom, project, global or system) or the include/exclude file filter differs from session %q; %s", s.SessionID, resumeHint)
+	}
+	if m.Execution.ReviewPromptSHA256 == "" {
+		return fmt.Errorf("resume session %q recorded no review prompt identity, so the background and prompt templates cannot be verified; %s (omit --resume)", s.SessionID, resumeHint)
+	}
+	if m.Execution.ReviewPromptSHA256 != id.ReviewPromptSHA256 {
+		return fmt.Errorf("resume rejected: review prompt identity changed since session %q (effective background or Plan/Main prompt templates, including language); %s (omit --resume)", s.SessionID, resumeHint)
 	}
 	return nil
 }

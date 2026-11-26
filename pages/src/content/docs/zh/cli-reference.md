@@ -224,6 +224,10 @@ ocr review --resume <session-id>   # 工作区（不传模式参数）
 - 解析后的输入必须一致。ref 的*写法*不参与比较（`abc1234` 与 `abc1234def`
   指向同一个 commit），但如果相同的 ref 现在解析到不同的 diff，或规则、过滤器
   改变了选中的文件集合，整次恢复会被拒绝，而不是部分复用
+- 实际生效的需求背景以及 Plan 和 Main 提示词模板（含回复语言）必须一致。
+  背景文件按清洗后的内容比较。任一项变化，或父 manifest 缺少
+  `review_prompt_sha256` 时，去掉 `--resume` 发起新评审。旧会话仍可用
+  `ocr session show` 查看。
 - 切换 provider 或 model 必须通过 `--provider` / `--model` 显式声明；经由配置
   文件或环境变量发生的变化一律拒绝
 - 父运行必须带有 run manifest，输入正是拿它来校验的。文件派发开始后，Ctrl-C 会

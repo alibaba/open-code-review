@@ -95,6 +95,76 @@ func TestResolveIdentityMatchesRunPath(t *testing.T) {
 	}
 }
 
+func TestResolveIdentityTracksReviewPrompts(t *testing.T) {
+	dir := initIdentityRepo(t)
+	ctx := context.Background()
+	resolve := func(t *testing.T, lang string, change func(*template.Template)) *SealedInput {
+		t.Helper()
+		tpl := &template.Template{
+			PlanTask: &template.LlmConversation{Messages: []template.ChatMessage{
+				{Role: "system", Content: "Plan the review."},
+				{Role: "user", Content: "{{diffs}}"},
+			}},
+			MainTask: template.LlmConversation{Messages: []template.ChatMessage{
+				{Role: "system", Content: "Review the diff on {{current_system_date_time}}."},
+				{Role: "user", Content: "{{requirement_background}}\n{{diffs}}"},
+			}},
+		}
+		if change != nil {
+			change(tpl)
+		}
+		tpl.ApplyLanguage(lang)
+		sealed, err := ResolveIdentity(ctx, Args{
+			RepoDir: dir, Background: "Keep the public API stable.", Template: *tpl,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sealed
+	}
+	base := resolve(t, "", nil).Identity
+	for _, tc := range []struct {
+		name   string
+		lang   string
+		change func(*template.Template)
+	}{
+		{name: "Main content", change: func(tpl *template.Template) {
+			tpl.MainTask.Messages[0].Content += "\nReview the public API."
+		}},
+		{name: "Plan content", change: func(tpl *template.Template) {
+			tpl.PlanTask.Messages[0].Content += "\nPlan a public API review."
+		}},
+		{name: "message role", change: func(tpl *template.Template) {
+			tpl.MainTask.Messages[1].Role = "assistant"
+		}},
+		{name: "message order", change: func(tpl *template.Template) {
+			messages := tpl.MainTask.Messages
+			messages[0], messages[1] = messages[1], messages[0]
+		}},
+		{name: "task boundary", change: func(tpl *template.Template) {
+			plan := tpl.PlanTask.Messages
+			last := len(plan) - 1
+			tpl.MainTask.Messages = append([]template.ChatMessage{plan[last]}, tpl.MainTask.Messages...)
+			tpl.PlanTask.Messages = plan[:last]
+		}},
+		{name: "effective language", lang: "Spanish"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolve(t, tc.lang, tc.change).Identity
+			if got.ReviewPromptSHA256 == base.ReviewPromptSHA256 {
+				t.Fatal("review prompt identity did not change")
+			}
+			got.ReviewPromptSHA256 = base.ReviewPromptSHA256
+			if got != base {
+				t.Errorf("other identity fields changed: got %+v, want %+v", got, base)
+			}
+		})
+	}
+	if got := resolve(t, "English", nil).Identity; got != base {
+		t.Errorf("default and explicit English should match: got %+v, want %+v", got, base)
+	}
+}
+
 func TestResolveIdentityTracksConfigChanges(t *testing.T) {
 	dir := initIdentityRepo(t)
 

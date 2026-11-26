@@ -40,6 +40,145 @@ func runReviewCapturingBoth(t *testing.T, repoDir, format string, extraArgs ...s
 	return out, errOut, err
 }
 
+func TestReviewE2E_ResumePromptIdentity(t *testing.T) {
+	const original = "Keep the public API stable."
+	const changed = "Remove the deprecated public API."
+	for _, fromFile := range []bool{false, true} {
+		name := "inline"
+		if fromFile {
+			name = "file"
+		}
+		t.Run(name, func(t *testing.T) {
+			repoDir, err := resolveRepoDir(retryTestRepo(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			parentArgs := []string{"--background", original}
+			var backgroundPath string
+			if fromFile {
+				backgroundPath = writeTempFile(t, original)
+				parentArgs = append(parentArgs, "--background-file", backgroundPath)
+			}
+
+			srv := newFakeLLM()
+			srv.hardFail["b.go"] = true
+			var requests atomic.Int32
+			var receivedChanged atomic.Bool
+			startFakeLLM(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if bytes.Contains(body, []byte(changed)) && srv.fileOf(body) != "unknown" {
+					receivedChanged.Store(true)
+				}
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				srv.ServeHTTP(w, r)
+			}))
+
+			out, stderr, err := runReviewCapturingBoth(t, repoDir, "json", parentArgs...)
+			if err == nil || !strings.Contains(err.Error(), "1 of 4 selected item(s) failed") {
+				t.Fatalf("expected a partial parent review, got %v\n%s", err, stderr)
+			}
+			var parent jsonOutput
+			if err := json.Unmarshal([]byte(out), &parent); err != nil {
+				t.Fatal(err)
+			}
+			if parent.Manifest == nil {
+				t.Fatal("parent review emitted no manifest")
+			}
+			state, err := session.LoadReviewResumeState(repoDir, parent.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(parent.Manifest.Coverage.Completed) != 3 || state.CompletedCount() != 3 {
+				t.Fatalf("expected three completed checkpoints, got manifest %+v and %d checkpoints",
+					parent.Manifest.Coverage, state.CompletedCount())
+			}
+
+			srv.mu.Lock()
+			delete(srv.hardFail, "b.go")
+			srv.mu.Unlock()
+
+			resume := []string{"--resume", parent.SessionID}
+			assertRejected := func(t *testing.T, want string, args ...string) {
+				t.Helper()
+				beforeFiles := countSessionFiles(t, repoDir)
+				beforeRequests := requests.Load()
+				out, stderr, err := runReviewCapturingBoth(t, repoDir, "json", append(resume, args...)...)
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("expected %q, got %v\nstderr: %s", want, err, stderr)
+				}
+				if out != "" || requests.Load() != beforeRequests {
+					t.Errorf("rejected resume emitted %d bytes or issued requests (%d -> %d)",
+						len(out), beforeRequests, requests.Load())
+				}
+				if after := countSessionFiles(t, repoDir); after != beforeFiles {
+					t.Errorf("rejected resume changed session file count: %d -> %d", beforeFiles, after)
+				}
+			}
+
+			const promptChanged = "review prompt identity changed"
+			t.Run("omitted", func(t *testing.T) { assertRejected(t, promptChanged) })
+			t.Run("changed", func(t *testing.T) {
+				if fromFile {
+					if err := os.WriteFile(backgroundPath, []byte(changed), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					assertRejected(t, promptChanged, parentArgs...)
+				} else {
+					assertRejected(t, promptChanged, "--background", changed)
+				}
+			})
+			if fromFile {
+				t.Run("missing file", func(t *testing.T) {
+					assertRejected(t, "read background file", "--background-file", filepath.Join(t.TempDir(), "missing.md"))
+				})
+				t.Run("invalid file", func(t *testing.T) {
+					assertRejected(t, "empty after sanitisation", "--background-file", writeTempFile(t, " \n"))
+				})
+				t.Run("equivalent file", func(t *testing.T) {
+					moved := writeTempFile(t, " \r\n"+original+"\r\n")
+					before := srv.attemptCounts()
+					out, stderr, err := runReviewCapturingBoth(t, repoDir, "json", append(resume,
+						"--background", "Ignored inline context.", "--background-file", moved)...)
+					if err != nil {
+						t.Fatalf("equivalent background must resume: %v\n%s", err, stderr)
+					}
+					var child jsonOutput
+					if err := json.Unmarshal([]byte(out), &child); err != nil {
+						t.Fatal(err)
+					}
+					if child.Manifest == nil {
+						t.Fatal("resumed review emitted no manifest")
+					}
+					coverage := child.Manifest.Coverage
+					if len(coverage.Reused) != 3 || len(coverage.Completed) != 1 || coverage.Completed[0].Path != "b.go" {
+						t.Fatalf("expected three reused items and only b.go completed: %+v", coverage)
+					}
+					for path, count := range srv.attemptCounts() {
+						if (count > before[path]) != (path == "b.go") {
+							t.Errorf("unexpected request count for %s: %d -> %d", path, before[path], count)
+						}
+					}
+				})
+			}
+
+			freshArgs := []string{"--background", changed}
+			if fromFile {
+				freshArgs = parentArgs
+			}
+			receivedChanged.Store(false)
+			_, stderr, err = runReviewCapturingBoth(t, repoDir, "json", freshArgs...)
+			if err != nil || !receivedChanged.Load() {
+				t.Fatalf("fresh review must deliver changed background to the model: %v\n%s", err, stderr)
+			}
+		})
+	}
+}
+
 func TestReviewE2E_LocalBudgetGraceFailureKeepsSuccessfulExit(t *testing.T) {
 	repo := retryTestRepo(t)
 	server := newFakeLLM()

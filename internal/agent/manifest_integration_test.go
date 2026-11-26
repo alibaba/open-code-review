@@ -138,8 +138,11 @@ func seedParentManifest(t *testing.T, a *Agent, fingerprints ...string) {
 		Operation:     session.OperationReview,
 		Repository:    session.ManifestRepository{IdentitySHA256: id.RepositorySHA256},
 		Input:         session.ManifestInput{Mode: id.Mode, SourceArtifactSHA256: id.SourceArtifactSHA256},
-		Execution:     session.ManifestExecution{RuleConfigSHA256: id.RuleConfigSHA256},
-		Coverage:      session.Coverage{Selected: items, Completed: items},
+		Execution: session.ManifestExecution{
+			RuleConfigSHA256:   id.RuleConfigSHA256,
+			ReviewPromptSHA256: id.ReviewPromptSHA256,
+		},
+		Coverage: session.Coverage{Selected: items, Completed: items},
 	}
 }
 
@@ -279,6 +282,7 @@ func TestManifestFlowCancellationPersistsResumableSession(t *testing.T) {
 		ResolvedHead:         manifest.Input.ResolvedHead,
 		SourceArtifactSHA256: manifest.Input.SourceArtifactSHA256,
 		RuleConfigSHA256:     manifest.Execution.RuleConfigSHA256,
+		ReviewPromptSHA256:   manifest.Execution.ReviewPromptSHA256,
 		RepositorySHA256:     manifest.Repository.IdentitySHA256,
 	}
 	if err := state.ValidateResume(session.ResumeRequest{
@@ -293,6 +297,43 @@ func TestManifestFlowCancellationPersistsResumableSession(t *testing.T) {
 	}
 	if _, ok := state.ReusableItem(reviewItemFingerprint(a.reviewMode(), blocked)); ok {
 		t.Fatal("cancelled item must be reviewed again")
+	}
+}
+
+func TestManifestFlowRecordsResolvedReviewPromptIdentity(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	ctx := context.Background()
+	args := identityArgs(initIdentityRepo(t), 4000)
+	args.Background = "Keep the public API stable."
+	args.Template.MaxToolRequestTimes = 5
+	args.Template.MainTask.Messages = []template.ChatMessage{
+		{Role: "system", Content: "Review the diff."},
+		{Role: "user", Content: "{{requirement_background}}\n{{diffs}}"},
+	}
+	args.Template.ApplyLanguage("Spanish")
+	args.LLMClient = manifestFlowClient{}
+	args.MainToolDefs = []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: tool.TaskDone.Name()}}}
+
+	sealed, err := ResolveIdentity(ctx, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args.SealedInput = &sealed.Resolution
+	a := New(args)
+	if _, err := a.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := session.LoadReviewResumeState(args.RepoDir, a.SessionID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Manifest == nil {
+		t.Fatal("review persisted no manifest")
+	}
+	got := state.Manifest.Execution.ReviewPromptSHA256
+	if len(got) != 64 || got != sealed.Identity.ReviewPromptSHA256 {
+		t.Errorf("persisted review prompt identity = %q, want %q", got, sealed.Identity.ReviewPromptSHA256)
 	}
 }
 

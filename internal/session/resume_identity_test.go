@@ -18,6 +18,7 @@ var parentIdentity = RunIdentity{
 	ResolvedHead:         "head-parent",
 	SourceArtifactSHA256: "artifact-parent",
 	RuleConfigSHA256:     "rules-parent",
+	ReviewPromptSHA256:   "prompt-parent",
 	RepositorySHA256:     "repo-parent",
 }
 
@@ -37,9 +38,10 @@ func parentState(mutate func(*RunManifest)) *ResumeState {
 			SourceArtifactSHA256: parentIdentity.SourceArtifactSHA256,
 		},
 		Execution: ManifestExecution{
-			Provider:         "anthropic",
-			Model:            "claude",
-			RuleConfigSHA256: parentIdentity.RuleConfigSHA256,
+			Provider:           "anthropic",
+			Model:              "claude",
+			RuleConfigSHA256:   parentIdentity.RuleConfigSHA256,
+			ReviewPromptSHA256: parentIdentity.ReviewPromptSHA256,
 		},
 		Coverage: Coverage{Selected: []CoverageItem{{ItemID: "item-1"}}},
 	}
@@ -190,6 +192,25 @@ func TestValidateResume(t *testing.T) {
 			name:    "changed rule config is rejected",
 			req:     func(r *ResumeRequest) { r.Identity.RuleConfigSHA256 = "rules-other" },
 			wantErr: "rule identity changed",
+		},
+		{
+			name:    "parent without prompt identity is rejected as unverifiable",
+			parent:  func(m *RunManifest) { m.Execution.ReviewPromptSHA256 = "" },
+			wantErr: "no review prompt identity",
+		},
+		{
+			name:    "changed prompt identity is rejected",
+			req:     func(r *ResumeRequest) { r.Identity.ReviewPromptSHA256 = "prompt-other" },
+			wantErr: "review prompt identity changed",
+		},
+		{
+			name: "explicit model change cannot bypass prompt identity",
+			req: func(r *ResumeRequest) {
+				r.Model = "claude-next"
+				r.ModelExplicit = true
+				r.Identity.ReviewPromptSHA256 = "prompt-other"
+			},
+			wantErr: "review prompt identity changed",
 		},
 		{
 			// A filter change moves both digests, and source artifact is compared
