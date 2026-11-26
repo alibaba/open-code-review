@@ -98,14 +98,31 @@ func splitSamePathHeader(rest string) (oldPath string, newPath string, ok bool) 
 func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref string, runner *gitcmd.Runner) ([]model.Diff, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	diffs := ParsePatch(diffText)
+	diffs, err := parsePatch(ctx, diffText)
+	if err != nil {
+		return nil, err
+	}
 	for index := range diffs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		finalizeDiff(ctx, &diffs[index], repoDir, ref, runner)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	return diffs, nil
 }
 
 func ParsePatch(diffText string) []model.Diff {
+	diffs, _ := parsePatch(context.Background(), diffText)
+	return diffs
+}
+
+func parsePatch(ctx context.Context, diffText string) ([]model.Diff, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	lines := splitDiffLines(diffText)
 	var diffs []model.Diff
 	var current *model.Diff
@@ -119,6 +136,9 @@ func ParsePatch(diffText string) []model.Diff {
 	inHunk := false
 
 	for _, line := range lines {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if oldPath, newPath, ok := parseDiffHeaderLine(line); ok {
 			// Flush previous diff
 			if current != nil {
@@ -186,7 +206,7 @@ func ParsePatch(diffText string) []model.Diff {
 		diffs = append(diffs, *current)
 	}
 
-	return diffs
+	return diffs, nil
 }
 
 // finalizeDiff reads the new file content. When ref is non-empty it uses
