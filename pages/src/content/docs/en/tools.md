@@ -406,6 +406,8 @@ understands `pathspec` syntax and respects `.gitignore`.
 | `case_sensitive`  | no       | `false`    | —                                                           |
 | `use_perl_regexp` | no       | `false`    | When `true`, `search_text` is treated as a regex.           |
 
+Use PCRE2 escapes such as `\x{00A0}` for Unicode code points; JavaScript-style `\u00A0` is rejected.
+
 ### Output
 
 Results are grouped by file. Each group starts with `File: <path>` and

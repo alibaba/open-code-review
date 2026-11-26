@@ -275,6 +275,8 @@ Depoda tam metin araması yapar. `git grep` kullandığı için `pathspec` sözd
 | `case_sensitive` | Hayır | `false` | — |
 | `use_perl_regexp` | Hayır | `false` | `true` ise `search_text` düzenli ifade olarak yorumlanır. |
 
+Unicode kod noktaları için `\x{00A0}` gibi PCRE2 kaçış dizileri kullanın. JavaScript biçimindeki `\u00A0` desteklenmez.
+
 ### Çıktı {#output-4}
 
 Sonuçlar dosyaya göre gruplanır. Her grup `File: <path>` ve `Match lines: <n>` ile başlar; her eşleşme `line|content` biçiminde yazılır:

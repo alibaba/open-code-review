@@ -340,6 +340,8 @@ src/main/java/com/example/internal/UserServiceImpl.java
 | `case_sensitive`  | 否   | `false` | —                                                  |
 | `use_perl_regexp` | 否   | `false` | 为 `true` 时，`search_text` 作为正则处理。         |
 
+匹配 Unicode 码点时，请使用 `\x{00A0}` 等 PCRE2 转义写法。JavaScript 风格的 `\u00A0` 不受支持。
+
 ### 输出
 
 结果按文件分组。每组以 `File: <path>` 和 `Match lines: <n>` 开头，随后每条命中

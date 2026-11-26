@@ -407,6 +407,8 @@ src/main/java/com/example/internal/UserServiceImpl.java
 | `case_sensitive`  | нет         | `false`          | —                                                                                     |
 | `use_perl_regexp` | нет         | `false`          | При значении `true` параметр `search_text` интерпретируется как регулярное выражение. |
 
+Для кодовых точек Unicode используйте экранирование PCRE2, например `\x{00A0}`. Запись `\u00A0` в стиле JavaScript не поддерживается.
+
 ### Вывод
 
 Результаты группируются по файлам. Каждая группа начинается со строк

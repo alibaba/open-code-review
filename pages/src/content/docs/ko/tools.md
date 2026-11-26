@@ -361,6 +361,8 @@ src/main/java/com/example/internal/UserServiceImpl.java
 | `case_sensitive`  | 아니요 | `false`     | —                                                            |
 | `use_perl_regexp` | 아니요 | `false`     | `true`면 `search_text`를 정규식으로 다룹니다.                |
 
+유니코드 코드 포인트에는 `\x{00A0}` 같은 PCRE2 이스케이프를 사용하세요. JavaScript 형식의 `\u00A0`은 지원하지 않습니다.
+
 ### 출력 {#output}
 
 결과는 파일별로 묶입니다. 각 묶음은 `File: <path>`와 `Match lines: <n>`으로
