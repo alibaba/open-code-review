@@ -94,7 +94,11 @@ func TestReviewExecutionEquivalence(t *testing.T) {
 						Usage:   &llm.UsageInfo{PromptTokens: 11, CompletionTokens: 7, CacheReadTokens: 3, CacheWriteTokens: 2},
 					}
 					if scenario == "compression" {
-						deps.Template.MaxTokens = 100
+						// 500 keeps the compression budget (MaxTokens×2 = 1000 bytes)
+						// above the compression template text (~1772 bytes pre-fit is
+						// still trimmed, but the message XML and summary target fit),
+						// matching the real default window instead of a toy 100.
+						deps.Template.MaxTokens = 500
 						deps.Template.MemoryCompressionTask = defaults.MemoryCompressionTask
 						deps.Tools.Register(&fakeFileReadProvider{result: strings.Repeat("source data ", 500)})
 						client.responses = []*llm.ChatResponse{client.responses[0], auxiliary, taskDoneResponse()}

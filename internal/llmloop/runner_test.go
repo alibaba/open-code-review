@@ -5,6 +5,7 @@ package llmloop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -371,7 +372,7 @@ func TestRunCompression_Success(t *testing.T) {
 		Compression: CompressionPolicy{
 			Messages: []MessageTemplate{{Role: "user", Content: "Summarize: {{context}}"}},
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -408,7 +409,7 @@ func TestRunCompression_LLMError(t *testing.T) {
 		Compression: CompressionPolicy{
 			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -444,7 +445,7 @@ func TestRunCompression_EmptySummary(t *testing.T) {
 		Compression: CompressionPolicy{
 			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -466,6 +467,53 @@ func TestRunCompression_EmptySummary(t *testing.T) {
 	}
 }
 
+// A compress zone dense in CJK/other multi-byte content can tokenize past
+// MaxContextTokens even when its rendered byte size sits under the
+// MaxContextTokens×4 byte budget (CJK measures ~3 bytes/token, not 4). The
+// token check must then tighten the byte budget and refit rather than reject
+// the request outright — otherwise a compressible history is dropped for no
+// reason. This pins that behavior: the compression call must succeed and reach
+// the LLM, not fail with errCompressionInputTooLarge.
+func TestRunCompression_TightensBudgetForDenseContent(t *testing.T) {
+	t_tempDir = t.TempDir()
+	summaryText := "compressed summary"
+	client := &fakeLLMClient{
+		response: &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{Content: &summaryText},
+			}},
+			Usage: &llm.UsageInfo{PromptTokens: 50, CompletionTokens: 10},
+		},
+	}
+	tpl := Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
+		},
+		MaxContextTokens: 200,
+	}
+	r := newTestRunner(client, tpl)
+
+	// CJK text tokenizes at ~3 bytes/token. ~700 bytes of CJK sits under the
+	// 800-byte budget but yields ~233 tokens, over the 200-token window.
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		msg("assistant", "下面是工具返回的结果"),             // allow-non-english: CJK fixture tokenizes densely
+		msg("tool", strings.Repeat("压缩测试数据", 100)), // allow-non-english: CJK fixture, 1800 bytes / ~600 tokens
+	}
+
+	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	if err != nil {
+		t.Fatalf("runCompression rejected dense content instead of tightening the budget: %v", err)
+	}
+	if len(got) < 2 {
+		t.Fatalf("expected at least 2 rebuilt messages, got %d", len(got))
+	}
+	if !strings.Contains(got[1].ExtractText(), "summary") {
+		t.Errorf("expected summary in rebuilt messages, got: %s", got[1].ExtractText())
+	}
+}
+
 func TestTriggerAsyncCompression(t *testing.T) {
 	t_tempDir = t.TempDir()
 	summaryText := "async summary"
@@ -481,7 +529,7 @@ func TestTriggerAsyncCompression(t *testing.T) {
 		Compression: CompressionPolicy{
 			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(client, tpl)
 
@@ -525,7 +573,7 @@ func TestCompression_CrossFileIsolation(t *testing.T) {
 		Compression: CompressionPolicy{
 			Messages: []MessageTemplate{{Role: "user", Content: "{{context}}"}},
 		},
-		MaxContextTokens: 50,
+		MaxContextTokens: 1000,
 	}
 	r := newTestRunner(gated, tpl)
 
@@ -725,5 +773,121 @@ func TestStripMarkdownFences_AdditionalCases(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+type recordingLLMClient struct {
+	calls    int
+	requests []llm.ChatRequest
+}
+
+func (c *recordingLLMClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.calls++
+	c.requests = append(c.requests, req)
+	summary := "compressed summary"
+	return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}}}, nil
+}
+
+func requestBytes(req llm.ChatRequest) int {
+	n := 0
+	for _, m := range req.Messages {
+		n += len(m.ExtractText())
+	}
+	return n
+}
+
+func TestRunCompression_RequestStaysWithinBudget(t *testing.T) {
+	t_tempDir = t.TempDir()
+	client := &recordingLLMClient{}
+	const maxContextTokens = 1000
+	r := newTestRunner(client, Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: "Summarize the history below.\n{{context}}"}},
+		},
+		MaxContextTokens: maxContextTokens,
+	})
+
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		llm.NewToolCallMessage("reading", nil, llm.NativeTurn{}, strings.Repeat("r", 40*1024)),
+		llm.NewToolResultMessage("call_1", strings.Repeat("x", 40*1024)),
+		msg("assistant", "done"),
+	}
+	if _, err := r.runCompression(context.Background(), msgs, "test.go"); err != nil {
+		t.Fatalf("runCompression: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("compression requests = %d, want 1", client.calls)
+	}
+	if got, budget := requestBytes(client.requests[0]), maxContextTokens*4; got > budget {
+		t.Errorf("compression request = %d bytes, want <= %d", got, budget)
+	}
+}
+
+func TestRunCompression_OversizedTemplateSkipsRequest(t *testing.T) {
+	t_tempDir = t.TempDir()
+	client := &recordingLLMClient{}
+	r := newTestRunner(client, Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: strings.Repeat("t", 500) + "{{context}}"}},
+		},
+		MaxContextTokens: 100,
+	})
+
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		msg("assistant", strings.Repeat("word ", 200)),
+		msg("tool", strings.Repeat("data ", 200)),
+	}
+	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	if !errors.Is(err, errCompressionInputTooLarge) {
+		t.Fatalf("err = %v, want errCompressionInputTooLarge", err)
+	}
+	if client.calls != 0 {
+		t.Errorf("compression requests = %d, want none sent", client.calls)
+	}
+	if len(got) != len(msgs) {
+		t.Errorf("messages = %d, want the original %d kept", len(got), len(msgs))
+	}
+}
+
+// Template text cannot shrink, so scaling the whole rendered size by the token
+// density can push the byte budget below the smallest request truncation can
+// produce. Here that smallest request is about 750 tokens, within the
+// 1000-token window, so compression must go ahead instead of failing.
+func TestRunCompression_ScaledBudgetKeepsReachableRequest(t *testing.T) {
+	t_tempDir = t.TempDir()
+	summaryText := "compressed summary"
+	client := &fakeLLMClient{
+		response: &llm.ChatResponse{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summaryText}}},
+			Usage:   &llm.UsageInfo{PromptTokens: 50, CompletionTokens: 10},
+		},
+	}
+	r := newTestRunner(client, Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: strings.Repeat(" abc", 700) + "\n{{context}}"}},
+		},
+		MaxContextTokens: 1000,
+	})
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		msg("assistant", "x"),
+		msg("tool", strings.Repeat("1!", 530)),
+	}
+
+	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	if err != nil {
+		t.Fatalf("runCompression: %v", err)
+	}
+	summarized := false
+	for _, m := range got {
+		summarized = summarized || strings.Contains(m.ExtractText(), summaryText)
+	}
+	if !summarized {
+		t.Fatal("compression result does not contain the summary")
 	}
 }
