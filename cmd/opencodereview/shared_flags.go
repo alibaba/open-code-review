@@ -167,6 +167,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 			return fmt.Errorf("--effort: %w", err)
 		}
 	}
+	if _, err := template.ParseGroupingOverride(opts.grouping); err != nil {
+		return fmt.Errorf("--grouping: %w", err)
+	}
 	return nil
 }
 
@@ -224,6 +227,8 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addModelFlag(cmd, &opts.model)
 	cmd.Flags().StringVar(&opts.effort, "effort", "", "review effort preset: low | medium | high (\"\" = configured or default medium)")
 	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
+	cmd.Flags().StringVar(&opts.grouping, "grouping", "", "override how files are grouped for review: llm | bundle-all | per-file (\"\" = default thresholds); per-file runs more groups in parallel on large change sets")
+	cmd.RegisterFlagCompletionFunc("grouping", completeEnum(template.GroupingOverrideNames()...))
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
 	cmd.Flags().IntVar(&opts.analysisMaxTokensBudget, "analysis-max-tokens-budget", 0, "cap total input and output tokens for Analysis only (0 = unlimited)")
 	cmd.Flags().BoolVar(&opts.analysis, "analysis", false, "include Behavior, Impact, and maintainer decisions (commit or range only; text/json); incomplete Analysis warns without changing the Review exit status")

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -51,6 +52,7 @@ type reviewOptions struct {
 	maxTokens               int
 	maxTokensBudget         int
 	effort                  string
+	grouping                string
 	noFilter                bool
 	preview                 bool
 	analysis                bool
@@ -202,6 +204,12 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return err
 	}
 	cc.Template.ApplyEffort(effort)
+
+	groupingOverride, err := template.ParseGroupingOverride(opts.grouping)
+	if err != nil {
+		return fmt.Errorf("--grouping: %w", err)
+	}
+	cc.Template.GroupingOverride = groupingOverride
 
 	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
 	// input it returns pins the run to the very commits this check passed on, so
