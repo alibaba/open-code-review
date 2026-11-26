@@ -10,11 +10,6 @@
 #   OCR_LLM_MODEL      - Model name (e.g., gpt-4o). OCR has no built-in default model; the
 #                        pipeline fails fast if this is unset.
 #
-# Not a CI/CD variable (hardcoded in the script below):
-#   llm.use_anthropic  - Pinned to `false` (OpenAI-compatible APIs). GitLab CI/CD cannot
-#                        store variables shorter than 8 chars, so this is set via
-#                        `ocr config set llm.use_anthropic false`. To use Anthropic
-#                        Claude, edit that line in the Configure OCR step to `true`.
 #
 # Optional CI/CD Variables (LLM provider configuration):
 #   OCR_LANGUAGE          - Review output language, written via `ocr config set language`
@@ -22,6 +17,10 @@
 #   OCR_LLM_AUTH_HEADER   - Custom auth header name, written via `ocr config set llm.auth_header`
 #                          (e.g. "x-api-key" for some providers).
 #   OCR_LLM_EXTRA_HEADERS - Extra headers "K=V,K=V", written via `ocr config set llm.extra_headers`.
+#   OCR_LLM_USE_ANTHROPIC - "true" for the Anthropic API format; defaults to "false".
+#                          Leave unset or set to "false" for OpenAI-compatible
+#                          endpoints. Must be UNMASKED (GitLab's 8-char minimum
+#                          applies to masked values only).
 #   OCR_LLM_TIMEOUT       - LLM request timeout in seconds (read natively by OCR from the env).
 #                          Unset/empty = use OCR's default.
 #
@@ -92,7 +91,6 @@ code-review:
       echo "OpenCodeReview installed with version:" && ocr version || true
 
     # Configure OCR
-    # Gitlab CI/CD does not support configuring variables with value length less than 8, so you can't set use_anthropic as a CI variable
     - |
       : "${OCR_LLM_URL:?set OCR_LLM_URL in Settings -> CI/CD -> Variables}"
       : "${OCR_LLM_AUTH_TOKEN:?set OCR_LLM_AUTH_TOKEN in Settings -> CI/CD -> Variables}"
@@ -100,7 +98,7 @@ code-review:
       ocr config set llm.url "$OCR_LLM_URL"
       ocr config set llm.auth_token "$OCR_LLM_AUTH_TOKEN"
       ocr config set llm.model "$OCR_LLM_MODEL"
-      ocr config set llm.use_anthropic false
+      ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC:-false}"
       ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
       # Optional config: only written when the CI var is non-empty, so an unset
       # variable does not clobber a previously-configured value.

@@ -386,10 +386,11 @@ Set under **Settings → CI/CD → Variables**:
 | `OCR_LLM_AUTH_TOKEN` | Yes | Yes | API authentication token. This CI variable is passed to `ocr config set llm.auth_token`. (OCR's direct env var is `OCR_LLM_TOKEN`, not `OCR_LLM_AUTH_TOKEN`.) |
 | `OCR_LLM_MODEL` | No | No | Model name. No default — must be set explicitly. |
 | `GITLAB_API_TOKEN` | No | Yes | Project / personal / group access token with `api` scope. Optional — the built-in `CI_JOB_TOKEN` is used as a fallback when this is absent (e.g. for fork MRs). A dedicated `GITLAB_API_TOKEN` is recommended for reliability. |
+| `OCR_LLM_USE_ANTHROPIC` | No | No | Set to `true` for the Anthropic API format; defaults to `false`. Must be unmasked. |
 
-> GitLab rejects variables shorter than 8 characters, so
-> `llm.use_anthropic` is hardcoded to `false` in the pipeline. To use
-> Anthropic Claude models, edit the script directly.
+> Leave `OCR_LLM_USE_ANTHROPIC` unmasked:
+> GitLab's 8-character minimum applies to masked variables only, and a boolean flag is not a
+> secret. The pipeline defaults it to `false`.
 
 > The pipeline also runs
 > `ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'`
