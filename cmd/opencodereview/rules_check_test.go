@@ -4,6 +4,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -26,11 +29,36 @@ func TestRunRulesCheck(t *testing.T) {
 		})
 	})
 
-	t.Run("non-git repo dir errors", func(t *testing.T) {
-		rulesCheckRepoDir = t.TempDir()
+	t.Run("non-git repo dir still resolves (#1704)", func(t *testing.T) {
+		plain := t.TempDir()
+		rulesCheckRepoDir = plain
 		defer func() { rulesCheckRepoDir = dir }()
-		if err := runRulesCheck("x.go"); err == nil {
-			t.Fatal("expected error for non-git repo dir")
+
+		// A distinctive project rule proves the project layer is really
+		// consulted for the non-git dir: exit-0 alone would still pass if
+		// rules were silently loaded from another root.
+		ruleDir := filepath.Join(plain, ".opencodereview")
+		if err := os.MkdirAll(ruleDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		ruleJSON := `{"rules":[{"path":"**/*.ruleprobe","rule":"DISTINCTIVE PROJECT RULE"}]}`
+		if err := os.WriteFile(filepath.Join(ruleDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		out := captureStdout(t, func() {
+			if err := runRulesCheck("pkg/RuleProbe.ruleprobe"); err != nil {
+				t.Fatalf("runRulesCheck error for non-git dir: %v", err)
+			}
+		})
+		for _, want := range []string{
+			"Source: Project (.opencodereview/rule.json)",
+			"Pattern: **/*.ruleprobe",
+			"DISTINCTIVE PROJECT RULE",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output missing %q, got:\n%s", want, out)
+			}
 		}
 	})
 }

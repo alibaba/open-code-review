@@ -269,6 +269,41 @@ func TestResolveWorkingDir_BareRepoFailsLoudly(t *testing.T) {
 	}
 }
 
+func TestResolveWorkingDir_GitProbeFailure(t *testing.T) {
+	repo := initTestGitRepo(t)
+	sub := filepath.Join(repo, "subproject1", "src")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+	if isGit, err := probeGitDir(sub); err == nil && isGit {
+		t.Skip("installed git does not honor GIT_TEST_ASSUME_DIFFERENT_OWNER")
+	}
+
+	gotScan, isGit, err := resolveWorkingDir(sub, false)
+	if err != nil {
+		t.Fatalf("scan path must tolerate an unusable git: %v", err)
+	}
+	if isGit {
+		t.Error("probe refusal must degrade to non-git mode, not isGit=true")
+	}
+	if gotScan == "" {
+		t.Error("scan path must still resolve a directory")
+	}
+
+	_, _, err = resolveWorkingDir(sub, true)
+	if err == nil {
+		t.Fatal("review path must fail when git cannot read the repository")
+	}
+	if !strings.Contains(err.Error(), "cannot determine") {
+		t.Errorf("review path error should name the probe failure, got: %v", err)
+	}
+}
+
 func TestResolveWorkingDir_GitRepo(t *testing.T) {
 	dir := t.TempDir()
 	gitDir := filepath.Join(dir, ".git")

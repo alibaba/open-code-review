@@ -535,13 +535,22 @@ func reviewModeFromOptions(opts reviewOptions) string {
 	return session.ReviewModeWorkspace
 }
 
-// resolveRepoDir resolves the repo dir for `ocr rules check`. It delegates to
-// resolveWorkingDir(requireGit=true) so it anchors at the git top-level just
-// like the review path — keeping rule resolution consistent when run from a
-// monorepo subdirectory (#287).
+// resolveRepoDir resolves the project rule root for `ocr rules check`.
+// A failed Git probe may hide a worktree root, so surface the failure instead
+// of silently loading rules from the requested subdirectory.
 func resolveRepoDir(input string) (string, error) {
-	absPath, _, err := resolveWorkingDir(input, true)
-	return absPath, err
+	absPath, err := absInputDir(input)
+	if err != nil {
+		return "", err
+	}
+	isGit, probeErr := probeGitDir(absPath)
+	if probeErr != nil {
+		return "", probeErr
+	}
+	if !isGit {
+		return absPath, nil
+	}
+	return anchorToGitTopLevel(absPath)
 }
 
 // requireGitRepo validates that the given directory is part of a git repository.

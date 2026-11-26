@@ -594,7 +594,8 @@ Rule introspection. There is exactly one subcommand:
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git repository root (default: current dir)
+  --repo <path>    Project directory to inspect (default: current directory).
+                   Inside a Git worktree, rules are loaded from the worktree root.
   --rule <path>    Path to a custom rule JSON file
 ```
 

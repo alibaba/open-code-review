@@ -557,7 +557,8 @@ id만으로 충분하므로 어느 디렉터리에서든 실행할 수 있습니
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git repository root (default: current dir)
+  --repo <path>    검사할 프로젝트 디렉터리(기본값: 현재 디렉터리).
+                   Git 작업 트리 안에서는 작업 트리의 루트에서 규칙을 불러옵니다.
   --rule <path>    Path to a custom rule JSON file
 ```
 

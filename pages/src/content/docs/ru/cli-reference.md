@@ -562,7 +562,8 @@ ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --repo ~/work/my-project
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git repository root (default: current dir)
+  --repo <path>    Каталог проекта для проверки (по умолчанию: текущий каталог).
+                   В рабочем дереве Git правила загружаются из его корня.
   --rule <path>    Path to a custom rule JSON file
 ```
 

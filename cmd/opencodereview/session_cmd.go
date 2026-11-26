@@ -680,9 +680,10 @@ func confirmDeletion(cmd *cobra.Command) (bool, error) {
 }
 
 // resolveWorkingDirForSession accepts an explicit --repo flag value and falls
-// back to the current working directory. Unlike resolveRepoDir it does not
-// require the target to be a git repository, so users can inspect sessions
-// even after archiving a checkout.
+// back to the current working directory. Like resolveRepoDir it accepts a
+// plain non-git directory, but it never anchors to the git top level and also
+// stays usable when git cannot read the repository at all, so users can
+// inspect sessions even after archiving a checkout.
 func resolveWorkingDirForSession(input string) (string, error) {
 	dir, _, err := resolveWorkingDir(input, false)
 	if err != nil {

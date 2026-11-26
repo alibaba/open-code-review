@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -151,45 +152,120 @@ func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxG
 // true, returns an error if the directory is not a git repo. When false,
 // returns IsGitRepo=false instead of erroring (scan path uses this).
 func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
+	absPath, err := absInputDir(input)
+	if err != nil {
+		return "", false, err
+	}
+	isGit, probeErr := probeGitDir(absPath)
+	if probeErr != nil {
+		// A failed probe is not "no repository": the directory may sit
+		// inside a repository git refuses to read. Review cannot work
+		// without git either way, so it gets the real reason instead of
+		// the misleading "is not a git repository".
+		if requireGit {
+			return "", false, probeErr
+		}
+		// Scan and session keep their old tolerance: once the probe reports
+		// no usable repository they never run git themselves, so an
+		// unusable git degrades them to their non-git mode. `ocr rules
+		// check` resolves the probe itself (resolveRepoDir) so it can fail
+		// loudly instead of silently changing the rule root.
+	}
+
+	if !isGit && requireGit {
+		return "", false, fmt.Errorf("%s is not a git repository", absPath)
+	}
+	// #287: anchor the review path at the git top level. requireGit is true
+	// only for the review path; scan (requireGit=false) keeps the CWD so its
+	// `git ls-files` walk stays scoped to the subdirectory.
+	if isGit && requireGit {
+		top, topErr := anchorToGitTopLevel(absPath)
+		if topErr != nil {
+			return "", false, topErr
+		}
+		absPath = top
+	}
+	return absPath, isGit, nil
+}
+
+// anchorToGitTopLevel returns the top-level directory of the git work tree
+// containing absPath. #287: git reports diff and `git show HEAD:<path>` paths
+// relative to the repository root, not the current directory, so callers that
+// resolve such root-relative paths must anchor at the top level even when run
+// from a monorepo subdirectory.
+func anchorToGitTopLevel(absPath string) (string, error) {
+	// runGitCmdStdout captures stdout only so git stderr notices can't
+	// pollute the resolved path. --show-toplevel fails (or is empty) when
+	// there is no work tree — e.g. a bare repo, where --git-dir succeeds so
+	// callers see isGit=true. Fail loudly there instead of silently reusing
+	// the input dir, which would reproduce the #287 root-relative-path bug.
+	top, topErr := runGitCmdStdout(absPath, "rev-parse", "--show-toplevel")
+	t := strings.TrimSpace(string(top))
+	if topErr != nil || t == "" {
+		return "", fmt.Errorf("%s is a git repository without a work tree (bare repo?); cannot resolve its top level", absPath)
+	}
+	return t, nil
+}
+
+// absInputDir resolves a --repo flag value (empty means the current working
+// directory) to an absolute path and checks that it exists on disk.
+func absInputDir(input string) (string, error) {
 	if input == "" {
 		wd, err := os.Getwd()
 		if err != nil {
-			return "", false, fmt.Errorf("get working directory: %w", err)
+			return "", fmt.Errorf("get working directory: %w", err)
 		}
 		input = wd
 	}
 	absPath, err := filepath.Abs(input)
 	if err != nil {
-		return "", false, fmt.Errorf("resolve absolute path: %w", err)
+		return "", fmt.Errorf("resolve absolute path: %w", err)
 	}
 	if _, statErr := os.Stat(absPath); statErr != nil {
-		return "", false, fmt.Errorf("stat %s: %w", absPath, statErr)
+		return "", fmt.Errorf("stat %s: %w", absPath, statErr)
 	}
-	out, err := runGitCmd(absPath, "rev-parse", "--git-dir")
-	isGit := err == nil && len(out) > 0
-	if !isGit && requireGit {
-		return "", false, fmt.Errorf("%s is not a git repository", absPath)
+	return absPath, nil
+}
+
+// probeGitDir reports whether git sees a repository at or above absPath. A
+// failed probe is a different answer from "no repository": git may instead be
+// refusing to read one that is there (dubious ownership, an unsafe repository,
+// a broken .git, a missing git binary), which probeGitDir reports as an error
+// so callers that derive meaning from "not a repository" can surface the
+// refusal instead of silently downgrading.
+func probeGitDir(absPath string) (bool, error) {
+	cmd := exec.Command("git", "-C", absPath, "rev-parse", "--git-dir")
+	// Discovery failures are classified by Git's English diagnostics.
+	cmd.Env = append(cmd.Environ(), "LC_ALL=C")
+	out, err := cmd.CombinedOutput()
+	if isNoGitRepoProbe(out, err) {
+		return false, nil
 	}
-	// #287: git reports diff and `git show HEAD:<path>` paths relative to the
-	// repository root, not the current directory. When `ocr review` runs from a
-	// subdirectory of a monorepo, anchor RepoDir at the git top-level so those
-	// root-relative paths resolve for both disk reads and git-show reads.
-	// requireGit is true only for the review path; scan (requireGit=false) keeps
-	// the CWD so its `git ls-files` walk stays scoped to the subdirectory.
-	if isGit && requireGit {
-		// runGitCmdStdout captures stdout only so git stderr notices can't
-		// pollute the resolved path. --show-toplevel fails (or is empty) when
-		// there is no work tree — e.g. a bare repo, where --git-dir succeeds so
-		// isGit is true. Fail loudly there instead of silently reusing the
-		// subdir, which would reproduce the #287 root-relative-path bug.
-		top, topErr := runGitCmdStdout(absPath, "rev-parse", "--show-toplevel")
-		t := strings.TrimSpace(string(top))
-		if topErr != nil || t == "" {
-			return "", false, fmt.Errorf("%s is a git repository without a work tree (bare repo?); cannot resolve its top level for review", absPath)
+	if err != nil {
+		reason := strings.TrimSpace(string(out))
+		if reason == "" {
+			reason = err.Error()
 		}
-		absPath = t
+		return false, fmt.Errorf("cannot determine whether %s is inside a git repository: %s", absPath, reason)
 	}
-	return absPath, isGit, nil
+	return len(out) > 0, nil
+}
+
+// Git uses exit 128 for both discovery misses and repository access errors.
+func isNoGitRepoProbe(out []byte, err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 128 {
+		return false
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if !strings.HasPrefix(line, "fatal: ") {
+			continue
+		}
+		return line == "fatal: not a git repository (or any of the parent directories): .git" ||
+			strings.HasPrefix(line, "fatal: not a git repository (or any parent up to mount point ")
+	}
+	return false
 }
 
 // llmRuntime bundles the LLM-side state both subcommands need once they've

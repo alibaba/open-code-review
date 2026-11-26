@@ -531,7 +531,8 @@ stdin 一律视为「否」**，因此流水线或 CI 任务需要传入 `--yes`
 ocr rules check [flags] <file-path>
 
 Flags:
-  --repo <path>    Git repository root (default: current dir)
+  --repo <path>    要检查的项目目录（默认：当前目录）。
+                   如果该目录位于 Git 工作树中，则从工作树根目录加载规则。
   --rule <path>    Path to a custom rule JSON file
 ```
 
