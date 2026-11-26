@@ -5,6 +5,7 @@ package diff
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -144,7 +145,7 @@ func TestParseHunks_CRLFKeepsLineContentClean(t *testing.T) {
 // LF diff text must be untouched, including a lone CR that is genuinely part
 // of a line rather than a line terminator.
 func TestSplitDiffLines_LeavesLFTextAlone(t *testing.T) {
-	got := splitDiffLines("alpha\nbeta\n")
+	got := slices.Collect(splitDiffLines("alpha\nbeta\n"))
 	want := []string{"alpha", "beta", ""}
 	if len(got) != len(want) {
 		t.Fatalf("got %q, want %q", got, want)
@@ -156,7 +157,7 @@ func TestSplitDiffLines_LeavesLFTextAlone(t *testing.T) {
 	}
 
 	// Only the final CR of a line is a terminator; an interior one stays.
-	if lines := splitDiffLines("a\rb\n"); lines[0] != "a\rb" {
+	if lines := slices.Collect(splitDiffLines("a\rb\n")); lines[0] != "a\rb" {
 		t.Errorf("interior CR was stripped: %q", lines[0])
 	}
 }

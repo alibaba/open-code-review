@@ -72,7 +72,7 @@ func ParseHunks(rawDiffText string) []Hunk {
 	var hunks []Hunk
 	var current *Hunk
 
-	for _, line := range lines {
+	for line := range lines {
 		if header, ok := hunkHeader(line); ok {
 			// Flush previous hunk
 			if current != nil {
