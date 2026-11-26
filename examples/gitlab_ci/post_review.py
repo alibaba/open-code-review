@@ -68,6 +68,7 @@ def log(msg):
 # HTML marker that tags the cross-run summary note so the sticky upsert can
 # find it across runs. Embedded verbatim in the summary body.
 SUMMARY_MARKER = "<!-- ocr-summary -->"
+GITLAB_NOTE_MAX_CHARS = 1_000_000
 
 # Per-run HTML marker embedded alongside SUMMARY_MARKER so the non-sticky
 # summary path can locate THIS run's note (find-by-tag) instead of always
@@ -78,14 +79,27 @@ def summary_tag_for(run_tag):
     return "<!-- ocr-summary-run:%s -->" % run_tag
 
 
-def wrap_summary_body(content, run_tag):
+def wrap_summary_body(content, run_tag, review_info=""):
     """Prefix the summary body with both the cross-run marker and the per-run tag.
 
     Sticky mode finds the note by SUMMARY_MARKER (cross-run reuse); non-sticky
     finds it by the per-run tag (run-internal reuse, run-external new). Both
     markers are always embedded so the same body serves either matching mode.
     """
-    return "%s\n%s\n%s" % (SUMMARY_MARKER, summary_tag_for(run_tag), content)
+    body = "%s\n%s\n%s" % (SUMMARY_MARKER, summary_tag_for(run_tag), content)
+    available = GITLAB_NOTE_MAX_CHARS - len(body)
+    if len(review_info) <= available or not review_info:
+        return body + review_info
+
+    # Trim only optional file rows, after reserving space for the complete note.
+    omitted = "\n\nAdditional file results omitted to fit this comment."
+    suffix = omitted + "\n\n</details>"
+    cutoff = available - len(suffix)
+    if cutoff > 0:
+        row = review_info.rfind("\n| <code>", 0, cutoff + len("\n| <code>"))
+        if row >= 0:
+            return body + review_info[:row] + suffix
+    return body + omitted if len(omitted) <= available else body
 
 # Reason attached to comments that have no valid line range and therefore can
 # never be posted as inline comments. Surfaced in the summary so every
@@ -1327,7 +1341,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         else:
             message = result.get("message", "No comments generated. Looks good to me.")
             summary = "✅ **OpenCodeReview**: %s" % message
-        body = wrap_summary_body(summary + details, config.get("run_tag", "0-0"))
+        body = wrap_summary_body(summary, config.get("run_tag", "0-0"), details)
         stats["summary_url"] = upsert_summary(poster, body, sticky,
                                              tag=summary_tag_for(config.get("run_tag", "0-0")))
         return stats
@@ -1385,8 +1399,8 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     run_tag = config.get("run_tag", "0-0")
     anchor_id = None
     anchor_body = wrap_summary_body(
-        build_pre_review_summary_body(stats["total"], no_line, routed, warnings, heading) + details,
-        run_tag,
+        build_pre_review_summary_body(stats["total"], no_line, routed, warnings, heading),
+        run_tag, details,
     )
     anchor_id = ensure_summary_anchor(poster, anchor_body, sticky,
                                       tag=summary_tag_for(run_tag))
@@ -1466,7 +1480,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         summary_body += "\n\n---\n\nℹ️ All inline comments overlapped with existing reviews; nothing new was posted."
     summary_body += format_warnings(warnings)
     run_tag = config.get("run_tag", "0-0")
-    full_body = wrap_summary_body(summary_body + details, run_tag)
+    full_body = wrap_summary_body(summary_body, run_tag, details)
     stats["summary_url"] = finalize_summary(poster, full_body, sticky, anchor_id,
                                            tag=summary_tag_for(run_tag))
     if not stats["summary_url"]:

@@ -535,6 +535,27 @@ class PublishTest(unittest.TestCase):
                         if comments:
                             self.assertIn("summary finding", body)
 
+    def test_large_coverage_table_fits_each_published_note(self):
+        failed = [{"path": "unfinished.py", "reason": "token limit"}]
+        completed = [{"path": "%s/file-%d.py" % ("directory/" * 10, i)} for i in range(11_999)]
+        coverage = {"selected": failed + completed, "failed": failed, "waived": [],
+                    "completed": completed, "reused": []}
+        manifest = {"terminal_state": "partial", "coverage": coverage}
+        for comments in ([], [comment(end_line=0, content="Keep this summary finding.")]):
+            with self.subTest(findings=len(comments)):
+                _, rec = run_publish({"manifest": manifest, "comments": comments})
+                for body in (rec.note_calls[0], rec.final_summary_body):
+                    self.assertLessEqual(len(body), 1_000_000)
+                    self.assertIn(pr.SUMMARY_MARKER, body)
+                    self.assertIn("11999 of 12000 selected files covered", body)
+                    self.assertIn("<code>unfinished.py</code> | Not reviewed — token limit |", body)
+                    self.assertIn("/file-0.py</code> | Reviewed |", body)
+                    self.assertNotIn(completed[-1]["path"], body)
+                    self.assertIn("Additional file results omitted", body)
+                    self.assertTrue(body.endswith("</details>"))
+                    if comments:
+                        self.assertIn("Keep this summary finding.", body)
+
     def test_complete_review_with_reused_coverage(self):
         item = {"path": "cached.py"}
         coverage = {"selected": [item], "completed": [], "reused": [item], "failed": [], "waived": []}
