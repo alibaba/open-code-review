@@ -4,8 +4,50 @@
 package suggestdiff
 
 import (
+	"fmt"
+	"reflect"
 	"testing"
 )
+
+func BenchmarkComputeLineDiff(b *testing.B) {
+	for _, size := range []int{50, 250, 1000} {
+		b.Run(fmt.Sprintf("lines_%d", size), func(b *testing.B) {
+			oldLines := make([]string, size)
+			newLines := make([]string, size)
+			for i := range oldLines {
+				oldLines[i] = fmt.Sprintf("    result[%d] = parseValue(values[%d], defaultValue)", i, i)
+				newLines[i] = oldLines[i]
+				if i%10 == 0 {
+					newLines[i] = fmt.Sprintf("    result[%d] = parseValue(values[%d], fallbackValue)", i, i)
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				ComputeLineDiff(oldLines, newLines)
+			}
+		})
+	}
+}
+
+func TestComputeLineDiffAlignment(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		old, new []string
+		want     []DiffLine
+	}{
+		{"duplicate", []string{"a"}, []string{"a", "a"}, []DiffLine{{DiffAdded, "a"}, {DiffContext, "a"}}},
+		{"tie", []string{"a", "b"}, []string{"b", "a"}, []DiffLine{{DiffDeleted, "a"}, {DiffContext, "b"}, {DiffAdded, "a"}}},
+		{"unicode fold", []string{"\u03c3", "tail"}, []string{"\u03c2", "tail"}, []DiffLine{{DiffDeleted, "\u03c3"}, {DiffAdded, "\u03c2"}, {DiffContext, "tail"}}},
+		{"unicode distinct", []string{"I", "tail"}, []string{"\u0131", "tail"}, []DiffLine{{DiffDeleted, "I"}, {DiffAdded, "\u0131"}, {DiffContext, "tail"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ComputeLineDiff(tt.old, tt.new); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("ComputeLineDiff() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestComputeLineDiff(t *testing.T) {
 	tests := []struct {
