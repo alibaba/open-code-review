@@ -343,7 +343,7 @@ script:
   - |
     ocr review \
       --background "$CI_MERGE_REQUEST_TITLE" \
-      --from "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" \
+      --from "$CI_MERGE_REQUEST_DIFF_BASE_SHA" \
       --to "${CI_COMMIT_SHA}" \
       --format json --audience agent
 ```
@@ -357,7 +357,7 @@ GitHub Actions のレシピと同じ引数です——`--rule` でプロジェ�
 script:
   - |
     ocr review --rule ./my-rules.json --concurrency 5 \
-      --from "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" \
+      --from "$CI_MERGE_REQUEST_DIFF_BASE_SHA" \
       --to "${CI_COMMIT_SHA}"
 ```
 
