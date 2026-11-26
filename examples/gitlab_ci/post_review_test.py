@@ -496,32 +496,52 @@ class PublishTest(unittest.TestCase):
                          "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
                          "✅ **OpenCodeReview**: Looks good to me.")
 
-    def test_failed_review_not_lgtm(self):
-        # A failed review also has zero comments, but must not post the
-        # success glyph / LGTM message on the durable MR record.
-        stats, rec = run_publish({"status": "failed",
-                                  "message": "Review failed: 0 finding(s); 3 of 3 selected item(s) failed."})
-        self.assertEqual(stats["inline"], 0)
-        self.assertNotIn("✅", rec.final_summary_body)
-        self.assertNotIn("Looks good to me", rec.final_summary_body)
-        self.assertEqual(rec.final_summary_body,
-                         "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
-                         "⚠️ **OpenCodeReview**: Review failed: 0 finding(s); 3 of 3 selected item(s) failed.")
+    def test_incomplete_review_without_coverage(self):
+        for status in ("partial", "failed", "completed_with_errors"):
+            with self.subTest(status=status):
+                _, rec = run_publish({"status": status, "warnings": [], "message": "Looks good to me.",
+                                      "manifest": {"coverage": {"failed": [None, {"path": "unfinished"}],
+                                                                "waived": 1}}})
+                self.assertIn("<code>unfinished</code> | Not reviewed", rec.final_summary_body)
+                self.assertIn("Coverage details unavailable", rec.final_summary_body)
+                self.assertNotIn("✅", rec.final_summary_body)
+                self.assertNotIn("Looks good to me", rec.final_summary_body)
 
-    def test_partial_review_not_lgtm(self):
-        # Partial means some selected items were never reviewed, so zero
-        # comments is not an all-clear either.
-        stats, rec = run_publish({"status": "partial",
-                                  "message": "Review partially complete: 0 finding(s); 2 of 3 selected item(s) failed."})
-        self.assertEqual(stats["inline"], 0)
-        self.assertEqual(rec.final_summary_body,
-                         "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
-                         "⚠️ **OpenCodeReview**: Review partially complete: 0 finding(s); 2 of 3 selected item(s) failed.")
+    def test_review_coverage_with_and_without_findings(self):
+        coverage = {
+            "selected": [{"path": p} for p in "abcd"],
+            "completed": [{"path": "a"}], "reused": [{"path": "b"}],
+            "failed": [{"path": "c", "classification": "budget", "reason": "token limit"}],
+            "waived": [{"path": "d", "reason": "empty diff"}], "excluded": [{"path": "excluded.py"}],
+        }
+        for state, label in (("partial", "Partial review"), ("failed", "Failed review")):
+            for comments in ([], [comment(), comment(end_line=0, content="summary finding")]):
+                with self.subTest(state=state, findings=len(comments)):
+                    manifest = {"terminal_state": state, "coverage": coverage,
+                                "input": {"resolved_base": "a" * 40, "resolved_head": "b" * 40}}
+                    stats, rec = run_publish({"manifest": manifest, "status": "success",
+                                              "warnings": [], "comments": comments})
+                    self.assertEqual(stats["inline"], 1 if comments else 0)
+                    for body in (rec.note_calls[0], rec.final_summary_body):
+                        self.assertTrue(body.split("-->")[-1].lstrip().startswith(
+                            "⚠️ **OpenCodeReview · %s: 2 of 4 selected files covered" % label))
+                        self.assertIn("<code>c</code> | Not reviewed — budget: token limit", body)
+                        self.assertIn("Waived — empty diff", body)
+                        self.assertIn("Covered by a previous run (result reused)", body)
+                        self.assertLess(body.index("<code>c"), body.index("<code>a"))
+                        self.assertIn("**Reviewed commits:** `aaaaaaa` → `bbbbbbb`", body)
+                        self.assertNotIn("excluded.py", body)
+                        self.assertNotIn("✅", body)
+                        if comments:
+                            self.assertIn("summary finding", body)
 
-    def test_incomplete_review_without_message_names_status(self):
-        stats, rec = run_publish({"status": "partial"})
-        self.assertNotIn("✅", rec.final_summary_body)
-        self.assertIn("review did not complete (status=partial)", rec.final_summary_body)
+    def test_complete_review_with_reused_coverage(self):
+        item = {"path": "cached.py"}
+        coverage = {"selected": [item], "completed": [], "reused": [item], "failed": [], "waived": []}
+        _, rec = run_publish({"manifest": {"terminal_state": "complete", "coverage": coverage}})
+        self.assertIn("Complete review: 1 of 1 selected files covered", rec.final_summary_body)
+        self.assertIn("Covered by a previous run (result reused)", rec.final_summary_body)
+        self.assertNotIn("⚠️", rec.final_summary_body)
 
     def test_warnings_in_summary(self):
         stats, rec = run_publish({"comments": [comment()], "warnings": [{"file": "a.py", "message": "skipped"}]})

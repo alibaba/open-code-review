@@ -87,6 +87,7 @@ async function runPostReviewComments({
   prNumber: prNumberOverride,
   resultPath = "/tmp/ocr-result.json",
   stderrPath = "/tmp/ocr-stderr.log",
+  reviewExitCode = 0,
   stickySummary = true,
   incremental = false,
   incrementalOverlapThreshold = DEFAULT_OVERLAP_THRESHOLD,
@@ -220,7 +221,7 @@ async function runPostReviewComments({
   // resolved_head rather than the runner's HEAD_SHA.
   const buildAdvanceMarker = (manifest) => {
     stats.checkpointAfter = "";
-    if (!checkpointEnabled || !stickySummary) return null;
+    if (!checkpointEnabled || !stickySummary || reviewExitCode !== 0) return null;
     if (!manifest || manifest.terminal_state !== "complete") return null;
     if (stats.failed !== outsideDiffCount) return null;
     // No fingerprint means the resolve step fell over before it computed one
@@ -287,8 +288,20 @@ async function runPostReviewComments({
   try {
     const raw = fs.readFileSync(resultPath, "utf8");
     result = JSON.parse(raw);
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      throw new Error("Expected a review report object");
+    }
+    if (reviewExitCode !== 0 && !result.manifest?.terminal_state && !result.status && !result.comments?.length) {
+      log("OCR exited without a review report.");
+      setStatsOutputs(out, stats);
+      return;
+    }
   } catch (e) {
     log(`Failed to parse OCR output: ${e.message}`);
+    if (reviewExitCode !== 0) {
+      setStatsOutputs(out, stats);
+      return;
+    }
     // stream_progress streams human-audience progress into stderr, so the file
     // can dwarf GitHub's 65536-char comment limit; keep the tail, which is
     // where the error that killed the run was written.
@@ -320,6 +333,7 @@ async function runPostReviewComments({
 
   const comments = result.comments || [];
   const warnings = result.warnings || [];
+  const { heading, details } = formatReviewCoverage(result, rangeNote);
   stats.total = comments.length;
 
   // No comments: post a summary. Warnings, when present, are part of it:
@@ -340,8 +354,9 @@ async function runPostReviewComments({
     const icon = warningBlock ? "⚠️" : "✅";
     // A clean run is still a complete run: this path advances the checkpoint.
     // Warnings are not an input to that decision.
+    const summary = heading ? findingCount(0, heading) : `${icon} **OpenCodeReview**: ${message}`;
     const body = appendCheckpoint(
-      `${SUMMARY_MARKER}\n${icon} **OpenCodeReview**: ${message}${warningBlock}${rangeNote}`,
+      `${SUMMARY_MARKER}\n${summary}${warningBlock}`,
       result.manifest
     );
     const posted = await postSummary({
@@ -350,6 +365,7 @@ async function runPostReviewComments({
       repo,
       prNumber,
       body,
+      details,
       sticky: stickySummary,
       preserveMarker,
       appSlug,
@@ -481,9 +497,9 @@ async function runPostReviewComments({
     tag: SUMMARY_TAG,
     appSlug,
     resolveSelfLogin: authenticatedLogin,
-    body: wrapSummary(
-      buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings)
-    ),
+    body: appendReviewInfo(wrapSummary(
+      buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings, heading)
+    ), details),
     log,
   });
 
@@ -558,6 +574,7 @@ async function runPostReviewComments({
     routed: commentsRouted.length,
     failed: failedCount,
     warnings,
+    heading,
   });
   summaryBody += formatSummaryComments(commentsWithoutLine);
   summaryBody += formatSummaryComments(commentsRouted);
@@ -569,7 +586,6 @@ async function runPostReviewComments({
     summaryBody += "\n\n---\n\nℹ️ All inline comments overlapped with existing reviews; nothing new was posted.";
   }
   summaryBody += formatWarnings(warnings);
-  summaryBody += rangeNote;
 
   // Update the anchored comment directly when its id is known (no extra read);
   // otherwise upsert (find-then-update-or-create), which also covers the case
@@ -587,6 +603,7 @@ async function runPostReviewComments({
     appSlug,
     resolveSelfLogin: authenticatedLogin,
     body: wrapSummary(appendCheckpoint(summaryBody, result.manifest)),
+    details,
     preserveMarker,
     log,
   });
@@ -602,7 +619,8 @@ async function runPostReviewComments({
   // lines, which is why currentSpans is built from the raw parsed findings
   // rather than from `toSend`: a finding we chose not to repeat is still a
   // finding that is live.
-  if (resolveMode !== "off") {
+  // Error exits publish the available findings but cannot establish that old threads are resolved.
+  if (reviewExitCode === 0 && resolveMode !== "off") {
     const currentSpans = comments.map((c) => ({
       path: c.path,
       start_line: c.start_line,
@@ -1111,13 +1129,13 @@ async function postSummary({
   repo,
   prNumber,
   body,
+  details = "",
   sticky,
   preserveMarker = false,
   appSlug = "",
   resolveSelfLogin = null,
   log,
 }) {
-  const fullBody = body;
   if (sticky) {
     const existing = await findExistingSummaryComment({
       github,
@@ -1133,7 +1151,7 @@ async function postSummary({
         owner,
         repo,
         comment_id: existing.id,
-        body: preserveMarker ? preserveCheckpointMarker(fullBody, existing.body) : fullBody,
+        body: appendReviewInfo(preserveMarker ? preserveCheckpointMarker(body, existing.body) : body, details),
       });
       return { id: updated.id, url: updated.html_url, updated: true };
     }
@@ -1142,7 +1160,7 @@ async function postSummary({
     owner,
     repo,
     issue_number: prNumber,
-    body: fullBody,
+    body: appendReviewInfo(body, details),
   });
   return { id: created.id, url: created.html_url, updated: false };
 }
@@ -1280,6 +1298,7 @@ async function finalizeSummary({
   prNumber,
   anchor,
   body,
+  details = "",
   sticky,
   tag,
   preserveMarker = false,
@@ -1287,13 +1306,15 @@ async function finalizeSummary({
   resolveSelfLogin = null,
   log,
 }) {
-  const keep = (newBody, oldBody) => (preserveMarker ? preserveCheckpointMarker(newBody, oldBody) : newBody);
+  const finalBody = (oldBody) => appendReviewInfo(
+    preserveMarker ? preserveCheckpointMarker(body, oldBody) : body, details
+  );
   if (anchor && anchor.id != null) {
     const { data: updated } = await github.rest.issues.updateComment({
       owner,
       repo,
       comment_id: anchor.id,
-      body: keep(body, anchor.body),
+      body: finalBody(anchor.body),
     });
     return { id: updated.id, url: updated.html_url };
   }
@@ -1319,7 +1340,7 @@ async function finalizeSummary({
       owner,
       repo,
       comment_id: existing.id,
-      body: keep(body, existing.body),
+      body: finalBody(existing.body),
     });
     return { id: updated.id, url: updated.html_url };
   }
@@ -1327,7 +1348,7 @@ async function finalizeSummary({
     owner,
     repo,
     issue_number: prNumber,
-    body,
+    body: appendReviewInfo(body, details),
   });
   return { id: created.id, url: created.html_url };
 }
@@ -2432,10 +2453,10 @@ function formatCommentMarkdown(comment, error) {
 //   skipped — comments suppressed by incremental overlap filtering
 //   failed  — comments that had line info but could not be posted (also
 //             rendered in the body below, each tagged with its failure reason)
-function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed, warnings }) {
-  let body = `🔍 **OpenCodeReview** found **${total}** issue(s) in this PR.`;
+function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed, warnings, heading }) {
+  let body = findingCount(total, heading);
   if (total > 0) {
-    body += `\n- ✅ Successfully posted inline: ${inline} comment(s)`;
+    body += `\n- Successfully posted inline: ${inline} comment(s)`;
     if (summary > 0) {
       body += `\n- 📝 In summary (no line info): ${summary} comment(s)`;
     }
@@ -2455,6 +2476,75 @@ function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed,
   return body;
 }
 
+// Keep the findings and idempotency markers when the file table alone would
+// push the comment over GitHub's size limit. Unfinished rows come first.
+function appendReviewInfo(body, details) {
+  const available = 65536 - body.length;
+  if (details.length <= available) return body + details;
+  const suffix = "\n\nAdditional file results omitted to fit this comment.\n\n</details>";
+  const end = details.lastIndexOf("\n", available - suffix.length);
+  return end > details.indexOf("</summary>") + "</summary>".length
+    ? body + details.slice(0, end) + suffix
+    : body;
+}
+
+function findingCount(total, heading) {
+  return heading ? `${heading}\n\n${total} finding${total === 1 ? "" : "s"}.`
+    : `🔍 **OpenCodeReview** found **${total}** issue(s) in this PR.`;
+}
+
+function coverageCell(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/\|/g, "&#124;").replace(/[\r\n]/g, " ");
+}
+
+function formatReviewCoverage(result, rangeNote) {
+  const manifest = result.manifest || {};
+  const state = manifest.terminal_state || result.status;
+  const coverage = manifest.coverage || {};
+  const outcomes = [
+    ["failed", "Not reviewed"], ["waived", "Waived"], ["completed", "Reviewed"],
+    ["reused", "Covered by a previous run (result reused)"],
+  ];
+  const known = Array.isArray(coverage.selected) && outcomes.every(([key]) => Array.isArray(coverage[key]));
+  const incomplete = ["partial", "failed", "completed_with_errors"].includes(state);
+  let heading = "";
+  if (incomplete || (known && state !== "skipped")) {
+    const label = {
+      partial: "Partial review",
+      failed: "Failed review",
+      completed_with_errors: "Review completed with errors",
+      complete: "Complete review",
+      skipped: "Review skipped",
+    }[state] || "Review";
+    const count = known
+      ? `${coverage.completed.length + coverage.reused.length} of ${coverage.selected.length} selected files covered`
+      : "Coverage details unavailable";
+    const waived = coverage.waived?.length ? ` · ${coverage.waived.length} waived` : "";
+    heading = `${incomplete ? "⚠️ " : ""}**OpenCodeReview · ${label}: ${count}${waived}**`;
+  }
+  const input = manifest.input || {};
+  const info = [];
+  if (/^[0-9a-f]{40}$/.test(input.resolved_base) && /^[0-9a-f]{40}$/.test(input.resolved_head)) {
+    info.push(`**Reviewed commits:** \`${input.resolved_base.slice(0, 7)}\` → \`${input.resolved_head.slice(0, 7)}\``);
+    if (rangeNote) info.push("Earlier commits in this PR were reviewed in a previous run.");
+  } else if (rangeNote) {
+    info.push(rangeNote.trim());
+  }
+  const rows = [];
+  for (const [key, label] of outcomes) {
+    if (!Array.isArray(coverage[key])) continue;
+    for (const item of coverage[key]) {
+      if (!item?.path) continue;
+      const reason = [item.classification, item.reason].filter(Boolean).map(coverageCell).join(": ");
+      rows.push(`| <code>${coverageCell(item.path)}</code> | ${label}${reason ? " — " + reason : ""} |`);
+    }
+  }
+  if (rows.length) info.push(["| File | Result |", "| --- | --- |", ...rows].join("\n"));
+  const details = info.length ? `\n\n<details>\n<summary>Review info</summary>\n\n${info.join("\n\n")}\n\n</details>` : "";
+  return { heading, details };
+}
+
 // Pre-review summary body: shown in the anchor comment while inline comments
 // are being posted. Includes only what is known before the review lands (issue
 // count, warnings, comments without line info, routed comments) — final posting
@@ -2463,8 +2553,8 @@ function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed,
 // finalize. Routed findings are known before the review (the policy decision is
 // made in the partition loop) so they are rendered here too, keeping the
 // pre-review anchor accurate.
-function buildPreReviewSummaryBody(totalCount, summaryComments, routedComments, warnings) {
-  let body = `🔍 **OpenCodeReview** found **${totalCount}** issue(s) in this PR.`;
+function buildPreReviewSummaryBody(totalCount, summaryComments, routedComments, warnings, heading) {
+  let body = findingCount(totalCount, heading);
   if (totalCount > 0) {
     body += `\n- ⏳ _Posting review comments…_`;
     if (routedComments && routedComments.length > 0) {

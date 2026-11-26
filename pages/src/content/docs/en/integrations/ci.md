@@ -124,7 +124,7 @@ step:
 | Input | Default | Description |
 |---|---|---|
 | `effort` | `''` | Review effort preset passed to `ocr review --effort`: `low`, `medium`, or `high` (case-insensitive). Empty keeps the CLI default (the configured value, or medium). Requires OCR v1.10.0 or newer; the action fails early with a clear error on older versions. |
-| `max_tokens_budget` | `''` | Total token cap (input + output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a subtask already over the cap gets one final round to submit findings, no further subtasks are dispatched, over-budget and skipped files are reported as `failed(budget)`. A budget-only partial review with usable coverage exits 0. Operational failures (such as timeouts or provider errors) and fully failed reviews (even for budget alone) exit non-zero. The CLI emits available results. On a non-zero exit, the Action can upload the raw output as an artifact but skips posting PR comments. |
+| `max_tokens_budget` | `''` | Total token cap (input + output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a subtask already over the cap gets one final round to submit findings, no further subtasks are dispatched, over-budget and skipped files are reported as `failed(budget)`. A budget-only partial review with usable coverage exits 0. Operational failures (such as timeouts or provider errors) and fully failed reviews (even for budget alone) exit non-zero. The CLI emits available results. The Action attempts to publish the report before returning the same exit code. |
 | `llm_reasoning_effort` | `''` | Reasoning depth for models with a steerable `reasoning_effort` request field (e.g. GLM-5.x, OpenAI reasoning models): `minimal`, `low`, `medium`, `high`, `max` (case-insensitive). Merged into the request body through `llm_extra_body`, so it works with every published CLI version; an explicit `reasoning_effort` key in `llm_extra_body` wins over this input. Empty (default) sends nothing. OpenAI-compatible protocols only — the Anthropic API rejects unknown body fields, so the action fails fast on that protocol; steer Anthropic thinking through an explicit `llm_extra_body` key instead. |
 | `stream_progress` | `'false'` | `'true'` streams live `[ocr]` progress lines to the workflow log (human audience on stderr) instead of staying silent until the run finishes. Display-only: stderr is still captured to a file for artifacts and comment posting. |
 
@@ -336,10 +336,7 @@ produce a report.
 
 > **Note.** The `OCR_DEBUG` env var is **not currently implemented**
 > in OCR — setting `OCR_DEBUG: "1"` has no effect. It's documented
-> here in case it is wired up later. For verbose output today, inspect
-> the raw review JSON and stderr that the workflow writes to
-> `/tmp/ocr-result.json` and `/tmp/ocr-stderr.log` (see troubleshooting
-> below), or run `ocr review` locally.
+> here in case it is wired up later. For the raw report and stderr, download the workflow artifact or run `ocr review` locally.
 
 ## GitLab CI
 

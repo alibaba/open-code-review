@@ -41,6 +41,7 @@ Standard library only (json, urllib) so it runs on any stock python3 image.
 
 import argparse
 import hashlib
+import html
 import json
 import os
 import random
@@ -354,11 +355,64 @@ def format_warnings(warnings):
     return body
 
 
-def build_summary_body(total, inline, summary, skipped, routed, failed, warnings):
+def coverage_cell(value):
+    return html.escape(str(value), quote=False).replace("|", "&#124;").replace("\r", " ").replace("\n", " ")
+
+
+def format_review_coverage(result):
+    manifest = result.get("manifest") or {}
+    state = manifest.get("terminal_state") or result.get("status")
+    coverage = manifest.get("coverage") or {}
+    if not isinstance(coverage, dict):
+        coverage = {}
+    outcomes = (("failed", "Not reviewed"), ("waived", "Waived"), ("completed", "Reviewed"),
+                ("reused", "Covered by a previous run (result reused)"))
+    known = isinstance(coverage.get("selected"), list) and all(
+        isinstance(coverage.get(key), list) for key, _ in outcomes)
+    incomplete = state in ("partial", "failed", "completed_with_errors")
+    heading = ""
+    if incomplete or (known and state != "skipped"):
+        label = {"partial": "Partial review", "failed": "Failed review",
+                 "completed_with_errors": "Review completed with errors",
+                 "complete": "Complete review", "skipped": "Review skipped"}.get(state, "Review")
+        count = "Coverage details unavailable"
+        if known:
+            count = "%d of %d selected files covered" % (
+                len(coverage["completed"]) + len(coverage["reused"]), len(coverage["selected"]))
+        waived = " · %d waived" % len(coverage["waived"]) if known and coverage["waived"] else ""
+        heading = "%s**OpenCodeReview · %s: %s%s**" % ("⚠️ " if incomplete else "", label, count, waived)
+
+    info = []
+    shas = _extract_expected_shas(result)
+    if shas.get("base") and shas.get("head"):
+        info.append("**Reviewed commits:** `%s` → `%s`" % (shas["base"][:7], shas["head"][:7]))
+    rows = []
+    for key, label in outcomes:
+        if not isinstance(coverage.get(key), list):
+            continue
+        for item in coverage[key]:
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            reason = ": ".join(coverage_cell(item[k]) for k in ("classification", "reason") if item.get(k))
+            rows.append("| <code>%s</code> | %s%s |" % (
+                coverage_cell(item["path"]), label, " — " + reason if reason else ""))
+    if rows:
+        info.append("\n".join(["| File | Result |", "| --- | --- |"] + rows))
+    details = "\n\n<details>\n<summary>Review info</summary>\n\n%s\n\n</details>" % "\n\n".join(info) if info else ""
+    return heading, details
+
+
+def finding_count(total, heading):
+    if heading:
+        return "%s\n\n%d finding%s." % (heading, total, "" if total == 1 else "s")
+    return "🔍 **OpenCodeReview** found **%d** issue(s) in this MR." % total
+
+
+def build_summary_body(total, inline, summary, skipped, routed, failed, warnings, heading=""):
     """Merged summary header. Counts are mutually exclusive and sum to total."""
-    body = "🔍 **OpenCodeReview** found **%d** issue(s) in this MR." % total
+    body = finding_count(total, heading)
     if total > 0:
-        body += "\n- ✅ Successfully posted inline: %d comment(s)" % inline
+        body += "\n- Successfully posted inline: %d comment(s)" % inline
         if summary > 0:
             body += "\n- 📝 In summary (no line info): %d comment(s)" % summary
         if routed > 0:
@@ -372,9 +426,9 @@ def build_summary_body(total, inline, summary, skipped, routed, failed, warnings
     return body
 
 
-def build_pre_review_summary_body(total, no_line, routed, warnings):
+def build_pre_review_summary_body(total, no_line, routed, warnings, heading=""):
     """Summary body shown in the sticky anchor while inline comments post."""
-    body = "🔍 **OpenCodeReview** found **%d** issue(s) in this MR." % total
+    body = finding_count(total, heading)
     if total > 0:
         body += "\n- ⏳ _Posting review comments…_"
         if routed:
@@ -879,12 +933,10 @@ def _extract_expected_shas(result):
     """
     manifest_input = (result.get("manifest") or {}).get("input") or {}
     shas = {}
-    head = (manifest_input.get("resolved_head") or "").strip()
-    base = (manifest_input.get("resolved_base") or "").strip()
-    if head:
-        shas["head"] = head
-    if base:
-        shas["base"] = base
+    for key in ("head", "base"):
+        value = manifest_input.get("resolved_" + key)
+        if isinstance(value, str) and value.strip():
+            shas[key] = value.strip()
     return shas
 
 
@@ -1268,20 +1320,14 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     stats = {"total": len(comments), "inline": 0, "summary": 0,
              "routed": 0, "skipped": 0, "failed": 0, "summary_url": None}
 
-    # No comments: LGTM summary (sticky-aware). A failed or partial review has
-    # zero comments too, but it must not post the success glyph: that is the
-    # one durable record a reviewer reads, and an all-clear on a review that
-    # skipped selected items is worse than no note.
+    heading, details = format_review_coverage(result)
     if not comments:
-        status = result.get("status")
-        if status in ("failed", "partial"):
-            message = result.get("message") or "review did not complete (status=%s)" % status
-            body = wrap_summary_body("⚠️ **OpenCodeReview**: %s" % message,
-                                     config.get("run_tag", "0-0"))
+        if heading:
+            summary = finding_count(0, heading) + format_warnings(warnings)
         else:
             message = result.get("message", "No comments generated. Looks good to me.")
-            body = wrap_summary_body("✅ **OpenCodeReview**: %s" % message,
-                                     config.get("run_tag", "0-0"))
+            summary = "✅ **OpenCodeReview**: %s" % message
+        body = wrap_summary_body(summary + details, config.get("run_tag", "0-0"))
         stats["summary_url"] = upsert_summary(poster, body, sticky,
                                              tag=summary_tag_for(config.get("run_tag", "0-0")))
         return stats
@@ -1339,7 +1385,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     run_tag = config.get("run_tag", "0-0")
     anchor_id = None
     anchor_body = wrap_summary_body(
-        build_pre_review_summary_body(stats["total"], no_line, routed, warnings),
+        build_pre_review_summary_body(stats["total"], no_line, routed, warnings, heading) + details,
         run_tag,
     )
     anchor_id = ensure_summary_anchor(poster, anchor_body, sticky,
@@ -1411,7 +1457,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     # Finalize the summary with the complete body.
     summary_body = build_summary_body(
         stats["total"], stats["inline"], stats["summary"],
-        stats["skipped"], stats["routed"], stats["failed"], warnings,
+        stats["skipped"], stats["routed"], stats["failed"], warnings, heading,
     )
     summary_body += format_summary_comments(no_line)
     summary_body += format_summary_comments(routed)
@@ -1420,7 +1466,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         summary_body += "\n\n---\n\nℹ️ All inline comments overlapped with existing reviews; nothing new was posted."
     summary_body += format_warnings(warnings)
     run_tag = config.get("run_tag", "0-0")
-    full_body = wrap_summary_body(summary_body, run_tag)
+    full_body = wrap_summary_body(summary_body + details, run_tag)
     stats["summary_url"] = finalize_summary(poster, full_body, sticky, anchor_id,
                                            tag=summary_tag_for(run_tag))
     if not stats["summary_url"]:

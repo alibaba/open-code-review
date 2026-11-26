@@ -728,9 +728,9 @@ async function testZeroFindingSummaryRendersWarnings() {
     const body = postedBody(github);
     assert.strictEqual(
       body,
-      `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${completedMessage}${warningBlock}${rangeNote}`
+      `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${completedMessage}${warningBlock}\n\n<details>\n<summary>Review info</summary>\n\n${rangeNote.trim()}\n\n</details>`
     );
-    assert.ok(body.indexOf(warningBlock) < body.indexOf(rangeNote), "warnings appear before the range note");
+    assert.ok(body.indexOf(warningBlock) < body.indexOf(rangeNote.trim()), "warnings appear before the range note");
   }
 
   // No warnings: byte-identical to the historical clean summary.
@@ -818,9 +818,59 @@ async function testZeroFindingWarningsDoNotBlockCheckpoint() {
       assert.strictEqual(body.startsWith(`${summary}\n\n`), true, "the advanced summary still renders the warnings");
     } else {
       assert.strictEqual(outputs.checkpoint_after, "", `${terminal} stays ineligible`);
-      assert.strictEqual(body, `${summary}\n\n${CARRY}`, `${terminal} keeps the previous checkpoint and the warnings`);
+      assert.ok(body.endsWith(`${formatWarnings(warnings)}\n\n${CARRY}`));
+      assert.ok(!body.includes(message));
     }
   }
+}
+
+async function testReviewCoverage() {
+  const coverage = {
+    selected: ["a", "b", "c", "d"].map(path => ({ path })),
+    completed: [{ path: "a" }], reused: [{ path: "b" }],
+    failed: [{ path: "c", classification: "budget", reason: "token limit" }],
+    waived: [{ path: "d", reason: "empty diff" }], excluded: [{ path: "excluded.go" }],
+  };
+  const findings = [{ path: "a", content: "inline finding", end_line: 1 }, { path: "a", content: "summary finding" }];
+  for (const state of ["partial", "failed"]) {
+    for (const comments of [[], findings]) {
+      const manifest = ckManifest({ terminal_state: state, coverage, input: { resolved_head: CK_NEW, resolved_base: CK_OLD } });
+      const { github, outputs } = await run({ result: { status: "success", warnings: [], manifest, comments },
+        opts: ckRunOptions({ reviewExitCode: state === "failed" ? 17 : 0, resolveOutdated: "true" }) });
+      assert.strictEqual(outputs.checkpoint_after, "");
+      for (const { body } of [...github.issueComments, ...github.updatedComments]) {
+        const title = state === "partial" ? "Partial review" : "Failed review";
+        assert.match(body.replace(/<!--.*?-->\s*/g, ""), new RegExp("^⚠️ \\*\\*OpenCodeReview · " + title));
+        assert.ok(body.includes("2 of 4 selected files covered"));
+        assert.ok(body.includes(`<code>c</code> | Not reviewed — budget: token limit`));
+        assert.ok(body.includes("Waived — empty diff"));
+        assert.ok(body.includes("Covered by a previous run (result reused)"));
+        assert.ok(body.indexOf("<code>c") < body.indexOf("<code>a"));
+        assert.ok(body.includes(`**Reviewed commits:** \`${CK_OLD.slice(0, 7)}\` → \`${CK_NEW.slice(0, 7)}\``));
+        assert.doesNotMatch(body, /✅|Looks good to me|excluded.go/);
+        if (comments.length) assert.ok(body.includes("summary finding"));
+      }
+      assert.strictEqual(Number(outputs.comments_inline), comments.length ? 1 : 0);
+      if (state === "failed") assert.deepStrictEqual(github.graphqlCalls, []);
+    }
+  }
+  const completed = Array.from({ length: 2000 }, (_, i) => ({ path: `reviewed/file-${i}.go` }));
+  const manifest = ckManifest({ coverage: { selected: completed, completed, reused: [], failed: [], waived: [] } });
+  const { github: complete } = await run({ result: { comments: [], manifest }, opts: ckRunOptions({}) });
+  const body = lastSummaryBody(complete);
+  assert.match(body, /Complete review: 2000 of 2000 selected files covered/);
+  assert.match(body, /Additional file results omitted/);
+  assert.ok(body.length <= 65536);
+  assert.strictEqual(parseCheckpointMarker(body).head, CK_RESOLVED);
+  for (const status of ["partial", "failed", "completed_with_errors"]) {
+    const coverage = { failed: [null, { path: "unfinished" }], waived: 1 };
+    const { github } = await run({ result: { status, warnings: [], comments: [], manifest: { coverage } } });
+    assert.match(lastSummaryBody(github), /<code>unfinished<\/code> \| Not reviewed/);
+    assert.match(lastSummaryBody(github), /Coverage details unavailable/);
+    assert.doesNotMatch(lastSummaryBody(github), /✅|Looks good to me|0 of 0/);
+  }
+  const { github } = await run({ result: "invalid", stderr: "diagnostic", opts: { reviewExitCode: 17 } });
+  assert.strictEqual(github.issueComments.length, 0);
 }
 
 async function testIncrementalSkipsOverlapping() {
@@ -2798,6 +2848,7 @@ async function main() {
   await testZeroFindingSummaryRendersWarnings();
   await testZeroFindingWarningsPreserveSummaryOwnership();
   await testZeroFindingWarningsDoNotBlockCheckpoint();
+  await testReviewCoverage();
   await testIncrementalSkipsOverlapping();
   await testIncrementalPrefersHighestSeverityOverlap();
   await testIncrementalSkipsSameRunIoUOverlapping();

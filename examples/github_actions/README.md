@@ -221,7 +221,7 @@ The task and request timeouts are independent:
 | Input | Default | Description |
 |-------|---------|-------------|
 | `effort` | `''` | Review effort preset passed to `ocr review --effort`: `low`, `medium`, or `high` (case-insensitive). Higher effort runs more review rounds. Empty keeps the CLI default (the configured value, or medium). |
-| `max_tokens_budget` | `''` | Total token cap (input+output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a group already over the cap gets one final round to submit findings, no further groups are dispatched, over-budget and skipped files are reported as failed(budget), partial results are still published, and the review exits 0. |
+| `max_tokens_budget` | `''` | Total token cap (input+output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Checked before every LLM round: a group already over the cap gets one final round to submit findings, no further groups are dispatched, over-budget and skipped files are reported as failed(budget), a budget-only partial review exits 0, and a fully failed review exits non-zero. The action publishes available results before propagating the review exit code. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -616,7 +616,7 @@ OCR supports both OpenAI and Anthropic API formats:
 
 ### Common Issues
 
-1. **Job fails / "Failed to parse OCR output"**: When `ocr review` exits non-zero the action fails the job with that exit code (the comment-posting step is skipped); a zero exit with malformed JSON surfaces as a parse error in the summary. In both cases, check that `OCR_LLM_URL` and `OCR_LLM_AUTH_TOKEN` are set correctly, then inspect the uploaded `ocr-stderr.log` artifact (also printed in the "Run OpenCodeReview" step log) for the underlying error.
+1. **Job fails / "Failed to parse OCR output"**: When `ocr review` exits non-zero the action attempts to publish any usable report from that invocation before failing the job with the same exit code; a zero exit with malformed JSON surfaces as a parse error in the summary. In both cases, check that `OCR_LLM_URL` and `OCR_LLM_AUTH_TOKEN` are set correctly, then inspect the uploaded `ocr-stderr.log` artifact (also printed in the "Run OpenCodeReview" step log) for the underlying error.
 2. **"Cannot find merge-base"**: The action fetches full history (`fetch-depth: 0`) and the PR head (`git fetch origin pull/<n>/head`); if this still fails, ensure `permissions: contents: read` is set and the base branch is accessible (e.g., not deleted).
 3. **Review comments not on the expected lines**: Comments are attached to the PR head commit. If a comment's line falls outside the current diff (the PR was force-pushed or updated mid-review), GitHub rejects the inline post and the comment is rendered in the summary instead. The workflow's concurrency group cancels stale runs on new pushes.
 4. **No summary or comments at all**: Confirm the job's `permissions` include `pull-requests: write`, and that `github_token` (defaults to `${{ github.token }}`) is not overridden with a token lacking those scopes.
