@@ -583,19 +583,27 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	warnLimit := PromptTokenLimit(maxAllowed)
 
 	r.tryApplyPendingCompression(st, messages)
+	blocked := st.compressionBlocked(*messages)
 	compress := func() error {
 		r.cancelPendingCompression(st)
+		snapshotID := compressionSnapshotID(*messages)
 		var err error
 		*messages, err = r.runCompression(ctx, *messages, taskKey)
-		if err != nil && !errors.Is(err, llm.ErrTokenBudget) {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", r.progressError(err))
+		if err != nil {
+			st.recordCompressionFailure(snapshotID, err)
+			if !errors.Is(err, llm.ErrTokenBudget) {
+				fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", r.progressError(err))
+			}
+			return err
 		}
-		return err
+		st.recordCompressionSuccess()
+		return nil
 	}
 
 	// A conversation can already be over the warning threshold before this
-	// round's messages are appended (e.g. an oversized initial prompt).
-	budgetDenied := CountMessagesTokens(*messages) > warnLimit && errors.Is(compress(), llm.ErrTokenBudget)
+	// round's messages are appended (e.g. an oversized initial prompt). Skip
+	// the request entirely when this snapshot is already blocked.
+	budgetDenied := !blocked && CountMessagesTokens(*messages) > warnLimit && errors.Is(compress(), llm.ErrTokenBudget)
 
 	if len(toolCalls) > 0 {
 		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls, native, reasoningContent))
@@ -606,12 +614,21 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	for _, rs := range results {
 		*messages = append(*messages, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
 	}
+	// Preserve this turn's assistant and tool messages even when compression
+	// is blocked; the stop applies to further compression attempts, not to
+	// the conversation content.
 	if budgetDenied {
 		return StopTokenBudget
+	}
+	if blocked {
+		return StopCompression
 	}
 
 	finalCount := CountMessagesTokens(*messages)
 	if finalCount >= warnLimit {
+		if st.compressionBlocked(*messages) {
+			return StopCompression
+		}
 		if errors.Is(compress(), llm.ErrTokenBudget) {
 			return StopTokenBudget
 		}
