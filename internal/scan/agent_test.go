@@ -6,6 +6,7 @@ package scan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -396,6 +397,94 @@ func TestTokenCountersDelegateToRunner(t *testing.T) {
 		t.Fatal("scan.Agent token getters must mirror runner")
 	}
 	_ = llmloop.AgentWarning{} // keep llmloop import meaningful
+}
+
+type cancelOnFileScanClient struct {
+	fakeScanClient
+	file   string
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnFileScanClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	for _, message := range req.Messages {
+		content, _ := message.Content.(string)
+		if message.Role == "user" && strings.HasPrefix(content, "path="+c.file+"\n") {
+			c.cancel()
+			return nil, ctx.Err()
+		}
+	}
+	return c.fakeScanClient.CompletionsWithCtx(ctx, req)
+}
+
+func TestRun_LastBatchCancellation(t *testing.T) {
+	testHome := t.TempDir()
+	t.Setenv("HOME", testHome)
+	t.Setenv("USERPROFILE", testHome)
+	repo := initTestRepo(t)
+	completed := model.ScanItem{Path: "a.go", Content: "package a\n"}
+	canceled := model.ScanItem{Path: "b.go", Content: "package b\n"}
+	writeFile(t, repo, completed.Path, []byte(completed.Content))
+	writeFile(t, repo, canceled.Path, []byte(canceled.Content))
+	gitCommit(t, repo, "init")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const finding = "finding in completed file"
+	client := &cancelOnFileScanClient{
+		fakeScanClient: fakeScanClient{responses: []*llm.ChatResponse{
+			scanCodeCommentResponse(finding),
+			scanTaskDoneResponse(),
+		}},
+		file:   canceled.Path,
+		cancel: cancel,
+	}
+	tpl := makeTemplateWithFullScan()
+	tpl.BatchStrategy = string(BatchByLanguage)
+	tpl.BatchSize = 2
+	collector := tool.NewCommentCollector()
+	registry := tool.NewRegistry()
+	registry.Register(&tool.CodeCommentProvider{Collector: collector})
+	registry.Freeze()
+	a := NewAgent(Args{
+		RepoDir:          repo,
+		Template:         tpl,
+		LLMClient:        client,
+		Model:            "test-model",
+		CommentCollector: collector,
+		Tools:            registry,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
+		SkipPlan:       true,
+		SkipDedup:      true,
+		SkipSummary:    true,
+		MaxConcurrency: 1,
+	})
+
+	comments, err := a.Run(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Run error = %v, want context.Canceled", err)
+	}
+	if len(comments) != 1 || comments[0].Path != completed.Path || comments[0].Content != finding {
+		t.Errorf("Run comments = %+v, want %q on %s", comments, finding, completed.Path)
+	}
+	warnings := a.Warnings()
+	if len(warnings) != 1 || warnings[0].Type != "scan_subtask_error" || warnings[0].File != canceled.Path {
+		t.Errorf("Warnings = %+v, want one scan_subtask_error on %s", warnings, canceled.Path)
+	}
+
+	state, err := session.LoadResumeState(repo, a.SessionID())
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	checkpoint, ok := state.Item(scanItemFingerprint(completed))
+	if !ok || len(checkpoint.Comments) != 1 || checkpoint.Comments[0].Content != finding {
+		t.Errorf("checkpoint for %s = %+v, want %q", completed.Path, checkpoint, finding)
+	}
+	if _, ok := state.Item(scanItemFingerprint(canceled)); ok {
+		t.Errorf("canceled file %s has a reusable checkpoint", canceled.Path)
+	}
 }
 
 type blockingScanCompressionClient struct {

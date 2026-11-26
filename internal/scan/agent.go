@@ -773,7 +773,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 	}
 
 	wg.Wait()
-	return dispatched, budgetHit, checkpoints, nil
+	return dispatched, budgetHit, checkpoints, ctx.Err()
 }
 
 // executeSubtask runs the scan pipeline for one file:
