@@ -121,7 +121,7 @@ func newMemoryCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		facts, err := s.List(cmd.Context(), review, "")
+		facts, err := s.ListAt(cmd.Context(), review, "", tree.Now)
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func newMemoryCommand() *cobra.Command {
 		}
 		if search != "" {
 			// Compute conflicts before narrowing output to the matching text.
-			matches, err := s.List(cmd.Context(), review, search)
+			matches, err := s.ListAt(cmd.Context(), review, search, tree.Now)
 			if err != nil {
 				return err
 			}
@@ -139,7 +139,12 @@ func newMemoryCommand() *cobra.Command {
 			for _, f := range matches {
 				ids[f.ID] = true
 			}
-			checked = slices.DeleteFunc(checked, func(c knowledge.Checked) bool { return !ids[c.ID] })
+			checked = slices.DeleteFunc(checked, func(c knowledge.Checked) bool {
+				if c.Category == knowledge.CategoryDiscussionSource {
+					return !c.MatchesDiscussionSearch(search)
+				}
+				return !ids[c.ID]
+			})
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(checked)
 	}}
@@ -167,7 +172,7 @@ func reviewMemory(ctx context.Context, cc *commonContext, opts reviewOptions, co
 		return nil, err
 	}
 	defer s.Close()
-	facts, err := s.List(ctx, opts.reviewID, "")
+	facts, err := s.ListAt(ctx, opts.reviewID, "", opts.memoryTime)
 	if err != nil {
 		return nil, err
 	}

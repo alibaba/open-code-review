@@ -27,6 +27,7 @@ const (
 	CategoryInvariant        = "invariant"
 	CategoryDesign           = "design"
 	CategoryDecision         = "decision"
+	CategoryDiscussionSource = "discussion-source"
 
 	AuthorityStructured = "structured"
 	AuthorityConfirmed  = "confirmed"
@@ -35,37 +36,43 @@ const (
 )
 
 type Fact struct {
-	ID          string           `json:"id"`
-	Scope       string           `json:"scope"`
-	Source      string           `json:"source"`
-	Revision    string           `json:"revision"`
-	Property    string           `json:"property,omitempty"`
-	Keyword     string           `json:"keyword,omitempty"`
-	Value       json.RawMessage  `json:"value,omitempty"`
-	SourceHash  string           `json:"source_sha256,omitempty"`
-	ReviewID    string           `json:"review_id,omitempty"`
-	Finding     string           `json:"finding,omitempty"`
-	Reason      string           `json:"reason,omitempty"`
-	CodeHash    string           `json:"code_sha256,omitempty"`
-	Category    string           `json:"category,omitempty"`
-	Authority   string           `json:"authority,omitempty"`
-	Origin      string           `json:"origin,omitempty"`
-	Claim       string           `json:"claim,omitempty"`
-	Subject     string           `json:"subject,omitempty"`
-	Predicate   string           `json:"predicate,omitempty"`
-	Identifiers []string         `json:"identifiers,omitempty"`
-	Citations   []Citation       `json:"citations,omitempty"`
-	Conditions  []Condition      `json:"conditions,omitempty"`
-	ExpiresAt   string           `json:"expires_at,omitempty"`
-	ObservedAt  string           `json:"observed_at,omitempty"`
-	Supersedes  []string         `json:"supersedes,omitempty"`
-	Feedback    []FeedbackRecord `json:"feedback,omitempty"`
+	ID                 string              `json:"id"`
+	Scope              string              `json:"scope"`
+	Source             string              `json:"source"`
+	Revision           string              `json:"revision"`
+	Property           string              `json:"property,omitempty"`
+	Keyword            string              `json:"keyword,omitempty"`
+	Value              json.RawMessage     `json:"value,omitempty"`
+	SourceHash         string              `json:"source_sha256,omitempty"`
+	ReviewID           string              `json:"review_id,omitempty"`
+	Finding            string              `json:"finding,omitempty"`
+	Reason             string              `json:"reason,omitempty"`
+	CodeHash           string              `json:"code_sha256,omitempty"`
+	Category           string              `json:"category,omitempty"`
+	Authority          string              `json:"authority,omitempty"`
+	Origin             string              `json:"origin,omitempty"`
+	Claim              string              `json:"claim,omitempty"`
+	Subject            string              `json:"subject,omitempty"`
+	Predicate          string              `json:"predicate,omitempty"`
+	Identifiers        []string            `json:"identifiers,omitempty"`
+	Citations          []Citation          `json:"citations,omitempty"`
+	DiscussionBody     string              `json:"discussion_body,omitempty"`
+	DiscussionBindings *discussionBindings `json:"discussion_bindings,omitempty"`
+	ScopeWitnesses     []Citation          `json:"scope_witnesses,omitempty"`
+	Conditions         []Condition         `json:"conditions,omitempty"`
+	ExpiresAt          string              `json:"expires_at,omitempty"`
+	ObservedAt         string              `json:"observed_at,omitempty"`
+	Supersedes         []string            `json:"supersedes,omitempty"`
+	Feedback           []FeedbackRecord    `json:"feedback,omitempty"`
 
 	contextStatus    string
 	contextConflicts []string
 	baseClaim        string
 	baseCommit       string
 	baseConditions   []string
+	// A discussion notice changes eligibility without contributing evidence.
+	discussionNotice   discussionNoticeKind
+	editionScopeDigest string
 }
 
 type Citation struct {
@@ -73,6 +80,7 @@ type Citation struct {
 	Path          string `json:"path,omitempty"`
 	Revision      string `json:"revision,omitempty"`
 	Reference     string `json:"reference,omitempty"`
+	Symbol        string `json:"symbol,omitempty"`
 	URL           string `json:"url,omitempty"`
 	ObservedAt    string `json:"observed_at,omitempty"`
 	StartLine     int    `json:"start_line,omitempty"`

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
+
+var errIneligibleFile = errors.New("ineligible evidence file")
 
 type Tree struct {
 	Repo      string
@@ -85,11 +88,11 @@ func (t Tree) read(ctx context.Context, p string) ([]byte, error) {
 	header, _, _ := bytes.Cut(entry, []byte("\t"))
 	fields := strings.Fields(string(header))
 	if len(fields) != 4 || (fields[0] != "100644" && fields[0] != "100755") || fields[1] != "blob" || !validOID(fields[2]) {
-		return nil, fmt.Errorf("regular file %q not found at %s", p, t.Commit)
+		return nil, fmt.Errorf("%w: regular file %q not found at %s", errIneligibleFile, p, t.Commit)
 	}
 	n, err := strconv.ParseInt(fields[3], 10, 64)
 	if err != nil || n < 0 || n > maxEvidenceBytes {
-		return nil, fmt.Errorf("evidence exceeds 1 MiB")
+		return nil, fmt.Errorf("%w: evidence exceeds 1 MiB", errIneligibleFile)
 	}
 	return t.Git.Output(ctx, t.Repo, "cat-file", "blob", fields[2])
 }

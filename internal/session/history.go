@@ -29,6 +29,8 @@ const (
 	ReviewFilterTask       TaskType = "review_filter_task"
 	BusinessReviewTask     TaskType = "business_review_task"
 	BusinessRefutationTask TaskType = "business_refutation_task"
+	BusinessOverlapTask    TaskType = "business_overlap_task"
+	BusinessEffectTask     TaskType = "business_effect_task"
 	GroupingTask           TaskType = "grouping_task"
 )
 

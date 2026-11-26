@@ -65,6 +65,7 @@ func pythonStatementStart(stmt parser2.Stmt, lines []string) int {
 }
 
 func pythonDeclarationEnd(lines []string, start, end int) int {
+	end = min(end, len(lines))
 	header := lines[start-1]
 	indent := header[:len(header)-len(strings.TrimLeft(header, " \t"))]
 	var possible []int

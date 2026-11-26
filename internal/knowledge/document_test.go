@@ -10,6 +10,26 @@ import (
 	"time"
 )
 
+func TestArchivedCommitDateRetriesAfterGitFailure(t *testing.T) {
+	repo := newLifecycleRepo(t)
+	repo.write("terms.py", "def retain(term): return term\n")
+	base := repo.commit("retain the accepted terms")
+	archives := reviewArchives{base: newRechecker(t.Context(), base), commitDates: map[string]string{}}
+	if !archives.base.ancestor(base.Commit) {
+		t.Fatal("failed to establish source commit")
+	}
+	citation := Citation{Kind: "history", Reference: base.Commit, Revision: base.Commit, StartLine: 1, EndLine: 1,
+		Quote: "retain the accepted terms", Digest: Digest([]byte("retain the accepted terms"))}
+	archives.base.tree.Repo = t.TempDir()
+	if _, ok := archives.citation(citation); ok || len(archives.commitDates) != 0 {
+		t.Fatal("failed Git date lookup cached an unavailable archive")
+	}
+	archives.base.tree.Repo = base.Repo
+	if got, ok := archives.citation(citation); !ok || got.ObservedAt == "" || got.ObservedAt != archives.commitDates[base.Commit] {
+		t.Fatalf("successful retry failed to restore the dated source: %+v, %t", got, ok)
+	}
+}
+
 func TestCheckBusinessDocument(t *testing.T) {
 	const target = "orders/draft.json"
 	rule := Fact{ID: "limit", Scope: target, Source: "contract.json", Property: "limit", Keyword: "enum", Value: json.RawMessage(`[9007199254740993,1.00,"USD",true,null]`)}

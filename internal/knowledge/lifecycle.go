@@ -17,17 +17,18 @@ import (
 )
 
 const (
-	StatusVerified   = "verified"
-	StatusCurrent    = "current"
-	StatusCandidate  = "candidate"
-	StatusHistorical = "historical"
-	StatusChanged    = "changed"
-	StatusTransition = "changed_in_review"
-	StatusUnverified = "unverified"
-	StatusExpired    = "expired"
-	StatusSuperseded = "superseded"
-	StatusConflict   = "conflict"
-	StatusRejected   = "rejected"
+	StatusVerified         = "verified"
+	StatusCurrent          = "current"
+	StatusCandidate        = "candidate"
+	StatusHistorical       = "historical"
+	StatusChanged          = "changed"
+	StatusTransition       = "changed_in_review"
+	StatusUnverified       = "unverified"
+	StatusExpired          = "expired"
+	StatusSuperseded       = "superseded"
+	StatusConflict         = "conflict"
+	StatusRejected         = "rejected"
+	StatusDiscussionSource = "discussion_source"
 )
 
 func validDigest(s string) bool {
@@ -155,14 +156,16 @@ type schemaAssertions struct {
 }
 
 type rechecker struct {
-	ctx       context.Context
-	tree      Tree
-	now       time.Time
-	files     map[string]checkedFile
-	schemas   map[string]schemaAssertions
-	reachable map[string]bool
-	moves     map[[2]string][]string
-	python    map[[2]string]*pythonWitnesses
+	ctx                   context.Context
+	tree                  Tree
+	now                   time.Time
+	files                 map[string]checkedFile
+	schemas               map[string]schemaAssertions
+	reachable             map[string]bool
+	origins               map[string]*rechecker
+	moves                 map[[2]string][]string
+	python                map[[2]string]*pythonWitnesses
+	discussionDefinitions map[string]discussionDefinitionFile
 }
 
 func newRechecker(ctx context.Context, t Tree) *rechecker {
@@ -222,11 +225,15 @@ func (t Tree) CheckReview(ctx context.Context, base string, facts []Fact) ([]Che
 
 func (t Tree) Check(ctx context.Context, facts []Fact) ([]Checked, error) {
 	r := newRechecker(ctx, t)
+	editions := r.discussionEditions(facts)
 	positions := make(map[string]int)
 	result := make([]Checked, 0, len(facts))
 	for _, f := range facts {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if f.discussionNotice != 0 {
+			continue // An edit timestamp retires old evidence and has no claim to display.
 		}
 		if !validOID(f.Revision) || !validPath(f.Source) || !validScope(f.Scope) ||
 			f.IsDecision() && !validPath(f.Scope) || f.schema() && !validSource(f.Source) {
@@ -239,9 +246,16 @@ func (t Tree) Check(ctx context.Context, facts []Fact) ([]Checked, error) {
 			}
 			f.ID = id
 		}
-		checked := r.observation(f)
+		checked := r.observation(editions.withCitedExpiry(f))
+		if f.Category == CategoryDiscussionSource && !editions.admits(f) {
+			continue
+		}
+		if f.Category != CategoryDiscussionSource && editions.obsolete(f) {
+			checked.Status, checked.Detail = StatusSuperseded, "cited discussion was edited or withdrawn"
+		}
 		if pos, exists := positions[f.ID]; exists {
-			if observationRank(checked.Status) > observationRank(result[pos].Status) {
+			if observationRank(checked.Status) > observationRank(result[pos].Status) ||
+				preferDiscussionWitnesses(checked, result[pos]) {
 				result[pos] = checked
 			}
 			continue
@@ -250,6 +264,7 @@ func (t Tree) Check(ctx context.Context, facts []Fact) ([]Checked, error) {
 		result = append(result, checked)
 	}
 	markSuperseded(result, positions)
+	suppressInactiveDiscussions(result)
 	markConflicts(result)
 	linkRejectedObservations(result)
 	return result, ctx.Err()
@@ -297,7 +312,7 @@ func observationRank(status string) int {
 	switch status {
 	case StatusRejected, StatusSuperseded, StatusExpired:
 		return 4
-	case StatusVerified, StatusCurrent, StatusCandidate, StatusHistorical:
+	case StatusVerified, StatusCurrent, StatusCandidate, StatusHistorical, StatusDiscussionSource:
 		return 3
 	case StatusChanged:
 		return 2
@@ -366,6 +381,9 @@ func (r *rechecker) observation(f Fact) Checked {
 	}
 	if f.schema() {
 		return r.checkSchema(checked)
+	}
+	if f.Category == CategoryDiscussionSource {
+		return r.checkDiscussionSource(checked)
 	}
 	if f.IsDecision() {
 		return r.checkDecision(checked)

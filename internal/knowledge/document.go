@@ -96,8 +96,10 @@ func (a *reviewArchives) citation(c Citation) (Citation, bool) {
 			raw, err := a.base.tree.Git.Output(a.base.ctx, a.base.tree.Repo, "show", "-s", "--no-notes", "--no-show-signature", "--format=%cI", c.Revision)
 			if err == nil {
 				date = strings.TrimSpace(string(raw))
+				if date != "" {
+					a.commitDates[c.Revision] = date
+				}
 			}
-			a.commitDates[c.Revision] = date
 		}
 		if date == "" || !a.base.observedBy(date) {
 			return Citation{}, false

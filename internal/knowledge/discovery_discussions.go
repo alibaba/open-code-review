@@ -32,6 +32,7 @@ type Discussion struct {
 	Body       string `json:"body"`
 	CreatedAt  string `json:"created_at,omitempty"`
 	UpdatedAt  string `json:"updated_at,omitempty"`
+	ExpiresAt  string `json:"expires_at,omitempty"`
 	exportPath string
 }
 
@@ -41,19 +42,25 @@ func validateDiscussions(items []Discussion) error {
 	if len(items) > maxDiscussionItems {
 		return fmt.Errorf("discussion import exceeds %d comments", maxDiscussionItems)
 	}
-	seen := map[string]bool{}
+	undated := map[string]Discussion{}
 	for i, d := range items {
-		if strings.TrimSpace(d.ID) == "" || len(d.ID) > 256 || strings.ContainsFunc(d.ID, unicode.IsControl) || seen[d.ID] {
-			return fmt.Errorf("discussion %d needs a unique stable comment ID", i+1)
+		if strings.TrimSpace(d.ID) == "" || len(d.ID) > 256 || strings.ContainsFunc(d.ID, unicode.IsControl) {
+			return fmt.Errorf("discussion %d needs a stable comment ID", i+1)
 		}
-		seen[d.ID] = true
 		if strings.TrimSpace(d.Body) == "" || len(d.Body) > 64<<10 || !utf8.ValidString(d.Body) || strings.IndexByte(d.Body, 0) >= 0 {
 			return fmt.Errorf("discussion %d needs a text body of up to 64 KiB", i+1)
+		}
+		if d.UpdatedAt == "" {
+			d.exportPath = ""
+			if prior, exists := undated[d.ID]; exists && prior != d {
+				return fmt.Errorf("discussion %d has contradictory editions without edit timestamps", i+1)
+			}
+			undated[d.ID] = d
 		}
 		if d.Revision != "" && !validOID(d.Revision) {
 			return fmt.Errorf("discussion %d has an invalid commit ID", i+1)
 		}
-		for _, stamp := range []string{d.CreatedAt, d.UpdatedAt} {
+		for _, stamp := range []string{d.CreatedAt, d.UpdatedAt, d.ExpiresAt} {
 			if stamp != "" {
 				if _, err := time.Parse(time.RFC3339, stamp); err != nil {
 					return fmt.Errorf("discussion %d has an invalid RFC3339 timestamp", i+1)
@@ -112,7 +119,7 @@ func LoadDiscussions(ctx context.Context, repoDir, source string) ([]Discussion,
 	}
 	var comments []Discussion
 	if err := decodeDiscoveryJSON(raw, &comments); err != nil || comments == nil {
-		return nil, errors.New("expected a JSON array of discussions with id, body and optional url, path, revision, created_at, updated_at")
+		return nil, errors.New("expected a JSON array of discussions with id, body and optional url, path, revision, created_at, updated_at, expires_at")
 	}
 	// A tracked export is review history, even when its filename ends in .json.
 	root, err := filepath.EvalSymlinks(repoDir)

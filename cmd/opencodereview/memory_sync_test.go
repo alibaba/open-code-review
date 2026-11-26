@@ -5,6 +5,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -15,8 +17,323 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/knowledge"
+	"github.com/alibaba/open-code-review/internal/llm"
 )
+
+func TestMemorySearchUsesTheDiscussionEditionAtTheReviewTime(t *testing.T) {
+	repo := initResumeRepo(t)
+	const source = "delivery.go"
+	commitFile(t, repo, source, "package delivery\nfunc dispatch() {}\n", "dispatch deliveries")
+	tree := knowledge.Tree{Repo: repo, Commit: revParse(t, repo, "HEAD"), Git: gitcmd.New(1)}
+	const early = "2025-01-01T00:00:00Z"
+	const late = "2025-04-01T00:00:00Z"
+	notes := []knowledge.Discussion{
+		{ID: "timing", Path: source, UpdatedAt: early, Body: "Keep the shipment pending."},
+		{ID: "timing", Path: source, UpdatedAt: late, Body: "Release the shipment immediately."},
+	}
+	result, err := tree.Discover(t.Context(), knowledge.DiscoverOptions{Discussions: notes}, func(context.Context, string, string) (string, error) {
+		return `{"records":[]}`, nil
+	})
+	if err != nil || len(result.DiscussionSources) != 2 {
+		t.Fatalf("importing two editions: %+v, %v", result.DiscussionSources, err)
+	}
+	db := filepath.Join(t.TempDir(), "editions.db")
+	store, err := openMemory(t.Context(), db, repo, tree.Git, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(t.Context(), result.DiscussionSources); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ at, search, body string }{
+		{early, "PENDING", notes[0].Body}, {early, "immediately", ""},
+		{late, "pending", ""}, {late, "immediately", notes[1].Body}, {late, source, notes[1].Body},
+	} {
+		c := newMemoryCommand()
+		var out bytes.Buffer
+		c.SetOut(&out)
+		c.SetArgs([]string{"--repo", repo, "--memory-db", db, "list", "--as-of", tc.at, "--search", tc.search})
+		if err := c.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		var records []knowledge.Checked
+		if err := json.Unmarshal(out.Bytes(), &records); err != nil {
+			t.Fatal(err)
+		}
+		if tc.body == "" && len(records) != 0 || tc.body != "" && (len(records) != 1 || records[0].DiscussionBody != tc.body) {
+			t.Errorf("search for %q at %s returned %+v", tc.search, tc.at, records)
+		}
+	}
+}
+
+func TestMemorySyncRefreshesOlderDiscussionReceipts(t *testing.T) {
+	ctx := t.Context()
+	const first = "Queue before closing the batch."
+	const second = "Queue only after closing the batch."
+	var extractions atomic.Int32
+	var reviewedBoth atomic.Bool
+	ordinary := newFakeLLM()
+	startFakeLLM(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if bytes.Contains(body, []byte("Extract repository knowledge")) {
+			extractions.Add(1)
+			if !bytes.Contains(body, []byte(first)) || !bytes.Contains(body, []byte(second)) || bytes.Contains(body, []byte("proposed*2")) {
+				t.Error("wrong accepted-side discovery corpus")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"sync","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"{\"records\":[]}"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}`)
+			return
+		}
+		if bytes.Contains(body, []byte("An independent code review of this change has finished")) && bytes.Contains(body, []byte(first)) && bytes.Contains(body, []byte(second)) {
+			reviewedBoth.Store(true)
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		ordinary.ServeHTTP(w, r)
+	}))
+	repo := initResumeRepo(t)
+	const path = "queue.go"
+	commitFile(t, repo, path, "package queue\nfunc submit(proposed int) int { return proposed }\n", "open queue")
+	base := revParse(t, repo, "HEAD")
+	commitFile(t, repo, path, "package queue\nfunc submit(proposed int) int { return proposed*2 }\n", "change queue")
+	root := t.TempDir()
+	archive := filepath.Join(root, "notes.json")
+	cutoff := time.Now().UTC().Truncate(time.Second)
+	expiring := knowledge.Discussion{ID: "archived-window", Body: "Keep the original queue window.", UpdatedAt: cutoff.Add(-5 * time.Hour).Format(time.RFC3339), ExpiresAt: cutoff.Add(-4 * time.Hour).Format(time.RFC3339)}
+	notes := []knowledge.Discussion{
+		{ID: "discussion-1", Path: path, UpdatedAt: cutoff.Add(-3 * time.Hour).Format(time.RFC3339), Body: first},
+		{ID: "discussion-2", Path: path, UpdatedAt: cutoff.Add(-2 * time.Hour).Format(time.RFC3339), Body: second},
+		{ID: "tomorrow", Path: path, UpdatedAt: cutoff.Add(24 * time.Hour).Format(time.RFC3339), Body: "A future change."},
+		expiring,
+	}
+	b, err := json.Marshal(notes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archive, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cc, err := loadCommonContext(repo, "", base, 0, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{Context: ctx})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathToDB := filepath.Join(root, "previous.db")
+	store, err := openMemory(ctx, pathToDB, repo, cc.GitRunner, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce earlier receipts for the same ref, selector and export.
+	// Version 2 could omit raw decisions and version 3 did not bind names.
+	prior, err := json.Marshal(struct {
+		Version, Revision, Provider, Model string
+		Live                               bool
+		Options                            knowledge.DiscoverOptions
+		Sources                            []string
+	}{"business-discovery-v2", base, rt.Provider, rt.Model, false, knowledge.DiscoverOptions{Paths: []string{path}, FocusLines: map[string][]int{}, AsOf: cutoff, Discussions: notes, FileFilter: cc.FileFilter}, []string{archive}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveDiscovery(ctx, knowledge.Digest(prior), nil); err != nil {
+		t.Fatal(err)
+	}
+	v3 := bytes.Replace(prior, []byte("business-discovery-v2"), []byte("business-discovery-v3"), 1)
+	if err := store.SaveDiscovery(ctx, knowledge.Digest(v3), nil); err != nil {
+		t.Fatal(err)
+	}
+	v4 := bytes.Replace(prior, []byte("business-discovery-v2"), []byte("business-discovery-v4"), 1)
+	if err := store.SaveDiscovery(ctx, knowledge.Digest(v4), nil); err != nil {
+		t.Fatal(err)
+	}
+	// V5 could save a checked inference from this pathless note without
+	// retaining its original record or including the deadline in the rule.
+	tree := knowledge.Tree{Repo: repo, Commit: base, Git: cc.GitRunner}
+	claim, err := tree.Prepare(ctx, knowledge.Fact{Origin: "discovery", Scope: path, Source: path, Category: knowledge.CategoryBusinessRule, Authority: knowledge.AuthorityInferred, Claim: expiring.Body,
+		Citations: []knowledge.Citation{{Kind: "code", Path: path, StartLine: 2, EndLine: 2}, {Kind: "discussion", Reference: expiring.ID, ObservedAt: expiring.UpdatedAt,
+			Quote: expiring.Body, Digest: knowledge.Digest([]byte(expiring.Body)), StartLine: 1, EndLine: 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRules := []knowledge.Fact{claim}
+	v5 := bytes.Replace(prior, []byte("business-discovery-v2"), []byte("business-discovery-v5"), 1)
+	if err := store.SaveDiscovery(ctx, knowledge.Digest(v5), oldRules); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := sql.Open("sqlite", pathToDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = legacy.ExecContext(ctx, "DROP TABLE discussion_edits"); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	memory := func(db string, args ...string) []byte {
+		t.Helper()
+		var out bytes.Buffer
+		c := newMemoryCommand()
+		c.SetOut(&out)
+		c.SetArgs(append([]string{"--repo", repo, "--memory-db", db}, args...))
+		if err := c.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		return out.Bytes()
+	}
+	args := []string{"sync", "--ref", base, "--path", path, "--discussions", archive, "--as-of", cutoff.Format(time.RFC3339)}
+	var before []knowledge.Checked
+	if err := json.Unmarshal(memory(pathToDB, "list", "--ref", base, "--as-of", cutoff.Format(time.RFC3339)), &before); err != nil || len(before) != 1 || before[0].Status != knowledge.StatusCandidate || before[0].ExpiresAt != "" {
+		t.Fatalf("expected a v5 rule without its deadline before importing the archive: %+v %v", before, err)
+	}
+	for _, cached := range []bool{false, true} {
+		var report memorySyncReport
+		if err := json.Unmarshal(memory(pathToDB, args...), &report); err != nil || report.Cached != cached || report.Facts != 0 || !cached && report.DiscussionSources != 2 {
+			t.Fatalf("upgrade then idempotent sync: %+v, %v", report, err)
+		}
+	}
+	checkList := func(db string) {
+		t.Helper()
+		var list []knowledge.Checked
+		if err := json.Unmarshal(memory(db, "list", "--ref", base, "--as-of", cutoff.Format(time.RFC3339)), &list); err != nil {
+			t.Fatalf("stored sources: %+v, %v", list, err)
+		}
+		sources, migrated := 0, false
+		for _, item := range list {
+			if item.ID == oldRules[0].ID {
+				if item.ExpiresAt != expiring.ExpiresAt || item.Status != knowledge.StatusExpired {
+					t.Fatalf("cached v5 rule survived reimport after expiry: %+v", item)
+				}
+				migrated = true
+				continue
+			}
+			sources++
+			if item.Status != knowledge.StatusDiscussionSource || item.Authority != knowledge.AuthorityHistorical || item.Revision != base || item.Scope != path || len(item.Citations) != 1 || item.Citations[0].Reference == "tomorrow" {
+				t.Fatalf("invalid source from CLI: %+v", item)
+			}
+		}
+		if sources != 2 || migrated != (db == pathToDB) {
+			t.Fatalf("stored sources or migrated rule: %+v", list)
+		}
+	}
+	checkList(pathToDB)
+	if err := json.Unmarshal(memory(pathToDB, "list", "--ref", base, "--as-of", expiring.UpdatedAt), &before); err != nil || len(before) != 1 || before[0].ID != oldRules[0].ID || before[0].Status != knowledge.StatusCandidate || before[0].ExpiresAt != expiring.ExpiresAt {
+		t.Fatalf("import did not preserve the old ID and pre-expiry availability: %+v %v", before, err)
+	}
+	fresh := filepath.Join(root, "new-review.db")
+	// A prior regular review had the same source bytes while the second
+	// note was still future-dated. Replaying that receipt now must sync.
+	priorLive, err := json.Marshal(struct {
+		Version, Revision, Provider, Model string
+		Live                               bool
+		Options                            knowledge.DiscoverOptions
+		Sources                            []string
+		NextEdit                           string `json:",omitempty"`
+	}{"business-discovery-v6", base, rt.Provider, rt.Model, true, knowledge.DiscoverOptions{Paths: []string{path}, FocusLines: map[string][]int{path: {2}}, Discussions: notes, FileFilter: cc.FileFilter}, []string{archive}, notes[1].UpdatedAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveStore, err := openMemory(ctx, fresh, repo, cc.GitRunner, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := liveStore.SaveDiscovery(ctx, knowledge.Digest(priorLive), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := liveStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	review := []string{"--repo", repo, "--commit", "HEAD", "--memory-sync", "--memory-discussions", archive,
+		"--memory-db", fresh, "--audience", "agent", "--format", "json", "--output", filepath.Join(root, "review.json")}
+	if err := runReview(review); err != nil {
+		t.Fatal(err)
+	}
+	checkList(fresh)
+	liveStore, err = openMemory(ctx, fresh, repo, cc.GitRunner, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer liveStore.Close()
+	var receipt map[string]json.RawMessage
+	if err := json.Unmarshal(priorLive, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	// Keep the original JSON field order while substituting the next actual
+	// unobserved timestamp in the same regular review's receipt.
+	newLive := bytes.Replace(priorLive, append([]byte(`"NextEdit":"`), notes[1].UpdatedAt...), append([]byte(`"NextEdit":"`), notes[2].UpdatedAt...), 1)
+	if seen, err := liveStore.Scanned(ctx, knowledge.Digest(newLive)); err != nil || !seen || len(receipt["NextEdit"]) == 0 {
+		t.Fatalf("live receipt failed to advance to the remaining future edition: %t, %v", seen, err)
+	}
+	if extractions.Load() != 2 || !reviewedBoth.Load() {
+		t.Fatalf("ordinary review did not receive both independent original notes after empty extraction: %d extractions, visible=%t", extractions.Load(), reviewedBoth.Load())
+	}
+}
+
+func TestLiveDiscussionReceiptChangesAtVisibilityBoundary(t *testing.T) {
+	at := time.Date(2025, 5, 1, 0, 0, 0, 0, time.UTC)
+	middle, last := at.Add(time.Hour), at.Add(2*time.Hour)
+	notes := []knowledge.Discussion{{UpdatedAt: last.Format(time.RFC3339Nano)}, {CreatedAt: middle.Format(time.RFC3339Nano)}, {UpdatedAt: at.Format(time.RFC3339Nano)}}
+	if nextDiscussionEdit(notes, at) != middle.Format(time.RFC3339Nano) || nextDiscussionEdit(notes, middle.Add(-time.Nanosecond)) != middle.Format(time.RFC3339Nano) ||
+		nextDiscussionEdit(notes, middle) != last.Format(time.RFC3339Nano) || nextDiscussionEdit(notes, last) != "" {
+		t.Fatal("live receipt changed between scheduled edits or stayed valid across a newly admissible observation")
+	}
+}
+
+func TestStandaloneDiscussionReceiptFollowsCheckout(t *testing.T) {
+	startFakeLLM(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"sync","type":"message","role":"assistant","model":"test","content":[{"type":"text","text":"{\"records\":[]}"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	repo := initResumeRepo(t)
+	t.Setenv("GIT_COMMITTER_DATE", "2024-01-02T10:00:00Z")
+	commitFile(t, repo, "queue.go", "package queue\nfunc submit() {}\n", "open queue")
+	base := revParse(t, repo, "HEAD")
+	t.Setenv("GIT_COMMITTER_DATE", "2024-01-05T10:00:00Z")
+	commitFile(t, repo, "next.go", "package queue\n", "next revision")
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "discussions.json")
+	if err := os.WriteFile(archive, []byte(`[{"id":"dispatch","path":"queue.go","body":"Queue a parcel before departure.","updated_at":"2024-01-03T10:00:00Z"}]`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sync := func() memorySyncReport {
+		t.Helper()
+		c := newMemoryCommand()
+		var out bytes.Buffer
+		c.SetOut(&out)
+		c.SetArgs([]string{"--repo", repo, "--memory-db", filepath.Join(dir, "db"), "sync", "--ref", base, "--discussions", archive})
+		if err := c.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		var report memorySyncReport
+		if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	if got := sync(); got.Cached || got.DiscussionSources != 0 {
+		t.Fatalf("later decision entered a historical sync: %+v", got)
+	}
+	gitIn(t, repo, "checkout", "--detach", base)
+	if got := sync(); got.Cached || got.DiscussionSources != 1 {
+		t.Fatalf("historical receipt hid the now eligible decision at HEAD: %+v", got)
+	}
+	if got := sync(); !got.Cached {
+		t.Fatal("identical live sync did not reuse its own receipt")
+	}
+}
 
 func TestMemorySyncRefreshAndReviewBase(t *testing.T) {
 	const accepted = "return cents"
@@ -100,6 +417,55 @@ func TestMemorySyncRefreshAndReviewBase(t *testing.T) {
 	}
 }
 
+func TestMemorySyncPersistsTheDateOfAnUnavailableEdit(t *testing.T) {
+	startFakeLLM(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"sync","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"{\"records\":[]}"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}`)
+	}))
+	repo := initResumeRepo(t)
+	commitFile(t, repo, "queue.go", "package queue\nfunc Next() int { return 1 }\n", "create queue")
+	commitFile(t, repo, "report.go", "package queue\nfunc Count() int { return 2 }\n", "add reports")
+	dir := t.TempDir()
+	db, archive := filepath.Join(dir, "knowledge.db"), filepath.Join(dir, "notes.json")
+	call := func(args ...string) []byte {
+		t.Helper()
+		var out bytes.Buffer
+		cmd := newMemoryCommand()
+		cmd.SetOut(&out)
+		cmd.SetArgs(append([]string{"--repo", repo, "--memory-db", db}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		return out.Bytes()
+	}
+	first := knowledge.Discussion{ID: "note-5", Path: "queue.go", Body: "The queue is FIFO.", UpdatedAt: "2025-02-01T01:00:00Z"}
+	edit := first
+	edit.Path, edit.Body, edit.UpdatedAt = "missing.py", "New external-only policy.", "2025-03-01T01:00:00Z"
+	for _, d := range []knowledge.Discussion{first, edit} {
+		raw, _ := json.Marshal([]knowledge.Discussion{d})
+		if err := os.WriteFile(archive, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if d == edit {
+			call("sync", "--scope", "report.go", "--discussions", archive, "--as-of", edit.UpdatedAt)
+			var kept []knowledge.Checked
+			if err := json.Unmarshal(call("list", "--as-of", edit.UpdatedAt), &kept); err != nil || len(kept) != 1 || kept[0].DiscussionBody != first.Body {
+				t.Fatalf("an unrelated scoped sync retired the original queue source: %+v, %v", kept, err)
+			}
+		}
+		call("sync", "--scope", "queue.go", "--discussions", archive, "--as-of", edit.UpdatedAt)
+	}
+	for _, tc := range []struct {
+		when string
+		n    int
+	}{{first.UpdatedAt, 1}, {edit.UpdatedAt, 0}} {
+		var got []knowledge.Checked
+		if err := json.Unmarshal(call("list", "--as-of", tc.when), &got); err != nil || len(got) != tc.n {
+			t.Fatalf("sources at %s: %+v %v", tc.when, got, err)
+		}
+	}
+}
+
 func TestMemorySyncFlags(t *testing.T) {
 	for _, args := range [][]string{{"--memory-sync"}, {"--memory-discussions", "comments.json"}, {"--memory-as-of", "2025-01-02T10:00:00Z"}} {
 		if _, err := parseReviewFlags(args); err == nil || !strings.Contains(err.Error(), "requires") {
@@ -162,6 +528,14 @@ func TestMemoryFeedbackAndTimeLimitedDecisionCommands(t *testing.T) {
 		}
 	}
 	args := []string{"decide", "pay.go", "--scope", "pay.go", "--review-id", "refund", "--finding", "convert units", "--reason", "already in cents"}
+	if _, err := call("revoke", id); err != nil {
+		t.Fatal(err)
+	}
+	out, err = call("list", "--as-of", cutoff, "--search", "cents")
+	var prior []knowledge.Checked
+	if err != nil || json.Unmarshal(out, &prior) != nil || len(prior) != 1 || prior[0].ID != id || prior[0].Status != knowledge.StatusVerified {
+		t.Fatalf("a later withdrawal hid the original verified mapping at the earlier cutoff: %s, %v", out, err)
+	}
 	if _, err := call(append(args, "--evidence-lines", "2", "--expires-at", "2001-01-01T00:00:00Z")...); err != nil {
 		t.Fatal(err)
 	}

@@ -471,3 +471,27 @@ func TestLiveDiscussionSamplingIncludesRecentUneditedSummaries(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLiveDiscoveryUsesTheSyncClock(t *testing.T) {
+	r := newDiscoveryRepo(t)
+	r.write("queue.py", "def next_item(queue):\n    return queue.first()\n")
+	tree := r.commit("preserve queue order")
+	earlier := time.Date(2025, 4, 2, 12, 0, 0, 0, time.UTC)
+	later := earlier.Add(time.Hour)
+	opts := DiscoverOptions{Discussions: []Discussion{
+		{ID: "undated", Body: "Initial live agreement."},
+		{ID: "edited", Body: "Change the order for new requests.", UpdatedAt: later.Format(time.RFC3339)},
+	}}
+	for _, now := range []time.Time{earlier, later} {
+		tree.Now = now
+		_, err := tree.Discover(t.Context(), opts, func(_ context.Context, _, corpus string) (string, error) {
+			if !strings.Contains(corpus, opts.Discussions[0].Body) || strings.Contains(corpus, opts.Discussions[1].Body) != now.Equal(later) {
+				t.Fatalf("wrong discussion inputs at %s: %s", now, corpus)
+			}
+			return `{"records":[]}`, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}

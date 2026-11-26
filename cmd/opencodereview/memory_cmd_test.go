@@ -78,7 +78,11 @@ func TestMemoryAcrossReviews(t *testing.T) {
 	if err = json.Unmarshal(data, &report); err != nil {
 		t.Fatal(err)
 	}
-	tracePath, err := session.SessionFilePath(repo, report.SessionID)
+	resolvedRepo, err := resolveRepoDir(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracePath, err := session.SessionFilePath(resolvedRepo, report.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}

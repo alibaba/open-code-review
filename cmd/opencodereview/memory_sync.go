@@ -126,18 +126,19 @@ func newMemorySync(open memoryOpener) *cobra.Command {
 }
 
 type memorySyncReport struct {
-	Revision         string         `json:"revision"`
-	Provider         string         `json:"provider"`
-	Model            string         `json:"model"`
-	Cached           bool           `json:"cached"`
-	Sources          int            `json:"sources,omitempty"`
-	Rejected         int            `json:"rejected,omitempty"`
-	Truncated        bool           `json:"truncated,omitempty"`
-	Facts            int            `json:"facts,omitempty"`
-	Tokens           int64          `json:"tokens,omitempty"`
-	SourceKinds      map[string]int `json:"source_kinds,omitempty"`
-	Limits           []string       `json:"limits,omitempty"`
-	RejectionReasons []string       `json:"rejection_reasons,omitempty"`
+	Revision          string         `json:"revision"`
+	Provider          string         `json:"provider"`
+	Model             string         `json:"model"`
+	Cached            bool           `json:"cached"`
+	Sources           int            `json:"sources,omitempty"`
+	Rejected          int            `json:"rejected,omitempty"`
+	Truncated         bool           `json:"truncated,omitempty"`
+	Facts             int            `json:"facts,omitempty"`
+	DiscussionSources int            `json:"discussion_sources,omitempty"`
+	Tokens            int64          `json:"tokens,omitempty"`
+	SourceKinds       map[string]int `json:"source_kinds,omitempty"`
+	Limits            []string       `json:"limits,omitempty"`
+	RejectionReasons  []string       `json:"rejection_reasons,omitempty"`
 }
 
 type reviewDiscoveryBudget struct {
@@ -161,12 +162,31 @@ func syncKnowledge(ctx context.Context, store *knowledge.Store, tree knowledge.T
 	if cc.FileFilter != nil {
 		tree.AllowPath = func(p string) bool { return !cc.FileFilter.IsUserExcluded(p) }
 	}
+	now := time.Now().UTC()
+	tree.Now = now
+	version, nextEdit := "business-discovery-v2", ""
+	if len(opts.Discussions) != 0 {
+		version = "business-discovery-v6"
+		if budget == nil && opts.AsOf.IsZero() {
+			// Checking out this very commit later changes an implicit
+			// historical sync into a live one with newly eligible edits.
+			var err error
+			opts.AsOf, err = tree.HistoricalDiscussionCutoff(ctx)
+			if err != nil {
+				return out, err
+			}
+		}
+		if opts.AsOf.IsZero() {
+			nextEdit = nextDiscussionEdit(opts.Discussions, now)
+		}
+	}
 	keyData, err := json.Marshal(struct {
 		Version, Revision, Provider, Model string
 		Live                               bool
 		Options                            knowledge.DiscoverOptions
 		Sources                            []string
-	}{Version: "business-discovery-v2", Revision: tree.Commit, Provider: rt.Provider, Model: rt.Model, Live: budget != nil, Options: opts, Sources: sources})
+		NextEdit                           string `json:",omitempty"`
+	}{Version: version, Revision: tree.Commit, Provider: rt.Provider, Model: rt.Model, Live: budget != nil, Options: opts, Sources: sources, NextEdit: nextEdit})
 	if err != nil {
 		return out, err
 	}
@@ -187,7 +207,7 @@ func syncKnowledge(ctx context.Context, store *knowledge.Store, tree knowledge.T
 		return out, store.Save(ctx, refreshed)
 	}
 	if budget != nil && opts.AsOf.IsZero() {
-		opts.AsOf = time.Now().UTC()
+		opts.AsOf = now
 	}
 	var skipped string
 	result, err := tree.Discover(ctx, opts, func(ctx context.Context, system, corpus string) (string, error) {
@@ -217,20 +237,49 @@ func syncKnowledge(ctx context.Context, store *knowledge.Store, tree knowledge.T
 		}
 		return resp.VisibleContent(), nil
 	})
+	discussionUpdates := result.DiscussionObservations()
 	if skipped != "" && budget != nil && ctx.Err() == nil {
 		// A later run with adequate room must be able to retry extraction.
 		out.Sources, out.SourceKinds, out.Facts = result.Sources, result.SourceKinds, len(refreshed)
 		out.Truncated, out.Limits = true, append(result.Limits, skipped)
 		fmt.Fprintf(os.Stderr, "[ocr] Skipped business knowledge extraction: %s. Continuing with stored evidence.\n", skipped)
-		return out, store.Save(ctx, refreshed)
+		out.DiscussionSources = len(result.DiscussionSources)
+		return out, store.Save(ctx, append(refreshed, discussionUpdates...))
 	}
 	if err != nil {
+		if ctx.Err() == nil && len(discussionUpdates) != 0 {
+			// A transport or decoding failure leaves extraction retryable. The
+			// authorized, independently validated source does not depend on it.
+			if saveErr := store.Save(ctx, discussionUpdates); saveErr != nil {
+				return out, fmt.Errorf("%w; saving discussion sources: %v", err, saveErr)
+			}
+		}
 		return out, err
 	}
 	result.Facts = append(result.Facts, refreshed...)
 	out.Sources, out.Rejected, out.Truncated, out.Facts = result.Sources, result.Rejected, result.Truncated, len(result.Facts)
 	out.SourceKinds, out.Limits, out.RejectionReasons = result.SourceKinds, result.Limits, result.RejectionReasons
-	return out, store.SaveDiscovery(ctx, key, result.Facts)
+	out.DiscussionSources = len(result.DiscussionSources)
+	return out, store.SaveDiscovery(ctx, key, append(result.Facts, discussionUpdates...))
+}
+
+// A live receipt stays valid until another supplied edition becomes visible.
+// An explicit replay cutoff already forms part of the receipt.
+func nextDiscussionEdit(discussions []knowledge.Discussion, now time.Time) string {
+	var next time.Time
+	for _, d := range discussions {
+		stamp := d.UpdatedAt
+		if stamp == "" {
+			stamp = d.CreatedAt
+		}
+		if at, err := time.Parse(time.RFC3339Nano, stamp); err == nil && at.After(now) && (next.IsZero() || at.Before(next)) {
+			next = at
+		}
+	}
+	if next.IsZero() {
+		return ""
+	}
+	return next.UTC().Format(time.RFC3339Nano)
 }
 
 func syncReviewBase(ctx context.Context, cc *commonContext, opts reviewOptions, code *reviewCodeTools, rt *llmRuntime, budget *reviewDiscoveryBudget) error {
@@ -297,7 +346,7 @@ func syncReviewBase(ctx context.Context, cc *commonContext, opts reviewOptions, 
 	tree := knowledge.Tree{Repo: cc.RepoDir, Commit: base, Git: runner, Now: opts.memoryTime}
 	report, err := syncKnowledge(ctx, store, tree, cc, rt, knowledge.DiscoverOptions{Paths: paths, FocusLines: focus, AsOf: opts.memoryTime}, opts.memoryDiscussions, budget)
 	if err == nil && !report.Cached {
-		fmt.Fprintf(os.Stderr, "[ocr] Memory sync at %.12s: %d sources, %d records, %d rejected, truncated=%t\n", base, report.Sources, report.Facts, report.Rejected, report.Truncated)
+		fmt.Fprintf(os.Stderr, "[ocr] Memory sync at %.12s: %d sampled sources, %d rules, %d original discussions, %d rejected, truncated=%t\n", base, report.Sources, report.Facts, report.DiscussionSources, report.Rejected, report.Truncated)
 	}
 	return err
 }

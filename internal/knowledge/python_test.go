@@ -8,6 +8,17 @@ import (
 	"testing"
 )
 
+func TestPythonDeclarationEndAtPhysicalEOF(t *testing.T) {
+	const src = "def read():\n    return 9"
+	witness := pythonWitnessesFor(t.Context(), []byte(src))
+	if witness == nil || witness.functions["read"].end != 2 {
+		t.Fatalf("declaration without a final newline: %+v", witness)
+	}
+	if got := pythonDeclarationEnd(strings.Split(src, "\n"), 1, 3); got != 2 {
+		t.Fatalf("parser end beyond the physical source: got %d", got)
+	}
+}
+
 func TestPythonKeepsUnchangedPremisesAtTheirNewLines(t *testing.T) {
 	ctx := t.Context()
 	r := newLifecycleRepo(t)

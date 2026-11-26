@@ -598,7 +598,7 @@ Use a trusted SQLite database outside the checkout. Set `DB` to its absolute pat
 ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
 ```
 
-OCR samples committed code, configuration, nearby tests, commit messages and earlier file versions at the comparison base. Changed paths and hunk locations help it find relevant code. The proposed implementation is reviewed against that knowledge. Add `--memory-discussions <url-or-file>` to ingest review feedback. GitHub pull requests and GitLab merge requests use the signed-in `gh` or `glab` CLI for a repository remote. Other workflows can supply a JSON array of objects with a stable `id`, a `body`, and optional `path`, `revision`, `url`, `created_at` and `updated_at`. Use RFC3339 timestamps.
+OCR samples committed code, configuration, nearby tests, commit messages and earlier file versions at the comparison base. Changed paths and hunk locations help it find relevant code. The proposed implementation is reviewed against that knowledge. Add `--memory-discussions <url-or-file>` to ingest review feedback. GitHub pull requests and GitLab merge requests use the signed-in `gh` or `glab` CLI for a repository remote. Other workflows can supply a JSON array of objects with a stable `id`, a `body`, and optional `path`, `revision`, `url`, `created_at`, `updated_at` and `expires_at`. Use RFC3339 timestamps.
 
 To curate a database separately, run discovery on a chosen commit and provide the resulting database read-only to review jobs:
 
@@ -648,7 +648,11 @@ Prior dismissals remain scoped to their review ID. A moved citation can remain a
 
 For a repeated finding about an inherited expression, the assessor can cite both sides of a one-line replacement. OCR checks the exact old line, the reported line and the disputed expression. Using only this diff evidence requires the same recorded finding. A reworded finding can be refuted with independently cited current evidence.
 
-When an imported review discussion identifies which behavior a deployment uses, OCR checks the original dated decision against the affected entry point. It compares the expected result with the old and new results for the same input. An added finding cites the decision and the current implementation. Unresolved or conflicting applicability keeps a conditional finding out of the report.
+When an imported review discussion identifies which behavior a deployment uses, OCR checks the original dated decision against the affected entry point. It compares the expected result with the old and new results for the same input. OCR adds a finding based on the agreement only when it can establish that the agreement applies and cite both the decision and the current implementation.
+
+A dated discussion attached to a repository file remains available even when the extractor derives no rule from it. The reviewer can follow an implementation named by the agreement to its current definition and cite several consecutive lines when a single line omits part of the behavior. It can also check which setting the entry point loads from the current configuration. When that evidence answers a tentative comment, an independent assessment checks the entire original comment before withdrawing it or replacing it with a confirmed finding. If an ordinary finding already diagnoses the same failure on the same lines, OCR checks both findings and keeps the original.
+
+An inferred finding can connect two functions in the same edited file. OCR checks which value the code actually returns or stores for the reported input before adding the finding. For example, a change in an intermediate amount only affects a billing percentage if that amount participates in its calculation. If either function cannot be located unambiguously, OCR records a warning and keeps the ordinary review.
 
 Revocation applies to subsequent runs, including imports of the same
 assertion at another commit. Changed effective evidence invalidates review

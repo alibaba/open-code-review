@@ -35,13 +35,44 @@ type DiscoverOptions struct {
 }
 
 type DiscoveryResult struct {
-	Facts            []Fact         `json:"facts"`
-	Sources          int            `json:"sources"`
-	SourceKinds      map[string]int `json:"source_kinds"`
-	Truncated        bool           `json:"truncated"`
-	Limits           []string       `json:"limits,omitempty"`
-	Rejected         int            `json:"rejected"`
-	RejectionReasons []string       `json:"rejection_reasons,omitempty"`
+	Facts             []Fact         `json:"facts"`
+	DiscussionSources []Fact         `json:"discussion_sources,omitempty"`
+	Sources           int            `json:"sources"`
+	SourceKinds       map[string]int `json:"source_kinds"`
+	Truncated         bool           `json:"truncated"`
+	Limits            []string       `json:"limits,omitempty"`
+	Rejected          int            `json:"rejected"`
+	RejectionReasons  []string       `json:"rejection_reasons,omitempty"`
+	discussionNotices []Fact
+}
+
+// DiscussionObservations also retains edit dates and exact-edition deadlines
+// needed to recheck records that already cite these discussions.
+func (r DiscoveryResult) DiscussionObservations() []Fact {
+	return append(slices.Clone(r.DiscussionSources), r.discussionNotices...)
+}
+
+func (r *DiscoveryResult) withholdEdition(revision string, d Discussion, scope string) {
+	if d.UpdatedAt != "" && d.Path != "" {
+		f := Fact{ID: discussionSourceID(d.ID), Revision: revision, ObservedAt: d.UpdatedAt, Origin: "discovery", discussionNotice: noticeUnavailable}
+		if scope != "" {
+			f.editionScopeDigest = Digest([]byte(scope))
+		}
+		r.discussionNotices = append(r.discussionNotices, f)
+	}
+}
+
+func (r *DiscoveryResult) recordDiscussionExpiry(revision string, d Discussion, scope string) {
+	if d.ExpiresAt == "" {
+		return
+	}
+	c := Citation{Reference: d.ID, Path: d.Path, URL: d.URL, Revision: d.Revision, ObservedAt: d.UpdatedAt,
+		Digest: Digest([]byte(strings.ReplaceAll(d.Body, "\r\n", "\n")))}
+	f := Fact{ID: discussionExpiryID(c), Origin: "discovery", Revision: revision, ObservedAt: d.ExpiresAt, discussionNotice: noticeExpiry}
+	if scope != "" {
+		f.editionScopeDigest = Digest([]byte(scope))
+	}
+	r.discussionNotices = append(r.discussionNotices, f)
 }
 
 func (r *DiscoveryResult) limit(reason string) {
@@ -59,6 +90,7 @@ type discoverySource struct {
 	Reference  string `json:"reference,omitempty"`
 	URL        string `json:"url,omitempty"`
 	ObservedAt string `json:"observed_at,omitempty"`
+	ExpiresAt  string `json:"expires_at,omitempty"`
 	StartLine  int    `json:"start_line"`
 	Text       string `json:"text"`
 	digest     string
@@ -130,6 +162,7 @@ func (t Tree) Discover(ctx context.Context, opts DiscoverOptions, extract Extrac
 	if err != nil {
 		return result, err
 	}
+	t.bindDiscussionDefinitions(ctx, opts, result.DiscussionSources, sources)
 	byID := make(map[string]discoverySource, len(sources))
 	current := false
 	for i := range sources {
@@ -239,6 +272,9 @@ func (r discoveryRule) fact(scope string, sources map[string]discoverySource) (F
 		}
 		f.Citations = append(f.Citations, c)
 		s := sources[q.Source]
+		if s.Kind == "discussion" {
+			f.ExpiresAt = earlierExpiry(f.ExpiresAt, s.ExpiresAt)
+		}
 		if !s.current() || s.Kind == "config" {
 			explicitConvention = true
 		}

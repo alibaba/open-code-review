@@ -8,8 +8,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -20,9 +22,11 @@ import (
 )
 
 type Store struct {
-	db        *sql.DB
-	repo      string
-	lifecycle bool
+	db              *sql.DB
+	repo            string
+	lifecycle       bool
+	discussionEdits bool
+	editionNotices  bool
 }
 
 func Open(ctx context.Context, filename, repo string, write bool) (*Store, error) {
@@ -54,18 +58,20 @@ func Open(ctx context.Context, filename, repo string, write bool) (*Store, error
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	var lifecycle bool
+	var lifecycle, discussionEdits, editionNotices bool
 	if write {
 		err = initialize(ctx, db)
 		lifecycle = err == nil
+		discussionEdits = err == nil
+		editionNotices = err == nil
 	} else {
-		err = db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='fact_observations')").Scan(&lifecycle)
+		err = db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='fact_observations'), EXISTS(SELECT 1 FROM sqlite_schema WHERE name='discussion_edits'), EXISTS(SELECT 1 FROM sqlite_schema WHERE name='discussion_unavailable')").Scan(&lifecycle, &discussionEdits, &editionNotices)
 	}
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, repo: repo, lifecycle: lifecycle}, nil
+	return &Store{db: db, repo: repo, lifecycle: lifecycle, discussionEdits: discussionEdits, editionNotices: editionNotices}, nil
 }
 
 func initialize(ctx context.Context, db *sql.DB) error {
@@ -84,6 +90,10 @@ func initialize(ctx context.Context, db *sql.DB) error {
  CREATE VIRTUAL TABLE IF NOT EXISTS fact_search USING fts5(text, tokenize='trigram');
  CREATE TABLE IF NOT EXISTS fact_observations(fact_row INTEGER NOT NULL, revision TEXT NOT NULL, body TEXT NOT NULL,
  PRIMARY KEY(fact_row,revision));
+ CREATE TABLE IF NOT EXISTS discussion_edits(fact_row INTEGER NOT NULL, revision TEXT NOT NULL, body TEXT NOT NULL,
+ PRIMARY KEY(fact_row,revision,body));
+ CREATE TABLE IF NOT EXISTS discussion_unavailable(repo TEXT NOT NULL, source_id TEXT NOT NULL, revision TEXT NOT NULL, observed_at TEXT NOT NULL, scope_digest TEXT NOT NULL,
+ PRIMARY KEY(repo,source_id,revision,observed_at,scope_digest));
  CREATE TABLE IF NOT EXISTS fact_feedback(
  event_id INTEGER PRIMARY KEY, fact_row INTEGER NOT NULL, action TEXT NOT NULL, revision TEXT NOT NULL,
  actor TEXT NOT NULL, reason TEXT NOT NULL, replacement_id TEXT NOT NULL, recorded_at TEXT NOT NULL,
@@ -132,6 +142,14 @@ func (s *Store) save(ctx context.Context, key string, facts []Fact) error {
 	}
 	ids := make([]string, len(facts))
 	for i, f := range facts {
+		if f.discussionNotice != 0 {
+			_, err := tx.ExecContext(ctx, "INSERT INTO discussion_unavailable(repo,source_id,revision,observed_at,scope_digest) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING", s.repo, f.ID, f.Revision, f.ObservedAt, f.editionScopeDigest)
+			if err != nil {
+				return err
+			}
+			ids[i] = f.ID
+			continue
+		}
 		f = observationBody(f)
 		f.ID, err = stableFactID(f)
 		if err != nil {
@@ -153,6 +171,12 @@ func (s *Store) save(ctx context.Context, key string, facts []Fact) error {
 		if err != nil {
 			return err
 		}
+		if f.Category == CategoryDiscussionSource {
+			_, err = tx.ExecContext(ctx, "INSERT INTO discussion_edits(fact_row,revision,body) VALUES(?,?,?) ON CONFLICT DO NOTHING", rowid, f.Revision, string(body))
+			if err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO fact_revisions(fact_row,revision) VALUES(?,?) ON CONFLICT DO NOTHING", rowid, f.Revision)
 		if err != nil {
 			return err
@@ -173,6 +197,7 @@ func (s *Store) save(ctx context.Context, key string, facts []Fact) error {
 
 func observationBody(f Fact) Fact {
 	f.Feedback, f.contextStatus, f.contextConflicts = nil, "", nil
+	f.ScopeWitnesses = nil
 	clear := func(c Citation) Citation {
 		c.CurrentPath, c.CurrentStartLine, c.CurrentEndLine = "", 0, 0
 		return c
@@ -196,8 +221,17 @@ func mapCitations(f Fact, project func(Citation) Citation) Fact {
 }
 
 func stableFactID(f Fact) (string, error) {
+	if ref := f.discussionRef(); ref != "" {
+		// One externally addressable source across edits, even when several
+		// edits were imported while the accepted Git tree stayed identical.
+		return discussionSourceID(ref), nil
+	}
 	f = observationBody(f)
 	f.ID, f.Revision, f.ObservedAt = "", "", ""
+	if f.Origin == "discovery" && slices.ContainsFunc(f.Citations, func(c Citation) bool { return c.Kind == "discussion" }) {
+		// Refreshing an inherited deadline preserves the ID and its feedback.
+		f.ExpiresAt = ""
+	}
 	f = mapCitations(f, func(c Citation) Citation {
 		if c.live() {
 			c.Revision, c.Quote, c.StartLine, c.EndLine = "", "", 0, 0
@@ -221,8 +255,15 @@ func searchText(f Fact) string {
 	return strings.Join(terms, " ")
 }
 
+// A discussion keeps one ID through edits. Match the edition chosen for
+// display, including its full original body beyond the review excerpts.
+func (f Fact) MatchesDiscussionSearch(phrase string) bool {
+	q := strings.ToLower(phrase)
+	return strings.Contains(strings.ToLower(f.DiscussionBody), q) || strings.Contains(strings.ToLower(searchText(f)), q)
+}
+
 func (s *Store) Revoke(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, "UPDATE facts SET revoked_at=COALESCE(revoked_at,CURRENT_TIMESTAMP) WHERE repo=? AND id=?", s.repo, id)
+	res, err := s.db.ExecContext(ctx, "UPDATE facts SET revoked_at=COALESCE(revoked_at,?) WHERE repo=? AND id=?", time.Now().UTC().Format(time.RFC3339Nano), s.repo, id)
 	if err != nil {
 		return err
 	}
@@ -237,12 +278,17 @@ func (s *Store) Revoke(ctx context.Context, id string) error {
 }
 
 func (s *Store) List(ctx context.Context, review, search string) ([]Fact, error) {
+	return s.ListAt(ctx, review, search, time.Time{})
+}
+
+// ListAt applies local withdrawals as of the requested review time.
+func (s *Store) ListAt(ctx context.Context, review, search string, cutoff time.Time) ([]Fact, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	facts, err := s.list(ctx, tx, review, search, "")
+	facts, err := s.list(ctx, tx, review, search, "", cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -252,15 +298,35 @@ func (s *Store) List(ctx context.Context, review, search string) ([]Fact, error)
 	return facts, nil
 }
 
-func (s *Store) list(ctx context.Context, tx *sql.Tx, review, search, id string) ([]Fact, error) {
+func withdrawnBy(at sql.NullString, cutoff time.Time) bool {
+	if !at.Valid {
+		return false
+	}
+	if cutoff.IsZero() {
+		return true
+	}
+	when, err := time.Parse(time.RFC3339Nano, at.String)
+	if err != nil {
+		when, err = time.Parse(time.DateTime, at.String) // Legacy SQLite CURRENT_TIMESTAMP (UTC).
+	}
+	return err != nil || !when.After(cutoff)
+}
+
+func (s *Store) list(ctx context.Context, tx *sql.Tx, review, search, id string, cutoff time.Time) ([]Fact, error) {
 	body := "facts.body"
 	join := ""
 	if s.lifecycle {
 		body = "COALESCE(o.body,facts.body)"
 		join = " LEFT JOIN fact_observations AS o ON o.fact_row=facts.rowid AND o.revision=r.revision"
 	}
-	query := "SELECT " + body + ", r.revision, facts.recorded_at FROM facts JOIN fact_revisions AS r ON r.fact_row=facts.rowid" + join +
-		" WHERE repo=? AND revoked_at IS NULL"
+	if s.discussionEdits {
+		body = "COALESCE(e.body,o.body,facts.body)"
+		join += " LEFT JOIN discussion_edits AS e ON e.fact_row=facts.rowid AND e.revision=r.revision"
+	}
+	query := "SELECT " + body + ", r.revision, facts.recorded_at, facts.revoked_at FROM facts JOIN fact_revisions AS r ON r.fact_row=facts.rowid" + join + " WHERE repo=?"
+	if cutoff.IsZero() {
+		query += " AND revoked_at IS NULL"
+	}
 	args := []any{s.repo}
 	if id != "" {
 		query += " AND id=?"
@@ -273,8 +339,13 @@ func (s *Store) list(ctx context.Context, tx *sql.Tx, review, search, id string)
 		if utf8.RuneCountInString(search) < 3 {
 			return nil, fmt.Errorf("memory search requires at least three characters")
 		}
-		query += " AND facts.rowid IN (SELECT rowid FROM fact_search WHERE fact_search MATCH ?)"
+		query += " AND (facts.rowid IN (SELECT rowid FROM fact_search WHERE fact_search MATCH ?)"
 		args = append(args, "\""+strings.ReplaceAll(search, "\"", "\"\"")+"\"")
+		if s.discussionEdits {
+			query += " OR EXISTS(SELECT 1 FROM discussion_edits AS de WHERE de.fact_row=facts.rowid AND instr(lower(json_extract(de.body,'$.discussion_body')),lower(?))>0)"
+			args = append(args, search)
+		}
+		query += ")"
 	}
 	rows, err := tx.QueryContext(ctx, query+" ORDER BY (review <> '') DESC, id, r.revision", args...)
 	if err != nil {
@@ -284,9 +355,13 @@ func (s *Store) list(ctx context.Context, tx *sql.Tx, review, search, id string)
 	result := []Fact{}
 	for rows.Next() {
 		var body, revision, recordedAt string
+		var revokedAt sql.NullString
 		var f Fact
-		if err = rows.Scan(&body, &revision, &recordedAt); err != nil {
+		if err = rows.Scan(&body, &revision, &recordedAt, &revokedAt); err != nil {
 			return nil, err
+		}
+		if withdrawnBy(revokedAt, cutoff) {
+			continue
 		}
 		if err = json.Unmarshal([]byte(body), &f); err != nil {
 			return nil, fmt.Errorf("decode memory record: %w", err)
@@ -308,6 +383,38 @@ func (s *Store) list(ctx context.Context, tx *sql.Tx, review, search, id string)
 	if len(result) == 0 || !s.lifecycle {
 		return result, nil
 	}
+	if s.discussionEdits {
+		rows, err := tx.QueryContext(ctx, `SELECT id, revoked_at FROM facts WHERE repo=? AND revoked_at IS NOT NULL AND json_extract(body,'$.category')=?`, s.repo, CategoryDiscussionSource)
+		if err != nil {
+			return nil, err
+		}
+		revoked := map[string]bool{}
+		for rows.Next() {
+			var id string
+			var at sql.NullString
+			if err := rows.Scan(&id, &at); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if withdrawnBy(at, cutoff) {
+				revoked[id] = true
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+		if len(revoked) != 0 {
+			result = slices.DeleteFunc(result, func(f Fact) bool {
+				return slices.ContainsFunc(f.Citations, func(c Citation) bool {
+					return c.Kind == "discussion" && revoked[discussionSourceID(c.Reference)]
+				})
+			})
+		}
+	}
 	feedback, err := s.readFeedback(ctx, tx, id)
 	if err != nil {
 		return nil, err
@@ -315,7 +422,63 @@ func (s *Store) list(ctx context.Context, tx *sql.Tx, review, search, id string)
 	for i := range result {
 		result[i].Feedback = feedback[result[i].ID]
 	}
+	if s.editionNotices {
+		return s.withEditionNotices(ctx, tx, result)
+	}
 	return result, nil
+}
+
+// Attach withdrawals and exact-edition deadlines for references in this
+// query. The notice table contains no discussion text or file paths.
+func (s *Store) withEditionNotices(ctx context.Context, tx *sql.Tx, facts []Fact) ([]Fact, error) {
+	referenced := map[string]map[string]bool{}
+	expiryIDs := map[string]bool{}
+	include := func(id, scope string) {
+		if referenced[id] == nil {
+			referenced[id] = map[string]bool{"": true}
+		}
+		for validPath(scope) {
+			referenced[id][Digest([]byte(scope))] = true
+			scope = path.Dir(scope)
+		}
+	}
+	for _, f := range facts {
+		for _, c := range f.Citations {
+			if c.Kind != "discussion" {
+				continue
+			}
+			scope := c.Path
+			if scope == "" {
+				scope = f.Scope
+			}
+			include(discussionSourceID(c.Reference), scope)
+			edition := discussionExpiryID(c)
+			include(edition, scope)
+			expiryIDs[edition] = true
+		}
+	}
+	if len(referenced) == 0 {
+		return facts, nil
+	}
+	ids, _ := json.Marshal(slices.Sorted(maps.Keys(referenced)))
+	rows, err := tx.QueryContext(ctx, "SELECT source_id,revision,observed_at,scope_digest FROM discussion_unavailable WHERE repo=? AND source_id IN (SELECT value FROM json_each(?))", s.repo, string(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		f := Fact{discussionNotice: noticeUnavailable, Origin: "discovery"}
+		if err := rows.Scan(&f.ID, &f.Revision, &f.ObservedAt, &f.editionScopeDigest); err != nil {
+			return nil, err
+		}
+		if referenced[f.ID][f.editionScopeDigest] {
+			if expiryIDs[f.ID] {
+				f.discussionNotice = noticeExpiry
+			}
+			facts = append(facts, f)
+		}
+	}
+	return facts, rows.Err()
 }
 
 const (
@@ -396,7 +559,7 @@ func (s *Store) Feedback(ctx context.Context, tree Tree, id string, input Feedba
 	defer tx.Rollback()
 	r := newRechecker(ctx, tree)
 	load := func(id string) (Checked, error) {
-		facts, err := s.list(ctx, tx, "", "", id)
+		facts, err := s.list(ctx, tx, "", "", id, tree.Now)
 		if err != nil {
 			return Checked{}, err
 		}
@@ -404,11 +567,35 @@ func (s *Store) Feedback(ctx context.Context, tree Tree, id string, input Feedba
 		if len(facts) == 0 {
 			return Checked{}, fmt.Errorf("no observation of memory %q at this revision", id)
 		}
+		// Checking just a derived fact would miss a correction, expiry or
+		// rejection recorded against the original discussion.
+		sources := map[string]bool{}
+		for _, f := range facts {
+			if f.Category == CategoryDiscussionSource {
+				continue
+			}
+			for _, c := range f.Citations {
+				if c.Kind != "discussion" || sources[c.Reference] {
+					continue
+				}
+				sources[c.Reference] = true
+				editions, err := s.list(ctx, tx, "", "", discussionSourceID(c.Reference), tree.Now)
+				if err != nil {
+					return Checked{}, err
+				}
+				facts = append(facts, editions...)
+			}
+		}
 		checked, err := tree.Check(ctx, facts)
 		if err != nil {
 			return Checked{}, err
 		}
-		return checked[0], nil
+		for _, c := range checked {
+			if c.ID == id {
+				return c, nil
+			}
+		}
+		return Checked{}, fmt.Errorf("no eligible observation of memory %q at this revision and time", id)
 	}
 	target, err := load(id)
 	if err != nil {
@@ -423,13 +610,16 @@ func (s *Store) Feedback(ctx context.Context, tree Tree, id string, input Feedba
 		if err != nil {
 			return Fact{}, err
 		}
-		if !correspondingRecords(target.Fact, replacement.Fact) || !confirmable(replacement) {
+		sourceReplacement := target.Category == CategoryDiscussionSource && replacement.Status == StatusDiscussionSource && target.Scope == replacement.Scope
+		if !sourceReplacement && (!correspondingRecords(target.Fact, replacement.Fact) || !confirmable(replacement)) {
 			return Fact{}, fmt.Errorf("replacement requires current evidence for the same scope and subject")
 		}
-		confirm := record
-		confirm.Action, confirm.ReplacementID = FeedbackConfirm, ""
-		if err := s.writeFeedback(ctx, tx, replacement.ID, confirm); err != nil {
-			return Fact{}, err
+		if !sourceReplacement {
+			confirm := record
+			confirm.Action, confirm.ReplacementID = FeedbackConfirm, ""
+			if err := s.writeFeedback(ctx, tx, replacement.ID, confirm); err != nil {
+				return Fact{}, err
+			}
 		}
 	}
 	if err = s.writeFeedback(ctx, tx, id, record); err != nil {

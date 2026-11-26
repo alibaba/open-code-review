@@ -241,11 +241,32 @@ func (t Tree) discoveryTree(ctx context.Context, rev string, paths []string, opt
 }
 
 func (t Tree) discoverySources(ctx context.Context, opts DiscoverOptions, result *DiscoveryResult) ([]discoverySource, error) {
-	discussions, err := t.discoveryDiscussions(ctx, opts, result)
+	reader := newRechecker(ctx, t)
+	discussions, cutoff, err := t.discoveryDiscussions(ctx, opts, result, reader)
 	if err != nil {
 		return nil, err
 	}
-	opts.Discussions = discussions
+	result.DiscussionSources, err = t.directDiscussionSources(reader, opts, discussions, result)
+	if err != nil {
+		return nil, err
+	}
+	opts.Discussions = latestDiscussionInputs(discussions, cutoff)
+	if len(result.discussionNotices) != 0 {
+		latest := map[string]time.Time{}
+		for _, edit := range result.discussionNotices {
+			if edit.discussionNotice == noticeExpiry {
+				continue
+			}
+			when, _ := time.Parse(time.RFC3339Nano, edit.ObservedAt)
+			if when.After(latest[edit.ID]) {
+				latest[edit.ID] = when
+			}
+		}
+		opts.Discussions = slices.DeleteFunc(opts.Discussions, func(d Discussion) bool {
+			when, ok := latest[discussionSourceID(d.ID)]
+			return ok && !discussionTime(d).After(when)
+		})
+	}
 	commits, err := t.discoveryHistory(ctx, opts, result)
 	if err != nil {
 		return nil, err
@@ -343,7 +364,7 @@ func (t Tree) discoverySources(ctx context.Context, opts DiscoverOptions, result
 			result.limit("sampled up to 12 discussion comments")
 			break
 		}
-		s := discoverySource{Kind: "discussion", Path: d.Path, Revision: d.Revision, Reference: d.ID, URL: d.URL, ObservedAt: d.UpdatedAt}
+		s := discoverySource{Kind: "discussion", Path: d.Path, Revision: d.Revision, Reference: d.ID, URL: d.URL, ObservedAt: d.UpdatedAt, ExpiresAt: d.ExpiresAt}
 		excerpts := discoveryExcerpts([]byte(d.Body), s, 1600, result, nil)
 		if len(excerpts) > 0 {
 			comments++
@@ -549,35 +570,41 @@ func discoveryExcerpts(data []byte, source discoverySource, budget int, result *
 	return excerpts
 }
 
-func (t Tree) discoveryDiscussions(ctx context.Context, opts DiscoverOptions, result *DiscoveryResult) ([]Discussion, error) {
+// HistoricalDiscussionCutoff returns the selected commit time for an older
+// revision. An unset time means a live sync of the currently checked-out HEAD.
+func (t Tree) HistoricalDiscussionCutoff(ctx context.Context) (time.Time, error) {
+	head, err := t.Git.Output(ctx, t.Repo, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || strings.TrimSpace(string(head)) == t.Commit {
+		return time.Time{}, err
+	}
+	raw, err := t.Git.Output(ctx, t.Repo, "show", "-s", "--no-notes", "--no-show-signature", "--format=%cI", t.Commit)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Parse(time.RFC3339, strings.TrimSpace(string(raw)))
+}
+
+func (t Tree) discoveryDiscussions(ctx context.Context, opts DiscoverOptions, result *DiscoveryResult, r *rechecker) ([]Discussion, time.Time, error) {
 	if err := validateDiscussions(opts.Discussions); err != nil || len(opts.Discussions) == 0 {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	cutoff := opts.AsOf
+	if cutoff.IsZero() {
+		var err error
+		cutoff, err = t.HistoricalDiscussionCutoff(ctx)
+		if err != nil {
+			return nil, time.Time{}, err
+		}
+	}
 	strict := !cutoff.IsZero()
 	if !strict {
-		head, err := t.Git.Output(ctx, t.Repo, "rev-parse", "--verify", "HEAD^{commit}")
-		if err != nil {
-			return nil, err
-		}
-		cutoff = time.Now()
-		if strings.TrimSpace(string(head)) != t.Commit {
-			raw, err := t.Git.Output(ctx, t.Repo, "show", "-s", "--no-notes", "--no-show-signature", "--format=%cI", t.Commit)
-			if err != nil {
-				return nil, err
-			}
-			cutoff, err = time.Parse(time.RFC3339, strings.TrimSpace(string(raw)))
-			if err != nil {
-				return nil, err
-			}
-			strict = true
+		cutoff = t.Now
+		if cutoff.IsZero() {
+			cutoff = time.Now()
 		}
 	}
 	var eligible []Discussion
 	for _, d := range opts.Discussions {
-		if d.Path != "" && !opts.allowed(d.Path) {
-			continue
-		}
 		if discoveryCredential.MatchString(d.ID) || discoveryCredential.MatchString(d.URL) {
 			result.limit("omitted sources containing credential-shaped text")
 			continue
@@ -590,13 +617,69 @@ func (t Tree) discoveryDiscussions(ctx context.Context, opts DiscoverOptions, re
 			result.limit("withheld discussions edited after the cutoff")
 			continue
 		}
+		if d.Revision != "" && !r.ancestor(d.Revision) {
+			result.limit("withheld discussions outside the accepted Git history")
+			continue
+		}
+		if d.Path != "" && !inDiscoveryScope(d.Path, opts.Scope) {
+			// An edit that moved out of the requested scope can still retire
+			// its earlier edition inside that scope.
+			result.withholdEdition(t.Commit, d, opts.Scope)
+			continue
+		}
+		if d.Path != "" && (!opts.allowed(d.Path) || discoveryKind(d.Path) == "documentation") || discoveryCredential.MatchString(d.Body) {
+			result.withholdEdition(t.Commit, d, "")
+			continue
+		}
+		p := d.Path
+		if p == "" {
+			p = opts.Scope
+		}
+		if d.Revision != "" && d.Revision != t.Commit && opts.allowed(p) && discoveryKind(p) != "documentation" {
+			prior, current := r.atRevision(d.Revision).file(p), r.file(p)
+			for _, file := range []checkedFile{prior, current} {
+				if file.err != nil && !errors.Is(file.err, errIneligibleFile) {
+					return nil, time.Time{}, file.err
+				}
+			}
+			if !sameDiscussionFile(p, prior, current) {
+				result.limit("withheld discussions whose original implementation could not be located")
+				result.withholdEdition(t.Commit, d, "")
+				continue
+			}
+		}
+		result.recordDiscussionExpiry(t.Commit, d, opts.Scope)
 		eligible = append(eligible, d)
 	}
 	// Prefer the latest available correction when a long conversation is sampled.
 	slices.SortStableFunc(eligible, func(a, b Discussion) int {
 		return discussionTime(b).Compare(discussionTime(a))
 	})
-	return eligible, nil
+	return eligible, cutoff, nil
+}
+
+func latestDiscussionInputs(eligible []Discussion, cutoff time.Time) []Discussion {
+	newest := map[string]Discussion{}
+	var active []Discussion
+	for _, d := range eligible {
+		if prior, ok := newest[d.ID]; ok {
+			// Withhold contradictory exports at the same edit time from rule
+			// inference. The independently recorded editions remain auditable.
+			if discussionTime(d).Equal(discussionTime(prior)) && (d.Body != prior.Body || d.Path != prior.Path || d.Revision != prior.Revision || d.URL != prior.URL || d.ExpiresAt != prior.ExpiresAt) {
+				active = slices.DeleteFunc(active, func(note Discussion) bool { return note.ID == d.ID })
+			}
+			continue
+		}
+		newest[d.ID] = d
+		if d.ExpiresAt != "" {
+			expires, _ := time.Parse(time.RFC3339, d.ExpiresAt) // Validated at import.
+			if !cutoff.Before(expires) {
+				continue // This edition also rules out its predecessors.
+			}
+		}
+		active = append(active, d)
+	}
+	return active
 }
 
 func discussionTime(d Discussion) time.Time {
