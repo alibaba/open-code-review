@@ -835,10 +835,12 @@ async function testReviewCoverage() {
       const { github, outputs } = await run({ result: { status: "success", warnings: [], manifest, comments },
         opts: ckRunOptions({ reviewExitCode: state === "failed" ? 17 : 0, resolveOutdated: "true" }) });
       assert.strictEqual(outputs.checkpoint_after, "");
+      assert.strictEqual(github.issueComments.length, 1);
+      assert.strictEqual(github.updatedComments.length, comments.length ? 1 : 0);
+      const markers = comments.length ? `${SUMMARY_MARKER}\n${buildRunTags().SUMMARY_TAG}` : SUMMARY_MARKER;
+      const title = state === "partial" ? "Partial review" : "Failed review";
       for (const { body } of [...github.issueComments, ...github.updatedComments]) {
-        const title = state === "partial" ? "Partial review" : "Failed review";
-        assert.match(body.replace(/<!--.*?-->\s*/g, ""), new RegExp("^⚠️ \\*\\*OpenCodeReview · " + title));
-        assert.ok(body.includes("2 of 6 selected files covered"));
+        assert.ok(body.startsWith(`${markers}\n⚠️ **OpenCodeReview · ${title}: 2 of 6 selected files covered`));
         assert.ok(body.split("<details>")[0].includes("Not reviewed: 2 files (budget exhausted), 1 file (timeout)."));
         assert.ok(body.includes(`<code>c</code> | Not reviewed — budget: token limit`));
         assert.ok(body.includes("Waived — empty diff"));
