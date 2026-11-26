@@ -375,11 +375,17 @@ const DocsPage: React.FC = () => {
     setExpandedItems(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
-  const navigateToDoc = useCallback((slug: DocSlug, fragment?: string) => {
-    navigate(`/docs/${slug}${fragment ? `#${fragment}` : ''}`);
+  const navigateToDoc = useCallback((slug: DocSlug, fragment?: string, options?: { replace?: boolean }) => {
+    navigate(`/docs/${slug}${fragment ? `#${fragment}` : ''}`, { replace: options?.replace });
     // Scroll page to top when the destination has no requested heading.
     if (!fragment) window.scrollTo(0, 0);
   }, [navigate]);
+
+  useEffect(() => {
+    if (slugParam && !validSlugs.has(slugParam as DocSlug)) {
+      navigateToDoc('quickstart', undefined, { replace: true });
+    }
+  }, [slugParam, navigateToDoc]);
 
   /* Intercept clicks on internal doc links and convert to SPA navigation */
   const handleContentClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {

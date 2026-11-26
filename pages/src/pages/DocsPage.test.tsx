@@ -128,14 +128,14 @@ function NavHistoryButtons() {
 }
 
 function CurrentLocation() {
-  const { pathname, hash } = useLocation();
-  return <div data-testid="location">{pathname}{hash}</div>;
+  const { pathname, search, hash } = useLocation();
+  return <div data-testid="location">{pathname}{search}{hash}</div>;
 }
 
-function renderDocsPage(initialLang: Language = 'en', initialEntry = '/docs/quickstart') {
+function renderDocsPage(initialLang: Language = 'en', initialEntry: string | string[] = '/docs/quickstart') {
   window.localStorage.setItem('ocr-lang', initialLang);
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <MemoryRouter initialEntries={typeof initialEntry === 'string' ? [initialEntry] : initialEntry}>
       <LanguageProvider>
         <SwitchLangButton to="en" />
         <SwitchLangButton to="zh" />
@@ -194,6 +194,43 @@ afterEach(() => {
 });
 
 describe('DocsPage', () => {
+  it('redirects an unknown doc slug to the canonical quickstart URL', async () => {
+    renderDocsPage('en', '/docs/troubleshooting/?source=missing#timeout-errorsuttggggg');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location').textContent).toBe('/docs/quickstart');
+    });
+
+    await act(async () => {
+      h.pending.en[0].resolve({ quickstart: 'quickstart body' });
+    });
+    expect(screen.getByTestId('markdown').getAttribute('data-content')).toBe('quickstart body');
+  });
+
+  it('keeps a known doc slug and its fragment on their own URL', async () => {
+    renderDocsPage('en', '/docs/installation#intro');
+
+    await act(async () => {
+      h.pending.en[0].resolve({ installation: '## Intro\n\ninstallation body' });
+    });
+
+    expect(screen.getByTestId('location').textContent).toBe('/docs/installation#intro');
+    expect(screen.getByTestId('markdown').getAttribute('data-content')).toContain('installation body');
+  });
+
+  it('replaces the unknown URL so Back returns to the previous document', async () => {
+    renderDocsPage('en', ['/docs/installation', '/docs/unknown#missing']);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location').textContent).toBe('/docs/quickstart');
+    });
+
+    fireEvent.click(screen.getByTestId('go-back'));
+    await waitFor(() => {
+      expect(screen.getByTestId('location').textContent).toBe('/docs/installation');
+    });
+  });
+
   it('shows a loading state, then renders the loaded content', async () => {
     renderDocsPage('en');
 
