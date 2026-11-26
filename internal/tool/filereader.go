@@ -180,17 +180,38 @@ func scanLines(r io.Reader, startLine, maxLines int) ([]string, int, error) {
 	var collected []string
 	lineNum := 0
 	lastHadNewline := false
+	hasLine := false
 
 	for {
-		line, err := br.ReadString('\n')
-		if len(line) > 0 {
+		collect := lineNum+1 >= startLine && len(collected) < maxLines
+		var line string
+		var err error
+		if collect {
+			line, err = br.ReadString('\n')
+			if len(line) > 0 {
+				hasLine = true
+				lastHadNewline = line[len(line)-1] == '\n'
+			}
+		} else {
+			// Unselected lines need only be counted, even when one spans many buffers.
+			var part []byte
+			part, err = br.ReadSlice('\n')
+			if len(part) > 0 {
+				hasLine = true
+				lastHadNewline = part[len(part)-1] == '\n'
+			}
+			if err == bufio.ErrBufferFull {
+				continue
+			}
+		}
+		if hasLine {
 			lineNum++
-			lastHadNewline = line[len(line)-1] == '\n'
-			trimmed := strings.TrimSuffix(line, "\n")
-			trimmed = strings.TrimSuffix(trimmed, "\r")
-			if lineNum >= startLine && len(collected) < maxLines {
+			if collect {
+				trimmed := strings.TrimSuffix(line, "\n")
+				trimmed = strings.TrimSuffix(trimmed, "\r")
 				collected = append(collected, trimmed)
 			}
+			hasLine = false
 		}
 		if err != nil {
 			if err != io.EOF {
