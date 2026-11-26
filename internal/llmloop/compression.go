@@ -315,6 +315,22 @@ func fitCompressionInput(msgs []llm.Message, templates []MessageTemplate, budget
 	return out, nil
 }
 
+// smallestCompressionInput returns a copy of msgs with every content and
+// reasoning field longer than the truncation marker replaced by the marker:
+// the shortest input fitCompressionInput can produce.
+func smallestCompressionInput(msgs []llm.Message) []llm.Message {
+	out := copyMessages(msgs)
+	for i := range out {
+		if len(out[i].ExtractText()) > len(truncationSuffix) {
+			out[i].Content = truncationSuffix
+		}
+		if len(out[i].ReasoningContent) > len(truncationSuffix) {
+			out[i].ReasoningContent = truncationSuffix
+		}
+	}
+	return out
+}
+
 // copyMessages creates a shallow copy of a message slice.
 func copyMessages(msgs []llm.Message) []llm.Message {
 	out := make([]llm.Message, len(msgs))
@@ -350,6 +366,14 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	// count is over budget, so the budget strictly shrinks each pass and
 	// fitCompressionInput eventually either fits or reports the markup/template
 	// alone is too large — there is no unbounded loop.
+	//
+	// The scaled budget is itself an estimate: template text and XML markup
+	// cannot shrink, so scaling the whole rendered size can undershoot what
+	// truncation is able to reach. The budget is therefore never lowered below
+	// the size of the smallest marked request; only when that smallest request
+	// is still over the token limit is compression skipped.
+	zone := msgs[part.frozenEnd:part.compressEnd]
+	minBudget := renderedSize(r.task.Compression.Messages, buildMessageXML(smallestCompressionInput(zone)))
 	var (
 		byteBudget      = r.task.MaxContextTokens * 4
 		compressZone    []llm.Message
@@ -359,8 +383,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 	)
 	for {
 		var err error
-		compressZone, err = fitCompressionInput(msgs[part.frozenEnd:part.compressEnd],
-			r.task.Compression.Messages, byteBudget)
+		compressZone, err = fitCompressionInput(zone, r.task.Compression.Messages, byteBudget)
 		if err != nil {
 			return msgs, fmt.Errorf("memory compression: %w", err)
 		}
@@ -376,10 +399,16 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, taskKey
 		if requestTokens <= r.task.MaxContextTokens {
 			break
 		}
+		if byteBudget <= minBudget {
+			return msgs, fmt.Errorf("memory compression: %w: %d tokens over a %d-token window",
+				errCompressionInputTooLarge, requestTokens, r.task.MaxContextTokens)
+		}
 		// Shrink the byte budget in proportion to the observed token density so
 		// the next fit targets a request that actually stays under the window.
-		// requestTokens > MaxContextTokens guarantees the factor is < 1.
-		byteBudget = byteBudget * r.task.MaxContextTokens / requestTokens
+		// requestTokens > MaxContextTokens guarantees the factor is < 1. The
+		// product is computed in 64 bits so it cannot overflow on 32-bit builds.
+		scaled := int(int64(byteBudget) * int64(r.task.MaxContextTokens) / int64(requestTokens))
+		byteBudget = max(scaled, minBudget)
 	}
 
 	// The task record is created before the request, not after it, because the

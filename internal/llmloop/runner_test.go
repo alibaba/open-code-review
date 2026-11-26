@@ -498,8 +498,8 @@ func TestRunCompression_TightensBudgetForDenseContent(t *testing.T) {
 	msgs := []llm.Message{
 		msg("system", "sys"),
 		msg("user", "prompt"),
-		msg("assistant", "下面是工具返回的结果"),
-		msg("tool", strings.Repeat("压缩测试数据", 100)), // 1800 bytes / ~600 tokens
+		msg("assistant", "下面是工具返回的结果"),             // allow-non-english: CJK fixture tokenizes densely
+		msg("tool", strings.Repeat("压缩测试数据", 100)), // allow-non-english: CJK fixture, 1800 bytes / ~600 tokens
 	}
 
 	got, err := r.runCompression(context.Background(), msgs, "test.go")
@@ -850,5 +850,44 @@ func TestRunCompression_OversizedTemplateSkipsRequest(t *testing.T) {
 	}
 	if len(got) != len(msgs) {
 		t.Errorf("messages = %d, want the original %d kept", len(got), len(msgs))
+	}
+}
+
+// Template text cannot shrink, so scaling the whole rendered size by the token
+// density can push the byte budget below the smallest request truncation can
+// produce. Here that smallest request is about 750 tokens, within the
+// 1000-token window, so compression must go ahead instead of failing.
+func TestRunCompression_ScaledBudgetKeepsReachableRequest(t *testing.T) {
+	t_tempDir = t.TempDir()
+	summaryText := "compressed summary"
+	client := &fakeLLMClient{
+		response: &llm.ChatResponse{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summaryText}}},
+			Usage:   &llm.UsageInfo{PromptTokens: 50, CompletionTokens: 10},
+		},
+	}
+	r := newTestRunner(client, Task{
+		Compression: CompressionPolicy{
+			Messages: []MessageTemplate{{Role: "user", Content: strings.Repeat(" abc", 700) + "\n{{context}}"}},
+		},
+		MaxContextTokens: 1000,
+	})
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		msg("assistant", "x"),
+		msg("tool", strings.Repeat("1!", 530)),
+	}
+
+	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	if err != nil {
+		t.Fatalf("runCompression: %v", err)
+	}
+	summarized := false
+	for _, m := range got {
+		summarized = summarized || strings.Contains(m.ExtractText(), summaryText)
+	}
+	if !summarized {
+		t.Fatal("compression result does not contain the summary")
 	}
 }
