@@ -523,6 +523,35 @@ stdin 一律视为「否」**，因此流水线或 CI 任务需要传入 `--yes`
 | `--repo <path>` | 所有仓库 | 只在该仓库下查找这个会话。 |
 | `--yes`、`-y` | `false` | 跳过确认提示。 |
 
+## `ocr memory`
+
+在本地或 CI 运行以下命令，OCR 会从本次评审的基线提交中提取业务知识，再检查当前改动。`DB` 是仓库目录外一个可信 SQLite 数据库的绝对路径。
+
+```bash
+ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
+```
+
+OCR 会读取相关代码、配置、测试、历史版本和提交说明。添加 `--memory-discussions <URL或文件>` 可以纳入 GitHub PR、GitLab MR 或本地 JSON 导出的评审讨论。在线读取使用本机已登录的 `gh` 或 `glab`。本地文件是一个 JSON 数组，每条讨论包含 `id`、`body`，可附带 `path`、`revision`、`url` 和 RFC3339 格式的 `created_at`、`updated_at`。
+
+也可以在指定版本上单独提取规则，之后让评审任务只读数据库。
+
+```bash
+ocr memory sync --ref main --scope src/payments --discussions notes.json --memory-db "$DB"
+ocr memory list --search refund --memory-db "$DB"
+ocr memory feedback "$RULE_ID" --action confirm --reason "Matches the settlement contract" --memory-db "$DB"
+ocr review --from main --to HEAD --memory-db "$DB"
+```
+
+`sync` 输出读入的来源、拒绝的记录和采样限制。`--path` 以及 `--at path:line` 可以优先检查指定代码。回放历史评审时，向 `sync --as-of` 和 `review --memory-as-of` 传入当时的时间，讨论需要有可核对的最后编辑时间。
+
+规则保留来源、适用范围和条件。模型提取的规则先标为候选；评审会定位本次改动中的代码，核对调用路径和例外。对明确绑定了 JSON Schema 的 JSON 文件，OCR 还能直接检查字段的 `const`、`enum` 取值。`memory learn` 可以建立这类绑定。`memory decide --review-id <id>` 用于记录某次评审的判断及理由；后续评审使用相同的 `--review-id` 和数据库来复核。
+
+运行 `memory list --ref <commit>` 可查看规则是否仍适用。用 `feedback --action reject` 或 `feedback --action replace --replacement <id>` 附上理由来处理错误或过时的规则，或用 `memory revoke <id>` 撤回一条记录。
+
+Agent 先按原流程检查改动和调用代码，再用业务知识复核改动和已发现的问题。新增业务意见要能指出受影响的代码行和当前仓库里的依据。撤回已有意见还要说明同一位置的哪项判断被证据推翻。尚未确认的规则需要另一个当前来源佐证。使用 `--no-filter` 可以保留原有意见。额外检查因预算或模型请求失败而跳过时，报告会记录原因。
+
+Go 或 Python 中的相关代码移到其他行后，OCR 可以重新定位引用。如果免手续费等例外的触发条件变了，旧评审里的解释就会失效。
+
 ## `ocr rules`
 
 规则自查。只有一个子命令：

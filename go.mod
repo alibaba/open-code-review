@@ -20,6 +20,7 @@ require (
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
+	github.com/tamnd/gopapy/v2 v2.0.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/yuin/goldmark v1.7.17
 	go.opentelemetry.io/otel v1.47.0

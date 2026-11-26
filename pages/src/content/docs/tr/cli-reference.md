@@ -474,6 +474,30 @@ Depo, dal, başlangıç zamanı, dosya ve yorum sayıları gösterilip onay iste
 | `--repo <path>` | Tüm depolar | Yalnızca bu depoda arar. |
 | `--yes`, `-y` | `false` | Onay istemini atlar. |
 
+## `ocr memory` {#ocr-memory}
+
+OCR, önerilen değişikliği incelerken karşılaştırmanın başlangıç sürümündeki iş kurallarından yararlanabilir. `DB` değişkenine çalışma dizininin dışında tutulan güvenilir bir SQLite dosyasının mutlak yolunu verin.
+
+```bash
+ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
+```
+
+`sync` koddaki örüntüleri, yapılandırmayı, yakın testleri, önceki dosya sürümlerini ve commit mesajlarını inceler. Her aday kuralın kaynağını, kapsamını ve geçerlilik koşullarını saklar. `--memory-discussions` ile bir GitHub PR bağlantısı, GitLab MR bağlantısı veya dışa aktarılmış bir JSON dosyası ekleyebilirsiniz. Bağlantılar için ilgili depoda oturum açmış bir `gh` veya `glab` istemcisi gerekir. Geçmiş bir incelemeyi yeniden çalıştırırken `memory sync --as-of` ve `review --memory-as-of` için aynı RFC3339 zamanını kullanın.
+
+### Açık kısıtlar ve inceleme kararları {#explicit-constraints-and-decisions}
+
+```bash
+ocr memory learn contracts/payment.json --scope src/payments --memory-db "$DB"
+ocr memory list --search refund --memory-db "$DB"
+ocr memory feedback "$RULE_ID" --action confirm --reason "Matches the settlement contract" --memory-db "$DB"
+```
+
+`learn`, JSON Schema özelliklerinin doğrudan `const` ve `enum` kısıtlarını belirtilen dosya veya dizinle ilişkilendirir. Belirli bir inceleme için alınan kararı, gerekçesini ve kaynak satırlarını `memory decide --review-id <id> --evidence-lines <ilk-son>` ile kaydedin. Sonraki incelemelerde aynı kimliği kullanın. Hatalı bir kuralı `feedback --action reject` ile reddedebilir, `--action replace --replacement <id>` ile başka bir kuralla değiştirebilirsiniz.
+
+### İncelemede kuralların kullanımı {#how-review-uses-knowledge}
+
+Ajan önce normal kod incelemesini tamamlar. Ardından ilgili kuralları ve güncel kaynak satırlarını kullanarak eksik bir iş kuralı ihlalini arar ve mevcut bulguların dayanaklarını sınar. Bir bulgunun geri çekilmesi için aynı konumdaki iddianın güncel kanıtla çelişmesi gerekir. `--no-filter` mevcut bulguları korur. Bir istisnanın koşulu değişirse önceki incelemenin gerekçesi geçerliliğini yitirir.
+
 ## `ocr rules` {#ocr-rules}
 
 Kuralları incelemek içindir; tek alt komutu vardır:

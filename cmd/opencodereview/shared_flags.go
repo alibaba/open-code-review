@@ -130,6 +130,22 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.reviewID != "" && opts.memoryDB == "" {
 		return fmt.Errorf("--review-id requires --memory-db")
 	}
+	if opts.memorySync && opts.memoryDB == "" {
+		return fmt.Errorf("--memory-sync requires --memory-db")
+	}
+	if len(opts.memoryDiscussions) > 0 && !opts.memorySync {
+		return fmt.Errorf("--memory-discussions requires --memory-sync")
+	}
+	if opts.memoryAsOf != "" {
+		if opts.memoryDB == "" {
+			return fmt.Errorf("--memory-as-of requires --memory-db")
+		}
+		cutoff, err := parseMemoryTime(opts.memoryAsOf)
+		if err != nil {
+			return err
+		}
+		opts.memoryTime = cutoff
+	}
 	opts.to = normalizeDiffTarget(opts.from, opts.to, opts.commit)
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
@@ -213,8 +229,11 @@ func validateDelegateOptions(opts *delegateOptions) error {
 
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
 func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
-	cmd.Flags().StringVar(&opts.memoryDB, "memory-db", "", "read verified repository knowledge from a trusted SQLite database")
-	cmd.Flags().StringVar(&opts.reviewID, "review-id", "", "include verified decisions for this PR, MR or local review")
+	cmd.Flags().StringVar(&opts.memoryDB, "memory-db", "", "read scoped business knowledge from a trusted SQLite database")
+	cmd.Flags().StringVar(&opts.reviewID, "review-id", "", "include decisions specific to this PR, MR or local review")
+	cmd.Flags().BoolVar(&opts.memorySync, "memory-sync", false, "discover or refresh business knowledge from the review base before reviewing")
+	cmd.Flags().StringArrayVar(&opts.memoryDiscussions, "memory-discussions", nil, "PR/MR URL or local discussion JSON for --memory-sync (repeatable)")
+	cmd.Flags().StringVar(&opts.memoryAsOf, "memory-as-of", "", "evaluate knowledge and feedback available by this RFC3339 timestamp")
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)

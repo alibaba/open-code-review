@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
@@ -22,6 +23,9 @@ type Tree struct {
 	Commit    string // Immutable target, or the base of a workspace review.
 	Workspace bool
 	Git       *gitcmd.Runner
+	AllowPath func(string) bool
+	Paths     []string
+	Now       time.Time
 }
 
 func validOID(s string) bool {
@@ -35,8 +39,8 @@ func validOID(s string) bool {
 const maxEvidenceBytes = 1 << 20
 
 func (t Tree) read(ctx context.Context, p string) ([]byte, error) {
-	if !validPath(p) {
-		return nil, fmt.Errorf("invalid evidence path %q", p)
+	if !t.permits(p) {
+		return nil, fmt.Errorf("invalid or excluded evidence path %q", p)
 	}
 	if t.Workspace {
 		root, err := os.OpenRoot(t.Repo)
@@ -71,7 +75,7 @@ func (t Tree) read(ctx context.Context, p string) ([]byte, error) {
 		}
 		return data, err
 	}
-	if !validOID(t.Commit) {
+	if !validOID(t.Commit) || t.Git == nil {
 		return nil, fmt.Errorf("expected an immutable commit for memory evidence")
 	}
 	entry, err := t.Git.Output(ctx, t.Repo, "--literal-pathspecs", "ls-tree", "-lz", t.Commit, "--", p)
@@ -90,8 +94,12 @@ func (t Tree) read(ctx context.Context, p string) ([]byte, error) {
 	return t.Git.Output(ctx, t.Repo, "cat-file", "blob", fields[2])
 }
 
+func (t Tree) permits(p string) bool {
+	return validPath(p) && (t.AllowPath == nil || t.AllowPath(p))
+}
+
 func (t Tree) Learn(ctx context.Context, source, scope, property string) ([]Fact, error) {
-	if !validSource(source) || !validPath(scope) {
+	if !validSource(source) || !validScope(scope) {
 		return nil, fmt.Errorf("source must be a relative .json path and scope a repository-relative path")
 	}
 	if !validOID(t.Commit) || t.Workspace {
@@ -121,11 +129,16 @@ func (t Tree) Learn(ctx context.Context, source, scope, property string) ([]Fact
 
 type Checked struct {
 	Fact
-	Status string `json:"status"`
-	Detail string `json:"detail,omitempty"`
+	Status    string   `json:"status"`
+	Detail    string   `json:"detail,omitempty"`
+	Conflicts []string `json:"conflicts,omitempty"`
 }
 
 func (t Tree) Decide(ctx context.Context, source, scope, review, finding, reason string) (Fact, error) {
+	return t.DecideWithCitation(ctx, source, scope, review, finding, reason, 0, 0)
+}
+
+func (t Tree) DecideWithCitation(ctx context.Context, source, scope, review, finding, reason string, start, end int) (Fact, error) {
 	if t.Workspace || !validOID(t.Commit) {
 		return Fact{}, fmt.Errorf("record a decision at a committed revision")
 	}
@@ -143,98 +156,15 @@ func (t Tree) Decide(ctx context.Context, source, scope, review, finding, reason
 	if err != nil {
 		return Fact{}, err
 	}
-	return Fact{Source: source, Revision: t.Commit, Scope: scope, ReviewID: review, Finding: finding, Reason: reason,
-		SourceHash: Digest(evidence), CodeHash: Digest(code)}, nil
-}
-
-func (t Tree) Check(ctx context.Context, facts []Fact) ([]Checked, error) {
-	type assertions struct {
-		values []Constraint
-		err    error
+	f := Fact{Source: source, Revision: t.Commit, Scope: scope, ReviewID: review, Finding: finding, Reason: reason,
+		SourceHash: Digest(evidence), CodeHash: Digest(code), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	if start != 0 || end != 0 {
+		c, err := newCitationFile(source, evidence).cite(source, t.Commit, start, end)
+		if err != nil {
+			return Fact{}, err
+		}
+		f.Citations = []Citation{c}
+		f.Category, f.Authority = CategoryDecision, AuthorityHistorical
 	}
-	schemas := map[string]assertions{}
-	hashes := map[string]string{}
-	checkHash := func(f Fact, path, expected, label string) Checked {
-		digest, ok := hashes[path]
-		if !ok {
-			data, err := t.read(ctx, path)
-			if err != nil {
-				return Checked{f, "unverified", err.Error()}
-			}
-			digest = Digest(data)
-			hashes[path] = digest
-		}
-		if digest != expected {
-			return Checked{f, "changed", label + " changed"}
-		}
-		return Checked{f, "verified", ""}
-	}
-	reachable := map[string]bool{}
-	result := make([]Checked, 0, len(facts))
-	// Several branches can independently establish the same assertion. Use the
-	// first reachable observation per stable ID, keeping one diagnostic if none is.
-	positions := make(map[string]int)
-	for _, f := range facts {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		checked := Checked{Fact: f, Status: "unverified"}
-		if !validOID(f.Revision) || !validPath(f.Source) || !validPath(f.Scope) || (f.ReviewID == "" && !validSource(f.Source)) {
-			return nil, fmt.Errorf("invalid stored evidence for %s", f.ID)
-		}
-		if _, ok := reachable[f.Revision]; !ok {
-			// A shallow checkout can lack the source commit. An unproven ancestor
-			// cannot authorize a decision, including on an unrelated release branch.
-			if validOID(t.Commit) {
-				_, err := t.Git.Output(ctx, t.Repo, "merge-base", "--is-ancestor", f.Revision, t.Commit)
-				reachable[f.Revision] = err == nil
-			}
-		}
-		pos, seen := positions[f.ID]
-		if seen && result[pos].Status != "unverified" {
-			continue
-		}
-		if !seen {
-			pos = len(result)
-			positions[f.ID] = pos
-			result = append(result, checked)
-		}
-		if !reachable[f.Revision] {
-			if !seen {
-				result[pos].Detail = "source revision is not a proven ancestor"
-			}
-			continue
-		}
-		if f.ReviewID != "" {
-			checked = checkHash(f, f.Source, f.SourceHash, "decision evidence")
-			if checked.Status == "verified" {
-				checked = checkHash(f, f.Scope, f.CodeHash, "reviewed file")
-			}
-			result[pos] = checked
-			continue
-		}
-		a, ok := schemas[f.Source]
-		if !ok {
-			data, err := t.read(ctx, f.Source)
-			if err == nil {
-				a.values, err = Constraints(data)
-			}
-			a.err = err
-			schemas[f.Source] = a
-		}
-		if a.err != nil {
-			checked.Detail = a.err.Error()
-			result[pos] = checked
-			continue
-		}
-		checked.Status = "changed"
-		for _, c := range a.values {
-			if f.Property == c.Property && f.Keyword == c.Keyword && bytes.Equal(f.Value, c.Value) {
-				checked.Status = "verified"
-				break
-			}
-		}
-		result[pos] = checked
-	}
-	return result, ctx.Err()
+	return f, nil
 }

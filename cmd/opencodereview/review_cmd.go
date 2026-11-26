@@ -33,6 +33,10 @@ import (
 type reviewOptions struct {
 	memoryDB                string
 	reviewID                string
+	memorySync              bool
+	memoryDiscussions       []string
+	memoryAsOf              string
+	memoryTime              time.Time
 	rulePath                string
 	repoDir                 string
 	from                    string
@@ -212,6 +216,12 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return fmt.Errorf("prepare code tools: %w", err)
 	}
+	discoveryBudget := reviewDiscoveryBudget{limit: opts.maxTokensBudget}
+	if opts.memorySync && resumeState == nil {
+		if err := syncReviewBase(ctx, cc, opts, codeTools, rt, &discoveryBudget); err != nil {
+			return fmt.Errorf("sync review memory: %w", err)
+		}
+	}
 	memories, err := reviewMemory(ctx, cc, opts, codeTools)
 	if err != nil {
 		return fmt.Errorf("load review memory: %w", err)
@@ -259,6 +269,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Template:              *cc.Template,
 		SystemRule:            cc.Resolver,
 		Knowledge:             memories,
+		KnowledgeUsage:        &discoveryBudget.usage,
 		FileFilter:            cc.FileFilter,
 		LLMClient:             rt.Client,
 		RetryCollector:        rt.RetryCollector,

@@ -55,6 +55,7 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
 	Knowledge       knowledge.Snapshot
+	KnowledgeUsage  *llm.UsageInfo
 	AnalysisEnabled bool
 	// RepoDir is the root of the git repository.
 	RepoDir string
@@ -258,6 +259,7 @@ func New(args Args) *Agent {
 		NewRequestMeta:  a.newRequestMeta,
 		MaxTokensBudget: args.MaxTokensBudget,
 	})
+	a.runner.RecordUsage(args.KnowledgeUsage)
 	return a
 }
 
@@ -1090,7 +1092,7 @@ func (a *Agent) sourceArtifactSHA256() string {
 func (a *Agent) ruleConfigSHA256() string {
 	var fields []string
 	if identity := a.args.Knowledge.Identity(); identity != "" {
-		fields = append(fields, "review-knowledge-v1", identity)
+		fields = append(fields, "review-knowledge-v3", identity)
 	}
 	if cc, ok := a.args.SystemRule.(interface{ CanonicalConfig() []string }); ok {
 		fields = append(fields, cc.CanonicalConfig()...)
@@ -1556,7 +1558,6 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 
 		confirmedText := buildConfirmedCommentsBlock(confirmed)
 		messages := a.buildMainTaskMessages(rule, changeFilesExcludingGroup, concatenatedDiffs, roundPlan, confirmedText)
-		messages = a.appendGroupKnowledge(messages, g)
 
 		if stop := a.checkPromptBudget(ctx, messages, groupKey, round); stop != nil {
 			if round == 1 {
@@ -1639,6 +1640,12 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 
 	if lastStop != nil {
 		return false, lastStop, nil
+	}
+	if completed {
+		g.business = selectBusinessContext(a.args.Knowledge, g.Diffs)
+		if len(g.business.rules) > 0 {
+			a.verifyBusinessFindings(ctx, g, rule, concatenatedDiffs)
+		}
 	}
 	return completed, nil, nil
 }
@@ -1822,23 +1829,6 @@ func (a *Agent) resolveGroupSystemRule(diffs []model.Diff) string {
 	return sb.String()
 }
 
-func (a *Agent) appendGroupKnowledge(messages []llm.Message, g FileGroup) []llm.Message {
-	if len(a.args.Knowledge) == 0 {
-		return messages
-	}
-	paths := make([]string, 0, len(g.Diffs))
-	for _, d := range g.Diffs {
-		paths = append(paths, d.NewPath)
-	}
-	if evidence := a.args.Knowledge.ForPaths(paths); evidence != "" {
-		withEvidence := append(messages, llm.NewTextMessage("user", evidence))
-		if llmloop.CountMessagesTokens(withEvidence) <= llmloop.PromptTokenLimit(a.args.Template.MaxTokens) {
-			return withEvidence
-		}
-	}
-	return messages
-}
-
 func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concatenatedDiffs, changeFiles, rule string) (string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "plan.execute")
 	defer span.End()
@@ -1857,7 +1847,6 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
-	messages = a.appendGroupKnowledge(messages, g)
 	gk := fileGroupKey(g.Diffs)
 	fs := a.session.GetOrCreateFileSession(gk)
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)

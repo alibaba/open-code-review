@@ -72,12 +72,12 @@ func TestEvidenceAtCommitAndInDirtyWorkspace(t *testing.T) {
 	}
 	dirty := tree
 	dirty.Workspace = true
-	status(dirty, "verified", "verified")
+	status(dirty, "verified", "historical")
 	write("entry.go", "caller no longer validates")
 	status(dirty, "verified", "changed")
 	write("contract.json", `{"properties":{"unit":{"const":"dollars"}}}`)
 	status(dirty, "changed", "changed")
-	status(tree, "verified", "verified")
+	status(tree, "verified", "historical")
 	write("contract.json", "{")
 	status(dirty, "unverified", "changed")
 	if err = os.Remove(filepath.Join(repo, "entry.go")); err != nil {

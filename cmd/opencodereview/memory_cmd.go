@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
@@ -29,6 +30,8 @@ func openMemory(ctx context.Context, database, repo string, runner *gitcmd.Runne
 	}
 	return knowledge.Open(ctx, database, identity, write)
 }
+
+type memoryOpener func(*cobra.Command, bool) (*knowledge.Store, knowledge.Tree, error)
 
 func newMemoryCommand() *cobra.Command {
 	var database, repoDir, ref string
@@ -53,13 +56,14 @@ func newMemoryCommand() *cobra.Command {
 		return s, tree, err
 	}
 	for _, name := range []string{"learn", "decide"} {
-		var scope, prop, review, finding, reason string
+		var scope, prop, review, finding, reason, lines, expires string
 		cmd := &cobra.Command{Use: name + " <schema.json>", Args: exactArgs(1), Short: "Extract direct property const and enum constraints from a committed JSON schema"}
-		cmd.Flags().StringVar(&scope, "scope", "", "repository-relative file or directory governed by the schema")
-		_ = cmd.MarkFlagRequired("scope")
 		if name == "decide" {
 			cmd.Use = "decide <evidence-file>"
 			cmd.Short = "Record a review-local decision backed by a committed file"
+			cmd.Flags().StringVar(&scope, "scope", "", "reviewed file relative to the repository")
+			cmd.Flags().StringVar(&lines, "evidence-lines", "", "source lines supporting the decision, e.g. 15-20")
+			cmd.Flags().StringVar(&expires, "expires-at", "", "expire this review decision at an RFC3339 timestamp")
 			cmd.Flags().StringVar(&review, "review-id", "", "PR, MR or local review identifier")
 			cmd.Flags().StringVar(&finding, "finding", "", "review finding that was discussed")
 			cmd.Flags().StringVar(&reason, "reason", "", "why this finding needs no change")
@@ -67,8 +71,10 @@ func newMemoryCommand() *cobra.Command {
 				_ = cmd.MarkFlagRequired(flag)
 			}
 		} else {
+			cmd.Flags().StringVar(&scope, "scope", "", "repository-relative file or directory governed by the schema")
 			cmd.Flags().StringVar(&prop, "property", "", "select one named schema property")
 		}
+		_ = cmd.MarkFlagRequired("scope")
 		cmd.RunE = func(cmd *cobra.Command, args []string) error {
 			s, tree, err := open(cmd, true)
 			if err != nil {
@@ -77,8 +83,19 @@ func newMemoryCommand() *cobra.Command {
 			defer s.Close()
 			var facts []knowledge.Fact
 			if name == "decide" {
+				start, end, lineErr := parseEvidenceLines(lines)
+				if lineErr != nil {
+					return lineErr
+				}
 				var fact knowledge.Fact
-				fact, err = tree.Decide(cmd.Context(), args[0], scope, review, finding, reason)
+				fact, err = tree.DecideWithCitation(cmd.Context(), args[0], scope, review, finding, reason, start, end)
+				if expires != "" {
+					until, err := time.Parse(time.RFC3339, expires)
+					if err != nil {
+						return fmt.Errorf("parse --expires-at: %w", err)
+					}
+					fact.ExpiresAt = until.UTC().Format(time.RFC3339)
+				}
 				facts = []knowledge.Fact{fact}
 			} else {
 				facts, err = tree.Learn(cmd.Context(), args[0], scope, prop)
@@ -93,14 +110,18 @@ func newMemoryCommand() *cobra.Command {
 		}
 		root.AddCommand(cmd)
 	}
-	var review, search string
+	var review, search, asOf string
 	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, Short: "Show recorded evidence and its status at the selected commit", RunE: func(cmd *cobra.Command, args []string) error {
 		s, tree, err := open(cmd, false)
 		if err != nil {
 			return err
 		}
 		defer s.Close()
-		facts, err := s.List(cmd.Context(), review, search)
+		tree.Now, err = parseMemoryTime(asOf)
+		if err != nil {
+			return err
+		}
+		facts, err := s.List(cmd.Context(), review, "")
 		if err != nil {
 			return err
 		}
@@ -108,10 +129,23 @@ func newMemoryCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if search != "" {
+			// Compute conflicts before narrowing output to the matching text.
+			matches, err := s.List(cmd.Context(), review, search)
+			if err != nil {
+				return err
+			}
+			ids := make(map[string]bool, len(matches))
+			for _, f := range matches {
+				ids[f.ID] = true
+			}
+			checked = slices.DeleteFunc(checked, func(c knowledge.Checked) bool { return !ids[c.ID] })
+		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(checked)
 	}}
 	list.Flags().StringVar(&review, "review-id", "", "also include decisions from this review")
 	list.Flags().StringVar(&search, "search", "", "literal full-text phrase (at least three characters)")
+	list.Flags().StringVar(&asOf, "as-of", "", "evaluate evidence and feedback at this RFC3339 timestamp")
 	root.AddCommand(list, &cobra.Command{Use: "revoke <id>", Args: exactArgs(1), Short: "Withdraw a memory from future reviews", RunE: func(cmd *cobra.Command, args []string) error {
 		s, _, err := open(cmd, true)
 		if err != nil {
@@ -120,6 +154,7 @@ func newMemoryCommand() *cobra.Command {
 		defer s.Close()
 		return s.Revoke(cmd.Context(), args[0])
 	}})
+	root.AddCommand(newMemorySync(open), newMemoryFeedback(open))
 	return root
 }
 
@@ -136,22 +171,25 @@ func reviewMemory(ctx context.Context, cc *commonContext, opts reviewOptions, co
 	if err != nil {
 		return nil, err
 	}
-	if f := cc.FileFilter; f != nil {
-		facts = slices.DeleteFunc(facts, func(item knowledge.Fact) bool { return f.IsUserExcluded(item.Source) || f.IsUserExcluded(item.Scope) })
+	tree := knowledge.Tree{Repo: cc.RepoDir, Git: cc.GitRunner, Commit: code.resolution.ResolvedHead, Workspace: code.reader.Mode == tool.ModeWorkspace, Now: opts.memoryTime}
+	if cc.FileFilter != nil {
+		facts = slices.DeleteFunc(facts, func(f knowledge.Fact) bool {
+			return cc.FileFilter.IsUserExcluded(f.Scope) || slices.ContainsFunc(f.EvidencePaths(), cc.FileFilter.IsUserExcluded)
+		})
+		tree.AllowPath = func(p string) bool { return !cc.FileFilter.IsUserExcluded(p) }
 	}
-	tree := knowledge.Tree{Repo: cc.RepoDir, Git: cc.GitRunner, Commit: code.resolution.ResolvedHead, Workspace: code.reader.Mode == tool.ModeWorkspace}
 	if tree.Workspace {
 		tree.Commit = code.resolution.ResolvedBase
 	}
-	checked, err := tree.Check(ctx, facts)
+	checked, err := tree.CheckReview(ctx, code.resolution.ResolvedBase, facts)
 	if err != nil {
 		return nil, err
 	}
-	var snapshot knowledge.Snapshot
-	for _, item := range checked {
-		if item.Status == "verified" {
-			snapshot = append(snapshot, item.Fact)
-		}
+	snapshot := knowledge.ReviewSnapshot(checked)
+	base := tree
+	base.Commit, base.Workspace = code.resolution.ResolvedBase, false
+	if err := snapshot.DescribeSchemaChanges(ctx, base, tree, checked); err != nil {
+		return nil, err
 	}
 	return snapshot, nil
 }
