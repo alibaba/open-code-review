@@ -153,6 +153,32 @@ func TestGitGrep_WorkspaceMode_Found(t *testing.T) {
 	}
 }
 
+func TestGitGrep_WorkspaceMode_SubmoduleRecurseConfig(t *testing.T) {
+	dir := setupTestRepo(t)
+	// git reads submodule.recurse as an implicit --recurse-submodules, which
+	// it refuses to combine with --untracked.
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "submodule.recurse")
+	t.Setenv("GIT_CONFIG_VALUE_0", "true")
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "hello.go") {
+		t.Errorf("expected hello.go in result, got: %s", result)
+	}
+}
+
+func TestBuildGrepArgs_SubmoduleRecurseScopedToWorkspace(t *testing.T) {
+	workspace := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
+	assertContains(t, workspace.buildGrepArgs("myFunc", false, false, false, nil), "--no-recurse-submodules")
+
+	commit := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "abc1234"})
+	assertNotContains(t, commit.buildGrepArgs("myFunc", false, false, false, nil), "--no-recurse-submodules")
+}
+
 func TestGitGrep_WorkspaceMode_NoMatch(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
