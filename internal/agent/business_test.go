@@ -403,6 +403,128 @@ func TestBusinessReviewSkipsUnneededOrOverBudgetAdjudication(t *testing.T) {
 	}
 }
 
+func TestRecordedDecisionReassessesRecurringFindingWithoutANomination(t *testing.T) {
+	g := routingReviewGroup(knowledge.StatusCurrent)
+	decision := g.business.rules[0]
+	decision.Category, decision.ReviewID, decision.Claim = knowledge.CategoryDecision, "MR-48", ""
+	decision.Finding, decision.Reason = "Rush orders cannot use this queue.", "Express routing is allowed for rush orders."
+	g.business = selectBusinessContext(knowledge.ReviewSnapshot([]knowledge.Checked{{Fact: decision, Status: knowledge.StatusHistorical}}), g.Diffs)
+	const repeated = "Expedited dispatch rejects the order when it enters the express queue."
+	const genuine = "The audit operation can fail when its destination is full."
+	v := businessCheck{ID: decision.ID, Candidate: "c-0", Outcome: "refuted", Path: routingReviewPath, Quote: dispatchQuote, Line: 9,
+		RefutedText: repeated, SourcePath: routingPolicy, SourceQuote: routingSource, Trigger: "Express dispatch of a rush order.",
+		Effect: "The reviewer says routing rejects it.", Reason: "The unchanged rush guard permits this queue."}
+	for _, tc := range []struct {
+		name, answer string
+		remove       bool
+	}{
+		{"corroborated decision", businessReply(t, v), true},
+		{"prior decision alone", `{"checks":[]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			empty := `{"checks":[]}`
+			client := &fakeAgentClient{responses: []*llm.ChatResponse{
+				{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &empty}}}},
+				{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &tc.answer}}}},
+			}}
+			a := New(Args{RepoDir: t.TempDir(), LLMClient: client, Template: template.Template{MaxTokens: 10000}})
+			a.args.CommentCollector.Add(model.LlmComment{Path: routingReviewPath, StartLine: 9, EndLine: 9, ExistingCode: dispatchQuote, Content: repeated})
+			a.args.CommentCollector.Add(model.LlmComment{Path: routingReviewPath, StartLine: 12, EndLine: 12, ExistingCode: "audit(order)", Content: genuine})
+			a.verifyBusinessFindings(t.Context(), g, "", g.Diffs[0].Diff)
+			got := a.args.CommentCollector.CommentsForPath(routingReviewPath)
+			if client.calls != 2 || len(got) == 0 || (len(got) == 1) != tc.remove || got[len(got)-1].Content != genuine {
+				t.Fatalf("calls=%d comments=%+v", client.calls, got)
+			}
+		})
+	}
+}
+
+func TestInheritedWitnessRequiresBothSidesOfTheSameReplacement(t *testing.T) {
+	const p = "billing.js"
+	const expr = `invoice.channel == "desk"`
+	old, newLine := expr+" ? 0 : 1", expr+" || amount > 0 ? 0 : 1"
+	change := model.Diff{NewPath: p, Diff: "@@ -10,2 +10,2 @@\n context()\n-" + old + "\n+" + newLine}
+	base := businessCheck{Path: p, Line: 11, Quote: newLine, SourcePath: p, SourceQuote: "-" + old, Inherited: expr}
+	if !showsInheritedExpression(base, []model.Diff{change}) {
+		t.Fatal("exact preserved expression in a single replacement was rejected")
+	}
+	pair := base
+	pair.SourceQuote += "\n+" + newLine
+	if !showsInheritedExpression(pair, []model.Diff{change}) {
+		t.Fatal("explicit quotes from both sides of the same replacement were rejected")
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*businessCheck, *model.Diff)
+	}{
+		{"unmarked old quote", func(c *businessCheck, _ *model.Diff) { c.SourceQuote = old }},
+		{"invented reviewed quote", func(c *businessCheck, _ *model.Diff) { c.SourceQuote += "\n+somethingElse()" }},
+		{"another line", func(c *businessCheck, _ *model.Diff) { c.Line = 10 }},
+		{"another file", func(c *businessCheck, _ *model.Diff) { c.SourcePath = "other.js" }},
+		{"partial property name", func(c *businessCheck, _ *model.Diff) { c.Inherited = "invoice.chan" }},
+		{"different value", func(c *businessCheck, _ *model.Diff) { c.Inherited = "amount > 0" }},
+		{"changed leading guard", func(c *businessCheck, d *model.Diff) {
+			c.Quote = "enabled && " + newLine
+			d.Diff = strings.ReplaceAll(d.Diff, "+"+newLine, "+"+c.Quote)
+		}},
+		{"separate replacement", func(c *businessCheck, d *model.Diff) {
+			d.Diff = "@@ -9,3 +9,3 @@\n-" + old + "\n+somethingElse()\n context()\n-another()\n+" + newLine
+		}},
+		{"ambiguous deleted block", func(c *businessCheck, d *model.Diff) {
+			d.Diff = strings.ReplaceAll(d.Diff, "-"+old, "-guard()\n-"+old)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, d := base, change
+			tc.edit(&c, &d)
+			if showsInheritedExpression(c, []model.Diff{d}) {
+				t.Fatal("unverified inherited expression accepted")
+			}
+		})
+	}
+}
+
+func TestInheritedWitnessCannotDismissAnotherIssueOnTheSameLine(t *testing.T) {
+	const path = "checkout.go"
+	const expr = `order.Mode == "desk"`
+	old, edited := "if "+expr+" {", "if "+expr+" || total/units > 0 {"
+	const finding = "When " + expr + " is false and units are zero, the new division panics."
+	f := knowledge.Fact{ID: "mode-decision", Scope: path, Source: "modes.go", Category: knowledge.CategoryDecision, ReviewID: "MR-5",
+		Finding: "Change the comparison " + expr + ".", Reason: "Desk orders are permitted.",
+		Citations: []knowledge.Citation{{Kind: "code", Path: "modes.go", Quote: `return mode == "desk"`}}}
+	g := FileGroup{Diffs: []model.Diff{{NewPath: path, Diff: "@@ -7 +7 @@\n-" + old + "\n+" + edited}}}
+	g.business = selectBusinessContext(knowledge.ReviewSnapshot([]knowledge.Checked{{Fact: f, Status: knowledge.StatusHistorical}}), g.Diffs)
+	empty := `{"checks":[]}`
+	incorrect := businessReply(t, businessCheck{ID: f.ID, Candidate: "c-0", Outcome: "refuted", RefutedText: finding,
+		Path: path, Line: 7, Quote: edited, SourcePath: path, SourceQuote: "-" + old, Inherited: expr,
+		Trigger: "Zero units on a non-desk order.", Effect: "Panics during evaluation.", Reason: "The desk comparison was already present."})
+	client := &fakeAgentClient{responses: []*llm.ChatResponse{
+		{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &empty}}}},
+		{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &incorrect}}}},
+	}}
+	a := New(Args{RepoDir: t.TempDir(), LLMClient: client, Template: template.Template{MaxTokens: 10000}})
+	a.args.CommentCollector.Add(model.LlmComment{Path: path, StartLine: 7, EndLine: 7, ExistingCode: edited, Content: finding})
+	a.verifyBusinessFindings(t.Context(), g, "", g.Diffs[0].Diff)
+	if client.calls != 2 || len(a.args.CommentCollector.CommentsForPath(path)) != 1 {
+		t.Fatal("a decision about permitted modes authorized withdrawal of a new arithmetic failure")
+	}
+}
+
+func TestPriorDecisionBindsAnInheritedExpressionToTheDisputedIssue(t *testing.T) {
+	const expr = `order.Mode == "desk"`
+	check := businessCheck{Inherited: expr, RefutedText: "Use strict equality for the desk comparison."}
+	if !priorFindingMatches("Use strict equality\nfor the desk comparison.", check) {
+		t.Fatal("line wrapping changed the identity of a prior decision")
+	}
+	check.RefutedText = "Consider rewriting " + expr + " in the dispatch condition."
+	if priorFindingMatches("Replace the comparison "+expr+".", check) {
+		t.Fatal("a rephrased finding needs current independent evidence")
+	}
+	if priorFindingMatches("Desk mode is a configured value.", check) {
+		t.Fatal("mere topic overlap attributed an unrelated decision to the finding")
+	}
+}
+
 func TestBusinessClaimNeedsItsCurrentPremise(t *testing.T) {
 	src := knowledge.Citation{Kind: "test", Path: "settlement_test.go", Quote: "require.Zero(t, order.Fee)"}
 	old := knowledge.Citation{Kind: "discussion", Path: "other.go", Quote: "we usually waive the fee"}

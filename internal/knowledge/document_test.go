@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCheckBusinessDocument(t *testing.T) {
@@ -115,6 +116,146 @@ func TestReviewTransitionKeepsOnlySurvivingWitnesses(t *testing.T) {
 	r.write("notes.md", "explain shipping\n")
 	if later := check(acceptedChange, r.commit("unrelated change")); later.baseClaim != "" || later.ContextStatus() != StatusChanged {
 		t.Fatalf("attributed an earlier policy change to this review: %+v", later)
+	}
+}
+
+func TestReviewTransitionSeparatesArchivedApplicabilityFromCurrentProof(t *testing.T) {
+	ctx := t.Context()
+	r := newLifecycleRepo(t)
+	const service = "dispatch.py"
+	const config = "depot.ini"
+	r.write(service, "def route(parcel):\n    return parcel.agreed_route\n")
+	r.write(config, "lane = bonded\n")
+	const historyText = "Use the manifest route for bonded consignments."
+	base := r.commit(historyText)
+	rawDate, err := base.Git.Output(ctx, base.Repo, "show", "-s", "--format=%cI", base.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitDate := strings.TrimSpace(string(rawDate))
+	when, err := time.Parse(time.RFC3339, commitDate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.Now = when.Add(time.Hour)
+	note := strings.Repeat("The depot confirmed the attached manifest schedule. ", 7) +
+		"Only bonded consignments routed through this depot must use the agreed route until the next signed amendment."
+	discussion := Citation{Kind: "discussion", Path: service, Reference: "review-8/comment-21", URL: "https://example.test/review/8#comment-21",
+		Revision: base.Commit, ObservedAt: when.Add(-time.Minute).Format(time.RFC3339), StartLine: 1, EndLine: 1, Quote: note, Digest: Digest([]byte(note))}
+	history := Citation{Kind: "history", Reference: base.Commit, Revision: base.Commit, StartLine: 1, EndLine: 1, Quote: historyText, Digest: Digest([]byte(historyText))}
+	implementation, err := base.Cite(ctx, service, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lane, err := base.Cite(ctx, config, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	condition := strings.Repeat("Use the bonded route recorded in the manifest. ", 8) + "Only the signed seasonal lane is covered."
+	f := prepareFact(t, base, Fact{Category: CategoryBusinessRule, Authority: AuthorityInferred, Source: service, Scope: service,
+		Claim: "Bonded parcels use the agreed route.", Citations: []Citation{implementation, history, discussion, lane},
+		Conditions: []Condition{{Description: condition, Key: "lane", Equals: json.RawMessage(`"bonded"`), Citation: &lane}}})
+	read := func(head Tree, fact Fact) (Fact, contextRecord, string) {
+		t.Helper()
+		head.Now = base.Now
+		checked, err := head.CheckReview(ctx, base.Commit, []Fact{fact})
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot := ReviewSnapshot(checked)
+		if err := snapshot.DescribeReviewChanges(ctx, base, head, checked); err != nil {
+			t.Fatal(err)
+		}
+		raw := snapshot.ForPaths([]string{service})
+		if len(snapshot) == 0 {
+			return Fact{}, contextRecord{}, raw
+		}
+		_, payload, ok := strings.Cut(raw, "\n")
+		var records []contextRecord
+		if !ok || len(payload) > promptEvidenceBytes || json.Unmarshal([]byte(payload), &records) != nil || len(records) != 1 {
+			t.Fatalf("invalid review payload: %s", raw)
+		}
+		return snapshot[0], records[0], raw
+	}
+	original, accepted, _ := read(base, f)
+	if accepted.Context != StatusCandidate || len(accepted.Citations) != 3 || accepted.Citations[2].Quote != note {
+		t.Fatalf("accepted candidate lost the signed scope after 120 bytes: %+v", accepted.Citations)
+	}
+	for _, status := range []string{StatusCandidate, StatusCurrent, StatusConflict} {
+		original.contextStatus = status
+		if visible := original.ReviewDiscussions(); len(visible) != 1 || visible[0].Quote != note || visible[0].Reference != discussion.Reference {
+			t.Fatalf("%s lost the discussion visible in the prompt: %+v", status, visible)
+		}
+	}
+	r.write(service, "def route(parcel):\n    return parcel.default_route\n")
+	proposed := r.commit("switch to the default route")
+	for _, witnesses := range []int{1, 0} {
+		if witnesses == 0 {
+			r.write(config, "lane = domestic\n")
+			proposed = r.commit("change the installed lane")
+		}
+		transition, rec, _ := read(proposed, f)
+		if rec.Context != StatusTransition || rec.Claim != "" || rec.Authority != AuthorityHistorical || rec.BaseScope != f.Scope || rec.BaseClaim != f.Claim ||
+			len(rec.BaseConditions) != 1 || rec.BaseConditions[0] != `lane = "bonded". `+condition || len(rec.Conditions) != 0 {
+			t.Fatalf("original scope or applicability lost: %+v", rec)
+		}
+		if rec.CurrentWitnessCount == nil || *rec.CurrentWitnessCount != witnesses || len(rec.Citations) != witnesses ||
+			witnesses != 0 && (rec.Citations[0].Kind != "config" || rec.Citations[0].Quote != lane.Quote) {
+			t.Fatalf("ineligible current witnesses: %+v", rec)
+		}
+		if len(transition.BaseProvenance()) != 2 || len(rec.BaseProvenance) != 2 || rec.BaseProvenance[0] != discussion ||
+			rec.BaseProvenance[1].Kind != "history" || rec.BaseProvenance[1].Quote != historyText || rec.BaseProvenance[1].Reference != base.Commit ||
+			rec.BaseProvenance[1].ObservedAt != commitDate || rec.BaseProvenance[1].CurrentPath != "" {
+			t.Fatalf("lost dated, verbatim archived evidence: %+v", rec.BaseProvenance)
+		}
+		if shown := transition.ReviewDiscussions(); len(shown) != 1 || shown[0] != discussion {
+			t.Fatalf("late evaluator cannot consume the exact visible discussion: %+v", shown)
+		}
+	}
+	// The raw record can contain a well-formed historical citation to a commit
+	// from the proposal. That commit cannot corroborate the accepted rule.
+	f.Citations[1].Revision, f.Citations[1].Reference = proposed.Commit, proposed.Commit
+	if _, rec, _ := read(proposed, f); len(rec.BaseProvenance) != 1 || rec.BaseProvenance[0] != discussion {
+		t.Fatalf("proposal-only commit appeared as accepted provenance: %+v", rec.BaseProvenance)
+	}
+	f.Citations[1] = history
+	reviewTime := base.Now
+	base.Now = when.Add(-time.Second)
+	if _, rec, _ := read(proposed, f); len(rec.BaseProvenance) != 1 || rec.BaseProvenance[0] != discussion {
+		t.Fatalf("Git commit dated after the review appeared as archived evidence: %+v", rec.BaseProvenance)
+	}
+	base.Now = reviewTime
+	// A later discussion edit is unavailable even when its text and location
+	// still match the saved record.
+	f.Citations[2].ObservedAt = base.Now.Add(time.Minute).Format(time.RFC3339)
+	if _, _, prompt := read(proposed, f); prompt != "" {
+		t.Fatalf("later discussion was disclosed to an earlier review: %s", prompt)
+	}
+}
+
+func TestReviewDiscussionsStayWithinProjectedBudget(t *testing.T) {
+	f := Fact{ID: "shipping", Scope: "route.go", Source: "route.go", baseCommit: strings.Repeat("a", 40)}
+	for _, ref := range []string{"first", "second", "third", "fourth"} {
+		q := strings.Repeat("x", 1990)
+		f.Citations = append(f.Citations, Citation{Kind: "discussion", Reference: ref, Quote: q, ObservedAt: "2024-02-22T12:00:00Z", Digest: Digest([]byte(q))})
+	}
+	for _, status := range []string{StatusCandidate, StatusCurrent, StatusConflict, StatusTransition} {
+		f.contextStatus = status
+		projected := f.promptRecord()
+		shown := f.ReviewDiscussions()
+		exposed := projected.Citations
+		if status == StatusTransition {
+			exposed = projected.BaseProvenance
+		}
+		if !projected.fitsPrompt() || len(shown) < 2 || len(shown) >= len(f.Citations) ||
+			len(exposed) != len(shown) || projected.AdditionalCitations != len(f.Citations)-len(shown) {
+			t.Fatalf("%s did not retain distinct references within the budget: %d shown, %d omitted", status, len(shown), projected.AdditionalCitations)
+		}
+		for i, c := range shown {
+			if c != exposed[i] || c.Reference != f.Citations[i].Reference || c.Quote != f.Citations[i].Quote {
+				t.Fatalf("%s truncated or replaced a visible reference: %+v", status, c)
+			}
+		}
 	}
 }
 

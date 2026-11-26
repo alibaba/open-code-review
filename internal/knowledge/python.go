@@ -7,6 +7,8 @@ import (
 	"context"
 	"reflect"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/tamnd/gopapy/v2/parser2"
@@ -62,6 +64,42 @@ func pythonStatementStart(stmt parser2.Stmt, lines []string) int {
 	return pythonNodeLine(stmt)
 }
 
+func pythonDeclarationEnd(lines []string, start, end int) int {
+	header := lines[start-1]
+	indent := header[:len(header)-len(strings.TrimLeft(header, " \t"))]
+	var possible []int
+	for n := end; n > start; n-- {
+		line := lines[n-1]
+		text := strings.TrimSpace(line)
+		if text == "" {
+			continue
+		}
+		if !strings.HasPrefix(text, "#") {
+			break
+		}
+		rest, hasIndent := strings.CutPrefix(line, indent)
+		if !hasIndent || !strings.HasPrefix(rest, " ") && !strings.HasPrefix(rest, "\t") {
+			possible = append(possible, n)
+		}
+	}
+	// A detached comment may document the next sibling. Lines starting with
+	// '#' can also be part of a final multiline string. Once the prefix parses
+	// as a complete declaration, every remaining such line is a real comment.
+	slices.Reverse(possible)
+	cut := sort.Search(len(possible), func(i int) bool {
+		src := strings.Join(lines[start-1:possible[i]-1], "\n") + "\n"
+		if indent != "" {
+			src = "if True:\n" + src
+		}
+		_, err := parser2.ParseFile("evidence.py", src)
+		return err == nil
+	})
+	if cut < len(possible) {
+		return possible[cut] - 1
+	}
+	return end
+}
+
 // Compare the complete cited function, including its guards and decorators.
 // Keep module and class setup, and any sibling referenced elsewhere in the
 // file. The bodies of isolated sibling functions do not establish this rule.
@@ -112,6 +150,7 @@ func pythonWitnessesFor(ctx context.Context, data []byte) *pythonWitnesses {
 			if start < 1 || start > len(lines) {
 				continue
 			}
+			end = pythonDeclarationEnd(lines, start, end)
 			qualified := prefix + name
 			full := parser2.DumpModule(&parser2.Module{Body: []parser2.Stmt{stmt}})
 			d := pythonDeclaration{qualified, start, end, Digest([]byte(full))}

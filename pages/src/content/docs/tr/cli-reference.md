@@ -496,7 +496,11 @@ ocr memory feedback "$RULE_ID" --action confirm --reason "Matches the settlement
 
 ### İncelemede kuralların kullanımı {#how-review-uses-knowledge}
 
-Bir değişiklik temel sürümde geçerli olan kuralı etkilediğinde ajan eski davranışı ve yeni sürümde hâlâ bulunan kaynak satırlarını görür. Bu sayede hangi çağrıların veya testlerin eski davranışa bağlı olduğunu inceleyebilir. İlk değerlendirme bir bulgunun geri çekilmesini önerirse bağımsız bir değerlendirme bulgunun koşullarını ve sonucunu güncel kanıtla karşılaştırır. Kanıt yetersizse bulgu korunur.
+Bir değişiklik temel sürümde geçerli olan kuralı etkilediğinde ajan eski davranışı ve yeni sürümde hâlâ bulunan kaynak satırlarını görür. Bu sayede hangi çağrıların veya testlerin eski davranışa bağlı olduğunu inceleyebilir. Bir bulgunun geri çekilmesi önerildiğinde veya aynı incelemede dosya için geçerli bir insan kararı bulunduğunda bağımsız bir değerlendirme bulgunun koşullarını ve sonucunu güncel kanıtla karşılaştırır. Kanıt yetersizse bulgu korunur.
+
+Yinelenen bulgu bir ifadenin bu değişiklikle eklendiğini öne sürüyorsa değerlendirme tek satırlık bir değişikliğin iki tarafını gösterebilir. OCR eski satırı, yeni satırı ve ilgili ifadeyi karşılaştırır. Yalnızca bu kanıta dayanarak bir bulguyu geri çekmek için önceki kararda aynı bulgunun kaydedilmiş olması gerekir. Farklı sözcüklerle ifade edilen bulgular bağımsız ve güncel kaynaklarla değerlendirilebilir.
+
+İçe aktarılan inceleme tartışması bir kurulumun hangi davranışı kullandığını belirtiyorsa OCR, tarihli kararın özgün metnini değişen kodun giriş noktasıyla karşılaştırır. Aynı girdi için beklenen sonucu, önceki sonucu ve yeni sonucu inceler. Yeni bulgu karara ve güncel koda atıfta bulunur. Kapsam belirsizse veya kararlar çelişiyorsa bu koşula bağlı bulgu yayımlanmaz.
 
 Ajan önce normal kod incelemesini tamamlar. Ardından ilgili kuralları ve güncel kaynak satırlarını kullanarak eksik bir iş kuralı ihlalini arar ve mevcut bulguların dayanaklarını sınar. Bir bulgunun geri çekilmesi için aynı konumdaki iddianın güncel kanıtla çelişmesi gerekir. `--no-filter` mevcut bulguları korur. Bir istisnanın koşulu değişirse önceki incelemenin gerekçesi geçerliliğini yitirir.
 

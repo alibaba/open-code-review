@@ -132,3 +132,35 @@ class Outer:
 		}
 	}
 }
+
+func TestPythonDetachedCommentDoesNotBorrowPrecedingFunction(t *testing.T) {
+	const path = "pricing.py"
+	const source = `def banner():
+    return """Unindented string content follows.
+# This line is part of the banner.
+# The string ends here."""
+
+# Pickup orders are free.
+def fee(pickup):
+    if pickup:
+        return 0
+    return 9
+`
+	r := newLifecycleRepo(t)
+	r.write(path, source)
+	base := r.commit("record the banner and pickup rule")
+	ctx := t.Context()
+	comment, err := base.DecideWithCitation(ctx, path, path, "pickup", "Charge for pickup", "The comment records a pickup waiver.", 6, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	literal, err := base.DecideWithCitation(ctx, path, path, "banner", "Change the banner", "The line is literal display text.", 3, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.write(path, strings.Replace(source, "if pickup:", "if not pickup:", 1))
+	checked := checkedFacts(t, r.commit("invert the fee condition"), []Fact{comment, literal})
+	if checked[0].Status != StatusChanged || checked[1].Status != StatusHistorical || checked[1].Citations[0].CurrentStartLine != 3 {
+		t.Fatalf("detached comment: %s; literal: %s at %d", checked[0].Status, checked[1].Status, checked[1].Citations[0].CurrentStartLine)
+	}
+}

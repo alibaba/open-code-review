@@ -40,13 +40,14 @@ func (s Snapshot) DescribeReviewChanges(ctx context.Context, before, after Tree,
 	if err != nil {
 		return err
 	}
+	archives := reviewArchives{base: newRechecker(ctx, before), commitDates: map[string]string{}}
 	for _, c := range base {
 		i, changed := positions[c.ID]
 		if !changed {
 			continue
 		}
 		if (c.Status == StatusCurrent || c.Status == StatusCandidate) && !c.IsDecision() {
-			s[i] = rechecker.transition(c.Fact, before.Commit)
+			s[i] = rechecker.transition(c.Fact, before.Commit, &archives)
 			continue
 		}
 		if c.Status != StatusVerified {
@@ -75,6 +76,43 @@ func (s Snapshot) DescribeReviewChanges(ctx context.Context, before, after Tree,
 	return ctx.Err()
 }
 
+// Recheck the time and origin of archived citations against the accepted
+// snapshot. Stored Git excerpts predate the observed_at field.
+type reviewArchives struct {
+	base        *rechecker
+	commitDates map[string]string
+}
+
+func (a *reviewArchives) citation(c Citation) (Citation, bool) {
+	if checkSupplemental(c) != nil {
+		return Citation{}, false
+	}
+	if c.Kind == "history" {
+		if !a.base.ancestor(c.Revision) {
+			return Citation{}, false
+		}
+		date, ok := a.commitDates[c.Revision]
+		if !ok {
+			raw, err := a.base.tree.Git.Output(a.base.ctx, a.base.tree.Repo, "show", "-s", "--no-notes", "--no-show-signature", "--format=%cI", c.Revision)
+			if err == nil {
+				date = strings.TrimSpace(string(raw))
+			}
+			a.commitDates[c.Revision] = date
+		}
+		if date == "" || !a.base.observedBy(date) {
+			return Citation{}, false
+		}
+		if c.ObservedAt == "" {
+			c.ObservedAt = date
+		}
+	}
+	if c.ObservedAt == "" || !a.base.observedBy(c.ObservedAt) {
+		return Citation{}, false
+	}
+	c.CurrentPath, c.CurrentStartLine, c.CurrentEndLine = "", 0, 0
+	return c, true
+}
+
 func (r *rechecker) decisionExcerpts(f Fact) []Citation {
 	file := r.file(f.Source)
 	if file.err != nil || file.digest != f.SourceHash {
@@ -94,16 +132,23 @@ func (r *rechecker) decisionExcerpts(f Fact) []Citation {
 
 // Surviving text can explain how a caller or test was affected. It does not
 // reinstate the authority of the old rule, even when every quote still exists.
-func (r *rechecker) transition(f Fact, base string) Fact {
+func (r *rechecker) transition(f Fact, base string, archives *reviewArchives) Fact {
 	prior := f
 	f.contextStatus, f.baseCommit, f.baseClaim = StatusTransition, base, prior.Claim
 	f.Claim, f.Reason, f.Authority, f.Value = "", "", AuthorityHistorical, nil
 	f.Citations, f.Conditions, f.Feedback = nil, nil, nil
 	for _, condition := range prior.Conditions {
-		f.baseConditions = append(f.baseConditions, shortText(condition.Description, 160))
+		qualifier := condition.Description
+		if condition.Key != "" {
+			qualifier = fmt.Sprintf("%s = %s. %s", condition.Key, condition.Equals, qualifier)
+		}
+		f.baseConditions = append(f.baseConditions, qualifier)
 	}
 	prior.eachCitation(func(c Citation) {
 		if !c.live() {
+			if old, eligible := archives.citation(c); eligible {
+				f.Citations = append(f.Citations, old)
+			}
 			return
 		}
 		current, _, _ := r.matchCitation(f.Revision, c)
