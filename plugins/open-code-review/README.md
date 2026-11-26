@@ -1,7 +1,7 @@
 # Coding agent plugins
 
 Open Code Review ships platform-specific integrations for Claude Code, Codex,
-Cursor, Kimi Code, and QCA Forward. Choose your platform below instead of
+Cursor, Kimi Code, OpenCode, and QCA Forward. Choose your platform below instead of
 adapting installation instructions written for a different agent.
 
 All integrations require Git 2.41 or later. Install the `ocr` CLI first:
@@ -122,6 +122,18 @@ installation with `/plugins list`, `/plugins info open-code-review`,
 See the
 [Kimi Code plugin documentation](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/plugins.html)
 for details.
+
+## OpenCode
+
+OpenCode supports both direct review and delegated review using the host model's
+subscription quota via the dual-form plugin (OpenCode 1.x and 2.x).
+
+It provides native tools (`ocr_review`, `ocr_health`, `ocr_delegate_preview`,
+`ocr_delegate_rule`) and slash commands (`/ocr-review`, `/ocr-health`,
+`/ocr-delegate-review`, `/ocr-delegate`).
+
+See the [OpenCode integration guide](opencode/README.md) for installation,
+configuration, and usage details.
 
 ## QCA Forward
 
