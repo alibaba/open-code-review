@@ -241,7 +241,11 @@ func executeDelegateRule(opts delegateOptions, paths []string) error {
 		return err
 	}
 
-	groups := delegate.GroupRules(dc.resolver(), paths)
+	lookup := make([]string, len(paths))
+	for i, p := range paths {
+		lookup[i] = ruleLookupPath(dc.cc.RepoDir, p)
+	}
+	groups := delegate.GroupRules(dc.resolver(), lookup)
 	if opts.format == "json" {
 		return writeDelegateJSON(delegateRulesJSON{
 			SchemaVersion: delegateSchemaVersion,
