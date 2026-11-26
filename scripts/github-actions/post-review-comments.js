@@ -321,6 +321,11 @@ async function runPostReviewComments({
   const comments = result.comments || [];
   const warnings = result.warnings || [];
   stats.total = comments.length;
+  // Lead banner for a partial/failed report ("" on a complete run), rendered
+  // at the top of every summary body below so an incomplete review is never
+  // mistaken for a complete one.
+  const coverageBanner = buildCoverageBanner(result);
+  const withBanner = (body) => (coverageBanner ? `${coverageBanner}\n\n${body}` : body);
 
   // No comments: post a summary. Warnings, when present, are part of it:
   // a check mark would hide them, and the fallback must not call that clean.
@@ -333,15 +338,23 @@ async function runPostReviewComments({
   // Resolution requires a run that actually produced findings.
   if (comments.length === 0) {
     const warningBlock = formatWarnings(warnings);
+    const incomplete = isIncompleteRunStatus(resolveRunStatus(result));
     const message = result.message
-      || (warningBlock
-        ? "No comments generated. See warnings below."
-        : "No comments generated. Looks good to me.");
-    const icon = warningBlock ? "⚠️" : "✅";
-    // A clean run is still a complete run: this path advances the checkpoint.
-    // Warnings are not an input to that decision.
+      || (incomplete
+        ? `Review did not complete (status=${resolveRunStatus(result) || "unknown"}).`
+        : warningBlock
+          ? "No comments generated. See warnings below."
+          : "No comments generated. Looks good to me.");
+    // An incomplete run leads with the coverage banner (never a check mark or
+    // an LGTM fallback); a complete run renders exactly as before.
+    const lead = incomplete
+      ? `${coverageBanner}\n\n${message}`
+      : `${warningBlock ? "⚠️" : "✅"} **OpenCodeReview**: ${message}`;
+    // Checkpoint advancement is decided by the manifest's terminal state alone
+    // (buildAdvanceMarker): an incomplete run carries the previous marker
+    // forward, warnings and findings are not inputs to that decision.
     const body = appendCheckpoint(
-      `${SUMMARY_MARKER}\n${icon} **OpenCodeReview**: ${message}${warningBlock}${rangeNote}`,
+      `${SUMMARY_MARKER}\n${lead}${warningBlock}${rangeNote}`,
       result.manifest
     );
     const posted = await postSummary({
@@ -482,7 +495,7 @@ async function runPostReviewComments({
     appSlug,
     resolveSelfLogin: authenticatedLogin,
     body: wrapSummary(
-      buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings)
+      withBanner(buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings))
     ),
     log,
   });
@@ -550,7 +563,7 @@ async function runPostReviewComments({
   // reason it ended up in the summary (so the reader always knows why it is
   // here). Routed findings render BEFORE the failed block so the order is:
   // counts → no-line summary → routed summary → failed.
-  let summaryBody = buildSummaryBody({
+  let summaryBody = withBanner(buildSummaryBody({
     total: stats.total,
     inline: successCount,
     summary: commentsWithoutLine.length,
@@ -558,7 +571,7 @@ async function runPostReviewComments({
     routed: commentsRouted.length,
     failed: failedCount,
     warnings,
-  });
+  }));
   summaryBody += formatSummaryComments(commentsWithoutLine);
   summaryBody += formatSummaryComments(commentsRouted);
   for (const { comment, error } of failedComments) {
@@ -2417,6 +2430,66 @@ function formatCommentMarkdown(comment, error) {
   return md;
 }
 
+// ---- Incomplete-run coverage banner ----
+
+// The run status a summary should trust: the manifest's terminal state when a
+// manifest exists (the CLI mirrors it on the top-level status), else the
+// top-level status, else "" (legacy reports), which renders as complete.
+function resolveRunStatus(result) {
+  const terminalState = result && result.manifest && result.manifest.terminal_state;
+  if (terminalState) return terminalState;
+  return (result && result.status) || "";
+}
+
+function isIncompleteRunStatus(status) {
+  return status === "partial" || status === "failed" || status === "completed_with_errors";
+}
+
+// One coverage item that never got reviewed, as `- `path` (class: reason)`.
+// Classification and reason are optional. The reason is the only free-form
+// text shown here; the CLI already sanitizes it before publishing the JSON.
+function formatUnfinishedCoverageItem(item) {
+  const path = item && item.path ? `\`${item.path}\`` : "`(unknown path)`";
+  const details = [item && item.classification, item && item.reason].filter(Boolean).join(": ");
+  return details ? `${path} (${details})` : path;
+}
+
+// Lead banner for a partial/failed report: identifies the run as incomplete at
+// the very top of the summary and lists the selected files that were not
+// reviewed, with their recorded reasons. Counts come from this run's manifest
+// coverage — reviewed is completed + reused over the selected denominator,
+// waived files are stated separately (a waiver is not a review), and excluded
+// files stay outside the denominator. When coverage is missing the banner says
+// so rather than inventing counts or causes. Returns "" for complete runs so
+// complete reviews render exactly as before.
+function buildCoverageBanner(result) {
+  const status = resolveRunStatus(result);
+  if (!isIncompleteRunStatus(status)) return "";
+  if (status === "completed_with_errors") {
+    return `⚠️ **Review did not complete (status=${status}); coverage details are unavailable in this report.**`;
+  }
+  const label = status === "failed" ? "Failed" : "Partial";
+  const coverage = result && result.manifest && result.manifest.coverage;
+  const selected = coverage && Array.isArray(coverage.selected) ? coverage.selected : null;
+  if (!selected) {
+    return `⚠️ **${label} review (status=${status}); coverage details are unavailable in this report.**`;
+  }
+  const count = (set) => (Array.isArray(coverage[set]) ? coverage[set].length : 0);
+  const reviewed = count("completed") + count("reused");
+  const waived = count("waived");
+  let banner = `⚠️ **${label} review: ${reviewed} of ${selected.length} selected file(s) reviewed`;
+  if (waived > 0) banner += `; ${waived} waived`;
+  banner += ".**";
+  const failed = Array.isArray(coverage.failed) ? coverage.failed : [];
+  if (failed.length > 0) {
+    banner += "\n\nNot completed:";
+    for (const item of failed) {
+      banner += `\n- ${formatUnfinishedCoverageItem(item)}`;
+    }
+  }
+  return banner;
+}
+
 // Merged summary header. All posting-outcome counts are surfaced here (and
 // ONLY here) so the numbers add up to the total and the reader no longer has
 // to reconcile two separately presented breakdowns (the old "posted as
@@ -3404,6 +3477,10 @@ module.exports = {
   routeComment,
   formatComment,
   formatCommentMarkdown,
+  resolveRunStatus,
+  isIncompleteRunStatus,
+  formatUnfinishedCoverageItem,
+  buildCoverageBanner,
   buildSummaryBody,
   buildPreReviewSummaryBody,
   formatSummaryComments,

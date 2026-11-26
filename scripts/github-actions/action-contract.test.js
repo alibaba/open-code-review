@@ -2086,6 +2086,45 @@ function testPostReviewCommentsWiresAppSlug() {
   );
 }
 
+// First `if:` condition of the named step, read straight from the YAML text
+// (parseSteps does not capture step conditions).
+function stepCondition(name) {
+  const step = stepNamed(name);
+  assert.ok(step, `action.yml must retain the ${name} step`);
+  const text = ACTION_TEXT.split(`    - name: ${name}`)[1] || "";
+  const match = /^[ \t]+if:[ \t]*(.*)$/m.exec(text);
+  return { step, condition: match ? match[1].trim() : "" };
+}
+
+// A non-zero review exit must not skip publication: a failed or partial run
+// with a usable report still reaches the PR before the job turns red — the
+// GitLab example pipeline already publishes before propagating the exit code.
+// The posting step runs on failure but not on cancellation, and the fail step
+// stays last while preserving the original review exit code.
+function testPublishBeforeFailingOnNonZeroReviewExit() {
+  const post = stepCondition("Post review comments");
+  const fail = stepCondition("Fail job on OCR error");
+  assert.strictEqual(
+    post.condition,
+    "${{ !cancelled() }}",
+    "the posting step must run on a non-zero review exit and stay skipped on cancellation"
+  );
+  assert.strictEqual(
+    fail.condition,
+    "env.OCR_EXIT_CODE != '0'",
+    "the fail step must keep gating on the original review exit code"
+  );
+  assert.ok(
+    post.step.index < fail.step.index,
+    "publication must be attempted before the job fails on the review exit"
+  );
+  assert.match(
+    fail.step.run,
+    /exit "\$\{OCR_EXIT_CODE\}"/,
+    "the fail step must exit with the original review exit code"
+  );
+}
+
 const TESTS = [
   ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
@@ -2138,6 +2177,7 @@ const TESTS = [
   ["both github-script steps read the resolved PR number", testPrNumberWiredIntoBothGithubScriptSteps],
   ["GitHub Actions README documents PR number resolution", testExampleReadmeDocumentsPrNumberResolution],
   ["Post review comments wires the app slug", testPostReviewCommentsWiresAppSlug],
+  ["publish before failing on a non-zero review exit", testPublishBeforeFailingOnNonZeroReviewExit],
 ];
 
 function main() {
