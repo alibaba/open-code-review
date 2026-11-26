@@ -6,7 +6,9 @@ package rules
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -482,6 +484,48 @@ func TestNewResolver_CustomRuleOverridesDefault(t *testing.T) {
 	got = resolver.Resolve("readme.md")
 	if !strings.Contains(got, "Correctness") {
 		t.Errorf("expected system default rule, got %q", truncate(got, 80))
+	}
+}
+
+func TestNewResolver_CustomRuleFileReference(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	workDir := t.TempDir()
+	repoDir := t.TempDir()
+	t.Chdir(workDir)
+
+	const customConfig = `{"rules":[{"path":"main.go","rule":"team.md"}]}`
+	writeFile(t, workDir, "rules.json", customConfig)
+	writeFile(t, workDir, "team.md", "CUSTOM_TEAM_RULE")
+	writeFile(t, workDir, "profile/rules.json", customConfig)
+	writeFile(t, workDir, "profile/team.md", "PROFILE_TEAM_RULE")
+	writeFile(t, workDir, "missing.json", `{"rules":[{"path":"main.go","rule":"missing.md"}]}`)
+	writeFile(t, repoDir, "team.md", "REPO_TEAM_RULE")
+	writeFile(t, repoDir, ".opencodereview/rule.json", `{"rules":[{"path":"main.go","rule":"PROJECT_RULE"}]}`)
+
+	tests := []struct {
+		name       string
+		configPath string
+		wantRule   string
+		wantSource string
+	}{
+		{"relative", "rules.json", "CUSTOM_TEAM_RULE", "custom"},
+		{"dot relative", "./rules.json", "CUSTOM_TEAM_RULE", "custom"},
+		{"nested relative", "profile/rules.json", "PROFILE_TEAM_RULE", "custom"},
+		{"absolute", filepath.Join(workDir, "rules.json"), "CUSTOM_TEAM_RULE", "custom"},
+		{"missing reference", "missing.json", "PROJECT_RULE", "project"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver, _, err := NewResolver(repoDir, tt.configPath, ResolverOptions{})
+			if err != nil {
+				t.Fatalf("NewResolver: %v", err)
+			}
+			detail := resolver.(DetailResolver).ResolveDetail("main.go")
+			if detail.Rule != tt.wantRule || detail.Source != tt.wantSource {
+				t.Errorf("ResolveDetail rule = %q, source = %q; want rule %q, source %q",
+					detail.Rule, detail.Source, tt.wantRule, tt.wantSource)
+			}
+		})
 	}
 }
 
@@ -1864,6 +1908,70 @@ func canonicalRoot(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+func TestLoadProjectRule_RejectsCaseDistinctSibling(t *testing.T) {
+	parent := t.TempDir()
+	if runtime.GOOS == "windows" {
+		output, err := exec.Command("fsutil.exe", "file", "setCaseSensitiveInfo", parent, "enable").CombinedOutput()
+		if err != nil {
+			t.Skipf("cannot enable case sensitivity: %v: %s", err, output)
+		}
+	}
+
+	repo := filepath.Join(parent, "repo")
+	sibling := filepath.Join(parent, "Repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(sibling, 0o755); err != nil {
+		if os.IsExist(err) {
+			t.Skip("filesystem is case-insensitive")
+		}
+		t.Fatal(err)
+	}
+
+	writeFile(t, repo, "team.md", "IN_REPO_RULE")
+	writeFile(t, sibling, "team.md", "SIBLING_RULE")
+
+	tests := []struct {
+		name       string
+		rule       string
+		want       string
+		linkTarget string
+	}{
+		{name: "same directory", rule: "team.md", want: "IN_REPO_RULE"},
+		{name: "relative sibling", rule: "../Repo/team.md"},
+		{name: "absolute sibling", rule: filepath.Join(sibling, "team.md")},
+		{name: "symlink to sibling", rule: "linked/team.md", linkTarget: sibling},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.linkTarget != "" {
+				if err := os.Symlink(tt.linkTarget, filepath.Join(repo, "linked")); err != nil {
+					t.Skipf("cannot create symlink: %v", err)
+				}
+			}
+			data, err := json.Marshal(ProjectRule{
+				Rules: []ProjectRuleEntry{{Path: "**/*.go", Rule: tt.rule}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, repo, ".opencodereview/rule.json", string(data))
+
+			rules, err := loadProjectRule(repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rules == nil || len(rules.Rules) != 1 {
+				t.Fatalf("expected one project rule, got %+v", rules)
+			}
+			if got := rules.Rules[0].Rule; got != tt.want {
+				t.Errorf("rule = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 // TestResolveRuleEntries_ProjectConfinesAbsolutePath verifies that with a confineRoot
