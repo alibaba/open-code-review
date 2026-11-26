@@ -62,6 +62,7 @@ func init() {
 	rootCmd.AddCommand(authCmd)
 	rootCmd.AddCommand(llmCmd)
 	rootCmd.AddCommand(rulesCmd)
+	rootCmd.AddCommand(newMemoryCommand())
 	rootCmd.AddCommand(viewerCmd)
 	rootCmd.AddCommand(completionCmd)
 }

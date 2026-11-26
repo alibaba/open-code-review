@@ -17,6 +17,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/knowledge"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -30,6 +31,8 @@ import (
 )
 
 type reviewOptions struct {
+	memoryDB                string
+	reviewID                string
 	rulePath                string
 	repoDir                 string
 	from                    string
@@ -203,10 +206,17 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	cc.Template.ApplyEffort(effort)
 
-	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
-	// input it returns pins the run to the very commits this check passed on, so
-	// the decision cannot be undone by a ref moving afterwards.
-	sealed, err := validateResumeIdentity(ctx, cc, opts, rt, resumeState)
+	// Use the same resolved input and evidence for resume admission and execution.
+	// A ref moving between them must not change the admitted review.
+	codeTools, err := prepareReviewCodeTools(ctx, cc.RepoDir, opts, cc.GitRunner, nil)
+	if err != nil {
+		return fmt.Errorf("prepare code tools: %w", err)
+	}
+	memories, err := reviewMemory(ctx, cc, opts, codeTools)
+	if err != nil {
+		return fmt.Errorf("load review memory: %w", err)
+	}
+	_, err = validateResumeIdentity(ctx, cc, opts, rt, resumeState, codeTools.resolution, memories)
 	if err != nil {
 		return err
 	}
@@ -216,15 +226,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Model:    rt.Model,
 	}
 
-	var sealedInput *diff.InputResolution
-	if sealed != nil {
-		sealedInput = &sealed.Resolution
-	}
-
-	codeTools, err := prepareReviewCodeTools(ctx, cc.RepoDir, opts, cc.GitRunner, sealedInput)
-	if err != nil {
-		return fmt.Errorf("prepare code tools: %w", err)
-	}
 	if codeTools.access != nil {
 		withSides := toolsconfig.WithComparisonSides
 		if codeTools.reader.Mode == tool.ModeWorkspace {
@@ -257,6 +258,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		ReviewMode:            reviewModeFromOptions(opts),
 		Template:              *cc.Template,
 		SystemRule:            cc.Resolver,
+		Knowledge:             memories,
 		FileFilter:            cc.FileFilter,
 		LLMClient:             rt.Client,
 		RetryCollector:        rt.RetryCollector,
@@ -477,20 +479,22 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // command line: both default to the empty string and nothing else can set them,
 // so a provider that changed via config file or environment stays implicit —
 // which is the transition this check exists to reject.
-func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState) (*agent.SealedInput, error) {
+func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState, resolution *diff.InputResolution, memories knowledge.Snapshot) (*agent.SealedInput, error) {
 	if state == nil {
 		return nil, nil
 	}
 	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		ReviewMode: reviewModeFromOptions(opts),
-		Template:   *cc.Template,
-		SystemRule: cc.Resolver,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		SealedInput: resolution,
+		Knowledge:   memories,
+		RepoDir:     cc.RepoDir,
+		From:        opts.from,
+		To:          opts.to,
+		Commit:      opts.commit,
+		ReviewMode:  reviewModeFromOptions(opts),
+		Template:    *cc.Template,
+		SystemRule:  cc.Resolver,
+		FileFilter:  cc.FileFilter,
+		GitRunner:   cc.GitRunner,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)

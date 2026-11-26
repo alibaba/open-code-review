@@ -18,6 +18,7 @@ Usage:
 Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
+  memory       Manage versioned repository evidence for review
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
@@ -69,6 +70,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | Command | Alias | What it does |
 |---|---|---|
 | `ocr review` | `ocr r` | Run a code review and emit comments. |
+| `ocr memory` | — | Learn schema constraints, record review-local decisions, inspect evidence and revoke it. |
 | `ocr scan` | `ocr s` | Scan complete files without requiring a Git diff. |
 | `ocr rules check <file>` | — | Show which rule applies to a given file path and where it came from. |
 | `ocr config set <key> <value>` | — | Persist a config value to `~/.opencodereview/config.json`. |
@@ -143,6 +145,10 @@ staged + unstaged + untracked changes in the current directory's repo.
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
 > `--resume` works with range, commit, and workspace reviews and cannot be
 > combined with `--preview`.
+
+The optional `--memory-db <path>` flag supplies verified repository evidence
+to review groups. Add `--review-id <id>` to include decisions made for this
+particular PR, MR or local review. See [review memory](#ocr-memory).
 
 ### Per-run LLM selection
 
@@ -585,6 +591,48 @@ different repository, or none, is refused: delete it by id alone.
 |---|---|---|
 | `--repo <path>` | every repository | Only look for the session under this repository. |
 | `--yes`, `-y` | `false` | Skip the confirmation prompt. |
+
+## `ocr memory`
+
+Memory works with the CLI in a local checkout or CI. Choose a trusted SQLite
+file outside the checkout, in a directory writable only by the intended
+maintainer. Pass that file explicitly to each command. Set `DB` below to its
+absolute path. A CI reviewer can use a read-only copy from a trusted job.
+
+```bash
+ocr memory learn contracts/payment.json --scope src/payments --memory-db "$DB"
+ocr memory decide contracts/payment.json --scope src/payments/charge.go \
+  --review-id PR-43 --finding "Multiply the input by 100" \
+  --reason "The incoming value is already in cents" --memory-db "$DB"
+ocr memory list --review-id PR-43 --search cents --memory-db "$DB"
+ocr review --from main --to HEAD --review-id PR-43 --memory-db "$DB"
+ocr memory revoke "$MEMORY_ID" --memory-db "$DB"
+```
+
+For a JSON Schema containing `{"properties":{"unit":{"const":"cents"}}}`,
+`learn` extracts the assertion and records the source commit, path and
+property. It also supports direct property `enum` arrays of scalars.
+Use `--property` to select one property and `--ref` to read a committed
+revision (default `HEAD`). The supplied scope is the file or directory
+governed by the schema. A decision can cite any repository evidence file, such
+as the caller, a regression test or the contract. Supply the exact reviewed
+file as its scope, the review identifier, the finding and the reason. Only
+record text suitable for the configured review model.
+
+Review checks the source commit's reachability and the selected property
+at its pinned target, or in the live working tree for workspace reviews.
+A decision requires both the evidence and reviewed files to match their
+recorded contents. A shallow
+checkout needs the source commit and its ancestry. `list --ref <commit>`
+reports `verified`, `changed` or `unverified`, including a diagnostic when
+evidence is unavailable. A group receives up to 6 KB of matching records for
+its paths. The model can cite those records while evaluating the current
+code. Memory does not automatically delete a finding from the report.
+
+Revocation applies to subsequent runs, including imports of the same
+assertion at another commit. Changed effective evidence invalidates review
+resume. Storage is scoped by the normalized origin remote, or by the local
+Git common directory for repositories without a network origin.
 
 ## `ocr rules`
 

@@ -127,6 +127,9 @@ func normalizeDiffTarget(from, to, commit string) string {
 }
 
 func validateReviewOptions(opts *reviewOptions) error {
+	if opts.reviewID != "" && opts.memoryDB == "" {
+		return fmt.Errorf("--review-id requires --memory-db")
+	}
 	opts.to = normalizeDiffTarget(opts.from, opts.to, opts.commit)
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
@@ -210,6 +213,8 @@ func validateDelegateOptions(opts *delegateOptions) error {
 
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
 func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
+	cmd.Flags().StringVar(&opts.memoryDB, "memory-db", "", "read verified repository knowledge from a trusted SQLite database")
+	cmd.Flags().StringVar(&opts.reviewID, "review-id", "", "include verified decisions for this PR, MR or local review")
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)

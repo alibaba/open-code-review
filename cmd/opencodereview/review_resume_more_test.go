@@ -280,14 +280,14 @@ func TestValidateResumeIdentity(t *testing.T) {
 
 	t.Run("same provider and model is accepted", func(t *testing.T) {
 		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
+		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state, nil, nil); err != nil {
 			t.Errorf("want accepted, got: %v", err)
 		}
 	})
 
 	t.Run("nil state is a non-resume run", func(t *testing.T) {
 		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, nil); err != nil {
+		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, nil, nil, nil); err != nil {
 			t.Errorf("a run with no --resume must not be checked, got: %v", err)
 		}
 	})
@@ -303,7 +303,7 @@ func TestValidateResumeIdentity(t *testing.T) {
 			t.Fatal("fixture must use a different spelling than the parent did")
 		}
 		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, equivalent, rt, state); err != nil {
+		if _, err := validateResumeIdentity(context.Background(), cc, equivalent, rt, state, nil, nil); err != nil {
 			t.Errorf("ref spelling must not decide admission, got: %v", err)
 		}
 	})
@@ -312,7 +312,7 @@ func TestValidateResumeIdentity(t *testing.T) {
 		before := countSessionFiles(t, repoDir)
 
 		rt := &llmRuntime{Provider: "openai", Model: "gpt-5"}
-		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
+		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state, nil, nil)
 		if err == nil {
 			t.Fatal("want rejection for a provider change with no --provider flag")
 		}
@@ -330,7 +330,7 @@ func TestValidateResumeIdentity(t *testing.T) {
 		explicit := opts
 		explicit.provider = "openai"
 		rt := &llmRuntime{Provider: "openai", Model: "gpt-5"}
-		if _, err := validateResumeIdentity(context.Background(), cc, explicit, rt, state); err != nil {
+		if _, err := validateResumeIdentity(context.Background(), cc, explicit, rt, state, nil, nil); err != nil {
 			t.Errorf("want accepted with --provider, got: %v", err)
 		}
 	})
@@ -348,7 +348,7 @@ func TestValidateResumeIdentity(t *testing.T) {
 			"package main\n\nfunc main() { println(\"changed\") }\n", "change main")
 
 		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
+		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state, nil, nil)
 		if err == nil {
 			t.Fatal("want rejection after the same refs resolved to a different diff")
 		}
@@ -399,7 +399,7 @@ func TestValidateResumeIdentityWorkspace(t *testing.T) {
 
 	t.Run("unchanged worktree is accepted", func(t *testing.T) {
 		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state); err != nil {
+		if _, err := validateResumeIdentity(context.Background(), cc, opts, rt, state, nil, nil); err != nil {
 			t.Errorf("want accepted, got: %v", err)
 		}
 	})
@@ -410,7 +410,7 @@ func TestValidateResumeIdentityWorkspace(t *testing.T) {
 			t.Fatalf("write workspace change: %v", err)
 		}
 		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
-		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state)
+		_, err := validateResumeIdentity(context.Background(), cc, opts, rt, state, nil, nil)
 		if err == nil {
 			t.Fatal("want rejection after the worktree changed")
 		}
