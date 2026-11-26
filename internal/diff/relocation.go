@@ -102,16 +102,27 @@ func extractCodeBlock(text string) string {
 	if start < 0 {
 		return ""
 	}
-	afterOpen := start + 3
+	fenceLength := 3
+	for start+fenceLength < len(text) && text[start+fenceLength] == '`' {
+		fenceLength++
+	}
+	afterOpen := start + fenceLength
 	// Skip optional language tag on the opening fence line.
 	if nl := strings.IndexByte(text[afterOpen:], '\n'); nl >= 0 {
 		afterOpen += nl + 1
 	} else {
 		return ""
 	}
-	end := strings.Index(text[afterOpen:], "```")
-	if end < 0 {
-		return ""
+	for offset := afterOpen; offset < len(text); {
+		line, _, _ := strings.Cut(text[offset:], "\n")
+		closing := strings.TrimLeft(line, " ")
+		if len(line)-len(closing) <= 3 {
+			closing = strings.TrimRight(closing, " \t\r")
+			if len(closing) >= fenceLength && strings.Trim(closing, "`") == "" {
+				return strings.TrimSpace(text[afterOpen:offset])
+			}
+		}
+		offset += len(line) + 1
 	}
-	return strings.TrimSpace(text[afterOpen : afterOpen+end])
+	return ""
 }

@@ -6,6 +6,8 @@ package diff
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -281,10 +283,20 @@ func TestExtractCodeBlock(t *testing.T) {
 		{"with language tag", "```go\nfoo\nbar\n```", "foo\nbar"},
 		{"without language tag", "```\nfoo\n```", "foo"},
 		{"with surrounding text", "Here:\n```\ncode\n```\ndone", "code"},
+		{"first block", "```\nfirst\n```\n```\nsecond\n```", "first"},
+		{"empty first block", "```\n```\n```\nsecond\n```", ""},
+		{"longer closing fence", "````go\ncode\n`````", "code"},
+		{"shorter inner fence", "````\nfirst\n```\nlast\n````", "first\n```\nlast"},
+		{"closing fence has text", "```\nfirst\n```not a closer\nlast\n```", "first\n```not a closer\nlast"},
+		{"closing fence whitespace", "```\ncode\n   ``` \t", "code"},
+		{"indented code fence", "```\nfirst\n    ```\nlast\n```", "first\n    ```\nlast"},
+		{"CRLF", "```go\r\nfirst\r\nlast\r\n```\r\n", "first\r\nlast"},
 		{"no code block", "just text", ""},
 		{"empty block", "```\n```", ""},
 		{"opening fence without newline", "```go", ""},
 		{"no closing fence", "```\nfoo\nbar", ""},
+		{"only shorter closing fence", "````\ncode\n```", ""},
+		{"inline fence without closer", "```go\nmarker := \"```\"", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -293,5 +305,44 @@ func TestExtractCodeBlock(t *testing.T) {
 				t.Errorf("extractCodeBlock() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestReLocateComment_PreservesFencedCode(t *testing.T) {
+	cases := []struct {
+		name, path, language, fence, snippet string
+	}{
+		{"ordinary control", "snippet.go", "go", "```", "count := len(text)\nreturn count"},
+		{"inline backticks", "snippet.go", "go", "```", "marker := \"```\"\nreturn marker"},
+		{"longer fence with nested fence", "snippet.py", "python", "````", "message = \"\"\"\n```\ncontent\n```\n\"\"\"\nrender(message)"},
+		{"longer fence control", "snippet.go", "go", "````", "count := len(text)\nreturn count"},
+	}
+	for _, tc := range cases {
+		for _, fullFile := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/full-file=%v", tc.name, fullFile), func(t *testing.T) {
+				lineCount := strings.Count(tc.snippet, "\n") + 1
+				d := &model.Diff{NewPath: tc.path}
+				if fullFile {
+					d.NewFileContent = tc.snippet + "\n"
+				} else {
+					d.Diff = fmt.Sprintf("@@ -0,0 +1,%d @@\n+%s\n", lineCount, strings.ReplaceAll(tc.snippet, "\n", "\n+"))
+				}
+				direct := model.LlmComment{Path: tc.path, ExistingCode: tc.snippet}
+				if !ResolveComment(&direct, d) || direct.StartLine != 1 || direct.EndLine != lineCount {
+					t.Fatalf("verbatim snippet is not a valid control: %+v", direct)
+				}
+				cm := model.LlmComment{Path: tc.path, ExistingCode: "a drifted quote that does not match", Content: "The quoted snippet needs correction."}
+				if ResolveComment(&cm, d) {
+					t.Fatal("initial quote should require re-location")
+				}
+				response := tc.fence + tc.language + "\n" + tc.snippet + "\n" + tc.fence
+				client := &mockLLMClient{response: newMockResponse(response)}
+				ok, resp := ReLocateComment(context.Background(), &cm, d, client,
+					BuildReLocationMessages(&cm, d, makeTask()), "test-model", 1000)
+				if !ok || resp == nil || cm.ExistingCode != tc.snippet || cm.StartLine != 1 || cm.EndLine != lineCount {
+					t.Fatalf("re-location did not preserve the complete valid snippet: %+v", cm)
+				}
+			})
+		}
 	}
 }
