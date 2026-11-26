@@ -231,19 +231,48 @@ func matchConsecutive(sideLines []indexedLine, targetLines []string) (startLine,
 	if len(targetLines) == 0 || len(sideLines) < len(targetLines) {
 		return 0, 0, false
 	}
-	for i := 0; i <= len(sideLines)-len(targetLines); i++ {
-		matched := true
-		for j, target := range targetLines {
-			if sideLines[i+j].content != target {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			return sideLines[i].lineNum, sideLines[i+len(targetLines)-1].lineNum, true
+	matcher := newLineMatcher(targetLines)
+	for i, line := range sideLines {
+		if matcher.advance(line.content) {
+			return sideLines[i-len(targetLines)+1].lineNum, line.lineNum, true
 		}
 	}
 	return 0, 0, false
+}
+
+type lineMatcher struct {
+	target  []string
+	prefix  []int
+	matched int
+}
+
+// Reuse matching prefixes so repeated source lines do not cause quadratic scans.
+func newLineMatcher(target []string) lineMatcher {
+	prefix := make([]int, len(target))
+	for i, matched := 1, 0; i < len(target); i++ {
+		for matched > 0 && target[i] != target[matched] {
+			matched = prefix[matched-1]
+		}
+		if target[i] == target[matched] {
+			matched++
+		}
+		prefix[i] = matched
+	}
+	return lineMatcher{target: target, prefix: prefix}
+}
+
+func (m *lineMatcher) advance(line string) bool {
+	for m.matched > 0 && line != m.target[m.matched] {
+		m.matched = m.prefix[m.matched-1]
+	}
+	if line == m.target[m.matched] {
+		m.matched++
+	}
+	if m.matched == len(m.target) {
+		m.matched = m.prefix[m.matched-1]
+		return true
+	}
+	return false
 }
 
 // resolveFromFileContent scans the new file content line-by-line for consecutive
@@ -253,7 +282,6 @@ func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 		return false
 	}
 
-	fileLines := strings.Split(d.NewFileContent, "\n")
 	targetLines := splitAndNormalize(cm.ExistingCode)
 	if len(targetLines) == 0 {
 		return false
@@ -262,32 +290,20 @@ func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 	// Normalize file lines the same way as target: skip blanks so that
 	// blank lines in the source don't break the sliding-window match.
 	// "Consecutive" here means adjacent non-blank lines.
-	normalizedFileLines := make([]string, 0, len(fileLines))
-	fileLineNums := make([]int, 0, len(fileLines))
-	for i, line := range fileLines {
+	matcher := newLineMatcher(targetLines)
+	fileLineNums := make([]int, len(targetLines))
+	lineNum, nonblankCount := 0, 0
+	for line := range strings.SplitSeq(d.NewFileContent, "\n") {
+		lineNum++
 		n := normalizeLine(strings.TrimRight(line, "\r"))
 		if n == "" {
 			continue
 		}
-		normalizedFileLines = append(normalizedFileLines, n)
-		fileLineNums = append(fileLineNums, i+1)
-	}
-
-	if len(normalizedFileLines) < len(targetLines) {
-		return false
-	}
-
-	for i := 0; i <= len(normalizedFileLines)-len(targetLines); i++ {
-		matched := true
-		for j, target := range targetLines {
-			if normalizedFileLines[i+j] != target {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			cm.StartLine = fileLineNums[i]
-			cm.EndLine = fileLineNums[i+len(targetLines)-1]
+		fileLineNums[nonblankCount%len(targetLines)] = lineNum
+		nonblankCount++
+		if matcher.advance(n) {
+			cm.StartLine = fileLineNums[(nonblankCount-len(targetLines))%len(targetLines)]
+			cm.EndLine = lineNum
 			return true
 		}
 	}
