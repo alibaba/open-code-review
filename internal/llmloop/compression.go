@@ -6,6 +6,7 @@ package llmloop
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -228,6 +229,16 @@ func buildMessageXML(msgs []llm.Message) string {
 		sb.WriteString("    <content>\n")
 		sb.WriteString(fmt.Sprintf("      %s\n", m.ExtractText()))
 		sb.WriteString("    </content>\n")
+		if len(m.ToolCalls) > 0 || m.ToolCallID != "" {
+			// Only string fields are serialized; opaque provider replay data is excluded.
+			activity, _ := json.Marshal(struct {
+				ToolCalls  []llm.ToolCall `json:"tool_calls,omitempty"`
+				ToolCallID string         `json:"tool_call_id,omitempty"`
+			}{ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID})
+			sb.WriteString("    <tool_activity>\n")
+			sb.WriteString(fmt.Sprintf("      %s\n", activity))
+			sb.WriteString("    </tool_activity>\n")
+		}
 		if m.ReasoningContent != "" {
 			sb.WriteString("    <reasoning>\n")
 			sb.WriteString(fmt.Sprintf("      %s\n", m.ReasoningContent))
