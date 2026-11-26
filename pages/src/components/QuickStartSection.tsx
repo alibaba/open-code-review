@@ -21,9 +21,9 @@ const Toast: React.FC<{ message: string; visible: boolean }> = ({ message, visib
         top: 88,
         left: '50%',
         transform: 'translateX(-50%)',
-        background: 'rgba(255,255,255,0.1)',
-        border: '1px solid rgba(255,255,255,0.2)',
-        color: 'rgba(255,255,255,0.85)',
+        background: 'var(--fill-hover)',
+        border: '1px solid var(--line)',
+        color: 'var(--text-body)',
         padding: '5px 8px 5px 10px',
         borderRadius: 6,
         fontSize: 12,
@@ -42,19 +42,19 @@ const Toast: React.FC<{ message: string; visible: boolean }> = ({ message, visib
 
 const CodeBlock: React.FC<{ label: string; code: string; multiline?: boolean; onCopy: (text: string) => void }> = ({ label, code, multiline, onCopy }) => (
   <div style={{ display: 'flex', flexDirection: 'column' }}>
-    <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, margin: '0 0 6px 0' }}>{label}</p>
+    <p style={{ color: 'var(--text-faint)', fontSize: 12, margin: '0 0 6px 0' }}>{label}</p>
     <div
       style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: multiline ? 'flex-start' : 'center',
-        background: '#000000',
+        background: 'var(--bg-page)',
         borderRadius: 6,
         padding: '4px 16px',
-        border: '1px solid rgba(255,255,255,0.16)',
+        border: '1px solid var(--line)',
       }}
     >
-      <pre style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, fontFamily: 'Menlo, monospace', margin: 0, whiteSpace: 'pre-wrap', lineHeight: '22px' }}>
+      <pre style={{ color: 'var(--text-body)', fontSize: 13, fontFamily: 'Menlo, monospace', margin: 0, whiteSpace: 'pre-wrap', lineHeight: '22px' }}>
         {code}
       </pre>
       <div
@@ -81,13 +81,13 @@ const QuickStartSection: React.FC = () => {
       <div style={{ width: '100%', maxWidth: 1200, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: isMobile ? 32 : 48 }}>
         {/* Header */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <span style={{ color: '#2BDE5E', fontSize: 16, fontWeight: 500, letterSpacing: '0.48px' }}>
+          <span style={{ color: 'var(--accent)', fontSize: 16, fontWeight: 500, letterSpacing: '0.48px' }}>
             {t('quickstart.sectionLabel')}
           </span>
-          <h2 style={{ color: '#FFFFFF', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
+          <h2 style={{ color: 'var(--text-strong)', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
             {t('quickstart.title')}
           </h2>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>
+          <p style={{ color: 'var(--text-faint)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>
             {t('quickstart.subtitle')}
           </p>
         </div>
@@ -95,15 +95,15 @@ const QuickStartSection: React.FC = () => {
         {/* Steps */}
         <div style={{ width: isMobile ? '100%' : isTablet ? '100%' : 720, display: 'flex', flexDirection: 'column', gap: 24 }}>
           {/* Step 1 */}
-          <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 8, padding: 24 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--fill-subtle)', border: '1px solid var(--line)', borderRadius: 8, padding: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 32, height: 32, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(255,255,255,0.04)', borderRadius: 6 }}>
-                  <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: 500 }}>01</span>
+                <div style={{ width: 32, height: 32, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'var(--fill-subtle)', borderRadius: 6 }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 500 }}>01</span>
                 </div>
                 <div>
-                  <p style={{ color: '#FFFFFF', fontSize: 16, fontWeight: 500, margin: 0 }}>{t('quickstart.step1Title')}</p>
-                  <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: 0 }}>{t('quickstart.step1Desc')}</p>
+                  <p style={{ color: 'var(--text-strong)', fontSize: 16, fontWeight: 500, margin: 0 }}>{t('quickstart.step1Title')}</p>
+                  <p style={{ color: 'var(--text-ghost)', fontSize: 13, margin: 0 }}>{t('quickstart.step1Desc')}</p>
                 </div>
               </div>
               <img src={chevronDown} alt="" style={{ width: 16, height: 16 }} />
@@ -115,15 +115,15 @@ const QuickStartSection: React.FC = () => {
           </div>
 
           {/* Step 2 */}
-          <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 8, padding: 24 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--fill-subtle)', border: '1px solid var(--line)', borderRadius: 8, padding: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 32, height: 32, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(255,255,255,0.04)', borderRadius: 6 }}>
-                  <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: 500 }}>02</span>
+                <div style={{ width: 32, height: 32, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'var(--fill-subtle)', borderRadius: 6 }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 500 }}>02</span>
                 </div>
                 <div>
-                  <p style={{ color: '#FFFFFF', fontSize: 16, fontWeight: 500, margin: 0 }}>{t('quickstart.step2Title')}</p>
-                  <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: 0 }}>{t('quickstart.step2Desc')}</p>
+                  <p style={{ color: 'var(--text-strong)', fontSize: 16, fontWeight: 500, margin: 0 }}>{t('quickstart.step2Title')}</p>
+                  <p style={{ color: 'var(--text-ghost)', fontSize: 13, margin: 0 }}>{t('quickstart.step2Desc')}</p>
                 </div>
               </div>
               <img src={chevronRight} alt="" style={{ width: 16, height: 16 }} />
@@ -144,15 +144,15 @@ const QuickStartSection: React.FC = () => {
           </div>
 
           {/* Step 3 */}
-          <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 8, padding: 24 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--fill-subtle)', border: '1px solid var(--line)', borderRadius: 8, padding: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 32, height: 32, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(255,255,255,0.04)', borderRadius: 6 }}>
-                  <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: 500 }}>03</span>
+                <div style={{ width: 32, height: 32, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'var(--fill-subtle)', borderRadius: 6 }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 500 }}>03</span>
                 </div>
                 <div>
-                  <p style={{ color: '#FFFFFF', fontSize: 16, fontWeight: 500, margin: 0 }}>{t('quickstart.step3Title')}</p>
-                  <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: 0 }}>{t('quickstart.step3Desc')}</p>
+                  <p style={{ color: 'var(--text-strong)', fontSize: 16, fontWeight: 500, margin: 0 }}>{t('quickstart.step3Title')}</p>
+                  <p style={{ color: 'var(--text-ghost)', fontSize: 13, margin: 0 }}>{t('quickstart.step3Desc')}</p>
                 </div>
               </div>
               <img src={playIcon} alt="" style={{ width: 16, height: 16 }} />

@@ -8,13 +8,13 @@ Copyright 2026 alibaba/open-code-review Contributors
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   line-height: 24px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-soft);
 }
 
 .docs-markdown h1 {
   font-size: 28px;
   font-weight: 700;
-  color: #FFFFFF;
+  color: var(--text-strong);
   margin: 0 0 24px 0;
   line-height: 36px;
 }
@@ -22,7 +22,7 @@ Copyright 2026 alibaba/open-code-review Contributors
 .docs-markdown h2 {
   font-size: 20px;
   font-weight: 600;
-  color: #FFFFFF;
+  color: var(--text-strong);
   margin: 40px 0 16px 0;
   line-height: 28px;
 }
@@ -30,7 +30,7 @@ Copyright 2026 alibaba/open-code-review Contributors
 .docs-markdown h3 {
   font-size: 16px;
   font-weight: 600;
-  color: #FFFFFF;
+  color: var(--text-strong);
   margin: 28px 0 12px 0;
   line-height: 24px;
 }
@@ -38,19 +38,19 @@ Copyright 2026 alibaba/open-code-review Contributors
 .docs-markdown h4 {
   font-size: 14px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-body);
   margin: 20px 0 8px 0;
   line-height: 22px;
 }
 
 .docs-markdown p {
   margin: 0 0 12px 0;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-muted);
   line-height: 24px;
 }
 
 .docs-markdown a {
-  color: #2BDE5E;
+  color: var(--accent);
   text-decoration: none;
   transition: opacity 0.2s;
 }
@@ -64,17 +64,17 @@ Copyright 2026 alibaba/open-code-review Contributors
 .docs-markdown code {
   font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
   font-size: 13px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--fill-hover);
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 2px 6px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--text-body);
 }
 
 /* Code blocks */
 .docs-markdown pre {
-  background: #000000;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: var(--bg-page);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 4px 0;
   margin: 0 0 16px 0;
@@ -87,16 +87,19 @@ Copyright 2026 alibaba/open-code-review Contributors
   padding: 0 16px;
   font-size: 13px;
   line-height: 22px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-body);
   white-space: pre;
   display: block;
   overflow-x: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: var(--line) transparent;
 }
 
 /* Copy button: revealed on hover so it never obscures code while reading;
-   the translucent background keeps it legible over long lines. */
+   the translucent background keeps it legible over long lines. The dark
+   background is deliberate in both themes: the copy icon is white
+   (icon-copy.svg), so it needs a dark chip to stay visible whether the code
+   block underneath is dark (dark theme) or white (light theme). */
 .docs-markdown pre .code-copy-btn {
   position: absolute;
   top: 4px;
@@ -123,7 +126,7 @@ Copyright 2026 alibaba/open-code-review Contributors
 /* Touch devices have no hover: keep the button always visible. */
 @media (hover: none) {
   .docs-markdown pre .code-copy-btn {
-    opacity: 1;
+  opacity: 1;
   }
 }
 
@@ -144,7 +147,7 @@ Copyright 2026 alibaba/open-code-review Contributors
 
 .docs-markdown li {
   margin-bottom: 6px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-muted);
   line-height: 24px;
 }
 
@@ -161,17 +164,17 @@ Copyright 2026 alibaba/open-code-review Contributors
   border-spacing: 0;
   margin: 0 0 16px 0;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--line);
 }
 
 .docs-markdown thead th {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--fill-subtle);
   font-size: 13px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-muted);
   text-align: left;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid var(--line);
 }
 
 .docs-markdown thead th:first-child {
@@ -184,9 +187,9 @@ Copyright 2026 alibaba/open-code-review Contributors
 
 .docs-markdown tbody td {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-muted);
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
 
@@ -206,14 +209,14 @@ Copyright 2026 alibaba/open-code-review Contributors
 .docs-markdown blockquote {
   margin: 0 0 16px 0;
   padding: 12px 16px;
-  border-left: 2px solid #2BDE5E;
-  background: rgba(255, 255, 255, 0.06);
+  border-left: 2px solid var(--accent);
+  background: var(--fill-hover);
   border-radius: 0 6px 6px 0;
 }
 
 .docs-markdown blockquote p {
   margin: 0;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -224,20 +227,20 @@ Copyright 2026 alibaba/open-code-review Contributors
 /* Horizontal rule */
 .docs-markdown hr {
   border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--line);
   margin: 32px 0;
 }
 
 /* Strong / bold */
 .docs-markdown strong {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-body);
   font-weight: 600;
 }
 
 /* Em / italic */
 .docs-markdown em {
   font-style: italic;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-soft);
 }
 
 /* Images */
@@ -256,8 +259,8 @@ Copyright 2026 alibaba/open-code-review Contributors
 .docs-markdown .mermaid-rendered {
   margin: 16px 0;
   padding: 24px 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--fill-subtle);
+  border: 1px solid var(--line);
   border-radius: 8px;
   overflow-x: auto;
   display: flex;
@@ -279,6 +282,6 @@ Copyright 2026 alibaba/open-code-review Contributors
 }
 
 .docs-markdown pre code::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--fill-hover);
   border-radius: 3px;
 }

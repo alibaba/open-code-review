@@ -11,6 +11,7 @@ export const ja: TranslationKeys = {
   'navbar.docs': 'ドキュメント',
   'navbar.blog': 'ブログ',
   'navbar.getStarted': '始める',
+  'navbar.themeToggle': 'ライトとダークテーマを切り替える',
 
   'providers.title': '主要モデルプロバイダーに標準対応',
   'providers.description': 'API キーを設定するだけでレビューを開始。主要プロトコルに対応したプライベートモデルサービスにも接続できます。',

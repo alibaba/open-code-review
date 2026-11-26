@@ -40,7 +40,9 @@ describe.each([375, 1440])('Footer at %dpx', (width) => {
     expect(contact).toHaveAttribute('href', 'https://github.com/lizhengfeng101');
     expect(contact).toHaveAttribute('target', '_blank');
     expect(contact).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(within(contact).getByRole('presentation')).toHaveAttribute('src', githubIcon);
+    const contactIcon = contact.querySelector('[aria-hidden="true"]');
+    expect(contactIcon).not.toBeNull();
+    expect((contactIcon as HTMLElement).style.maskImage).toContain(githubIcon);
     expect(footer.getByRole('link', { name: translations['footer.brand'] }))
       .toHaveAttribute('href', 'https://github.com/alibaba/open-code-review');
   });

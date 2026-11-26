@@ -7,6 +7,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 import { LanguageProvider } from './i18n';
+import { ThemeProvider } from './theme/ThemeProvider';
 
 function installLocalStorageMock() {
   let store: Record<string, string> = {};
@@ -45,9 +46,11 @@ describe('App', () => {
   it('renders the not-found page for an unmatched URL', () => {
     render(
       <MemoryRouter initialEntries={['/ewe.html']}>
-        <LanguageProvider>
-          <App />
-        </LanguageProvider>
+        <ThemeProvider>
+          <LanguageProvider>
+            <App />
+          </LanguageProvider>
+        </ThemeProvider>
       </MemoryRouter>,
     );
 
