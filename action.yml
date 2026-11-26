@@ -1033,15 +1033,12 @@ runs:
           /tmp/ocr-stderr.log
         if-no-files-found: warn
 
-    - name: Fail job on OCR error
-      if: env.OCR_EXIT_CODE != '0'
-      shell: bash
-      run: |
-        echo "ocr review exited with code ${OCR_EXIT_CODE}; see uploaded artifacts for details."
-        exit "${OCR_EXIT_CODE}"
-
     - name: Post review comments
-      if: env.OCR_EXIT_CODE == '0'
+      # Publishes whenever the job is not cancelling, including a non-zero
+      # review exit: a failed or partial run that still produced a usable
+      # report must reach the PR before the job turns red, and a parse failure
+      # posts the stderr banner instead. Skipped entirely on cancellation.
+      if: ${{ !cancelled() }}
       id: post
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       env:
@@ -1117,3 +1114,14 @@ runs:
             // OCR summary (see OCR_CHECKPOINT_APP_SLUG above).
             appSlug: process.env.OCR_CHECKPOINT_APP_SLUG || '',
           });
+
+    - name: Fail job on OCR error
+      # Last step: Post review comments has already published this run's
+      # summary (banner included) when the report was usable, so the failure is
+      # visible both as a red job and on the PR. The original review exit code
+      # is preserved unchanged.
+      if: env.OCR_EXIT_CODE != '0'
+      shell: bash
+      run: |
+        echo "ocr review exited with code ${OCR_EXIT_CODE}; see uploaded artifacts for details."
+        exit "${OCR_EXIT_CODE}"

@@ -16,7 +16,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, isSummaryAuthorOurs, preserveCheckpointMarker, tailForComment, MAX_COMMENT_STDERR_CHARS } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, isSummaryAuthorOurs, preserveCheckpointMarker, tailForComment, MAX_COMMENT_STDERR_CHARS, resolveRunStatus, isIncompleteRunStatus, formatUnfinishedCoverageItem, buildCoverageBanner } = require(path.join(__dirname, "post-review-comments.js"));
 
 // REVIEW_TAG as the production code builds it for this test's hardcoded run
 // identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
@@ -798,7 +798,6 @@ async function testZeroFindingWarningsDoNotBlockCheckpoint() {
     message: "reached the aggregate token budget before finishing; the grace round completed the task",
   }];
   const message = "Review complete: 0 finding(s) across 1 selected item(s).";
-  const summary = `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${message}${formatWarnings(warnings)}`;
 
   for (const terminal of ["complete", "partial", "failed"]) {
     const { github, outputs } = await run({
@@ -811,6 +810,11 @@ async function testZeroFindingWarningsDoNotBlockCheckpoint() {
       opts: ckRunOptions({ checkpointCarry: CARRY }),
     });
     const body = lastSummaryBody(github);
+    // ckManifest carries no coverage set, so an incomplete terminal renders the
+    // banner's coverage-unavailable variant ahead of the CLI message.
+    const summary = terminal === "complete"
+      ? `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview**: ${message}${formatWarnings(warnings)}`
+      : `${SUMMARY_MARKER}\n⚠️ **${terminal === "failed" ? "Failed" : "Partial"} review (status=${terminal}); coverage details are unavailable in this report.**\n\n${message}${formatWarnings(warnings)}`;
     if (terminal === "complete") {
       assert.strictEqual(outputs.checkpoint_after, CK_RESOLVED, "warnings do not block a complete run");
       assert.strictEqual(parseCheckpointMarker(body).head, CK_RESOLVED);
@@ -821,6 +825,189 @@ async function testZeroFindingWarningsDoNotBlockCheckpoint() {
       assert.strictEqual(body, `${summary}\n\n${CARRY}`, `${terminal} keeps the previous checkpoint and the warnings`);
     }
   }
+}
+
+// ---- Incomplete-run coverage banner ----
+
+const ckCoverage = (over = {}) => Object.assign({
+  selected: [],
+  completed: [],
+  reused: [],
+  failed: [],
+  waived: [],
+  excluded: [],
+}, over);
+
+// A partial review with zero findings must lead the summary with the coverage
+// banner — reviewed/selected counts plus the unfinished paths with their
+// recorded reasons — and never a check mark or an LGTM fallback. Reused items
+// count as covered; excluded files stay out of the denominator.
+async function testZeroFindingsPartialShowsCoverageBanner() {
+  const { github } = await run({
+    result: {
+      comments: [],
+      message: "Review partially complete: 0 finding(s); 1 of 3 selected item(s) failed.",
+      manifest: ckManifest({
+        terminal_state: "partial",
+        coverage: ckCoverage({
+          selected: [{ item_id: "a", path: "src/a.go" }, { item_id: "b", path: "src/b.go" }, { item_id: "c", path: "src/c.go" }],
+          completed: [{ item_id: "a", path: "src/a.go" }],
+          reused: [{ item_id: "c", path: "src/c.go" }],
+          failed: [{ item_id: "b", path: "src/b.go", classification: "budget", reason: "token budget reached" }],
+          excluded: [{ item_id: "d", path: "vendor/d.go", exclude_reason: "vendor" }],
+        }),
+      }),
+    },
+  });
+  const body = lastSummaryBody(github);
+  const banner = "⚠️ **Partial review: 2 of 3 selected file(s) reviewed.**";
+  assert.strictEqual(body.startsWith(`${SUMMARY_MARKER}\n${banner}`), true, body);
+  assert.match(body, /Not completed:\n- `src\/b\.go` \(budget: token budget reached\)/);
+  // The CLI's own message still follows the banner.
+  assert.match(body, /Review partially complete: 0 finding\(s\); 1 of 3 selected item\(s\) failed\./);
+  assert.strictEqual(body.includes("✅"), false, body);
+  assert.strictEqual(body.includes("Looks good to me"), false, body);
+}
+
+// A fully failed review leads with the Failed banner and an empty warnings
+// list must not resurrect the check mark.
+async function testZeroFindingsFailedShowsBannerWithEmptyWarnings() {
+  const { github } = await run({
+    result: {
+      comments: [],
+      warnings: [],
+      message: "Review failed: 0 finding(s); 3 of 3 selected item(s) failed.",
+      manifest: ckManifest({
+        terminal_state: "failed",
+        coverage: ckCoverage({
+          selected: [{ item_id: "a", path: "src/a.go" }, { item_id: "b", path: "src/b.go" }, { item_id: "c", path: "src/c.go" }],
+          failed: [
+            { item_id: "a", path: "src/a.go", classification: "timeout" },
+            { item_id: "b", path: "src/b.go", classification: "provider", reason: "upstream 503" },
+            { item_id: "c", path: "src/c.go" },
+          ],
+        }),
+      }),
+    },
+  });
+  const body = lastSummaryBody(github);
+  const banner = "⚠️ **Failed review: 0 of 3 selected file(s) reviewed.**";
+  assert.strictEqual(body.startsWith(`${SUMMARY_MARKER}\n${banner}`), true, body);
+  assert.match(body, /Not completed:\n- `src\/a\.go` \(timeout\)\n- `src\/b\.go` \(provider: upstream 503\)\n- `src\/c\.go`/);
+  assert.strictEqual(body.includes("✅"), false, body);
+  assert.strictEqual(body.includes("Looks good to me"), false, body);
+}
+
+// A report without coverage says so instead of inventing counts or causes,
+// and the missing-message fallback never degrades to LGTM.
+async function testZeroFindingsIncompleteWithoutCoverageNamesStatus() {
+  for (const result of [
+    { comments: [], status: "partial" },
+    { comments: [], status: "failed" },
+    { comments: [], status: "completed_with_errors" },
+  ]) {
+    const { github } = await run({ result });
+    const body = lastSummaryBody(github);
+    assert.match(body, /coverage details are unavailable in this report/, JSON.stringify(result));
+    assert.strictEqual(body.includes("✅"), false, JSON.stringify(result));
+    assert.strictEqual(body.includes("Looks good to me"), false, JSON.stringify(result));
+  }
+  const { github } = await run({ result: { comments: [], status: "completed_with_errors" } });
+  assert.match(lastSummaryBody(github), /Review did not complete \(status=completed_with_errors\)/);
+}
+
+// With findings, the banner precedes the findings header on the pre-review
+// anchor and on the finalized summary, and the partial run never advances the
+// checkpoint.
+async function testFindingsPartialBannerPrecedesFindings() {
+  const result = {
+    comments: [{ path: "src/a.js", content: "real finding", start_line: 1, end_line: 1 }],
+    manifest: ckManifest({
+      terminal_state: "partial",
+      coverage: ckCoverage({
+        selected: [{ item_id: "a", path: "src/a.js" }, { item_id: "b", path: "src/b.js" }],
+        completed: [{ item_id: "a", path: "src/a.js" }],
+        failed: [{ item_id: "b", path: "src/b.js", classification: "budget", reason: "token budget reached" }],
+      }),
+    }),
+  };
+  const { github, outputs } = await run({ result });
+  const anchor = github.issueComments[0].body;
+  const body = github.updatedComments[0].body;
+  const bannerIdx = body.indexOf("⚠️ **Partial review: 1 of 2 selected file(s) reviewed.**");
+  const findingsIdx = body.indexOf("🔍 **OpenCodeReview** found **1** issue(s)");
+  assert.notStrictEqual(bannerIdx, -1, "finalized summary carries the banner");
+  assert.ok(bannerIdx < findingsIdx, "banner precedes the findings header");
+  assert.match(anchor, /⚠️ \*\*Partial review: 1 of 2 selected file\(s\) reviewed\.\*\*[\s\S]*🔍 \*\*OpenCodeReview\*\* found/);
+  assert.strictEqual(body.includes("`src/b.js` (budget: token budget reached)"), true, body);
+  assert.strictEqual(outputs.checkpoint_after, "", "a partial run never advances the checkpoint");
+}
+
+// Complete reviews render exactly as before, coverage present or not.
+async function testCompleteReviewRendersWithoutBanner() {
+  const withCoverage = {
+    comments: [{ path: "src/a.js", content: "minor", start_line: 1, end_line: 1 }],
+    manifest: ckManifest({
+      coverage: ckCoverage({
+        selected: [{ item_id: "a", path: "src/a.js" }],
+        completed: [{ item_id: "a", path: "src/a.js" }],
+      }),
+    }),
+  };
+  const { github } = await run({ result: withCoverage });
+  const body = github.updatedComments[0].body;
+  // The findings path wraps the body with the summary marker and the per-run
+  // tag before the findings header.
+  assert.match(
+    body,
+    /^<!-- ocr-summary -->\n<!-- ocr-summary-run:[\w:-]+ -->\n🔍 \*\*OpenCodeReview\*\* found \*\*1\*\* issue\(s\)/,
+    body
+  );
+  assert.strictEqual(body.includes("Partial review"), false, body);
+
+  const legacy = { comments: [] };
+  const { github: gh2 } = await run({ result: legacy });
+  assert.strictEqual(
+    lastSummaryBody(gh2),
+    `${SUMMARY_MARKER}\n✅ **OpenCodeReview**: No comments generated. Looks good to me.`
+  );
+}
+
+// Unit-level: waived files are stated separately (a waiver is not a review)
+// and both item renderings degrade gracefully when fields are missing.
+function testCoverageBannerUnitHelpers() {
+  assert.strictEqual(buildCoverageBanner({ status: "success" }), "");
+  assert.strictEqual(buildCoverageBanner({ status: "skipped" }), "");
+  assert.strictEqual(buildCoverageBanner({}), "");
+  assert.strictEqual(
+    buildCoverageBanner({
+      manifest: {
+        terminal_state: "partial",
+        coverage: ckCoverage({
+          selected: [{ path: "a" }, { path: "b" }, { path: "c" }, { path: "d" }],
+          completed: [{ path: "a" }, { path: "b" }],
+          waived: [{ path: "c", classification: "waived", reason: "rule waiver" }],
+          failed: [{ path: "d", classification: "budget" }],
+        }),
+      },
+    }),
+    "⚠️ **Partial review: 2 of 4 selected file(s) reviewed; 1 waived.**\n\nNot completed:\n- `d` (budget)"
+  );
+  assert.strictEqual(formatUnfinishedCoverageItem({ path: "x.go" }), "`x.go`");
+  assert.strictEqual(formatUnfinishedCoverageItem({}), "`(unknown path)`");
+  assert.strictEqual(formatUnfinishedCoverageItem(null), "`(unknown path)`");
+  // Rendered fields cannot carry control characters into the summary, and a
+  // backtick cannot break the path's code span.
+  assert.strictEqual(
+    formatUnfinishedCoverageItem({ path: "a\x01b`c.go", classification: "budget\r\nx" }),
+    "`abc.go` (budgetx)"
+  );
+  assert.strictEqual(resolveRunStatus({ manifest: { terminal_state: "partial" }, status: "success" }), "partial");
+  assert.strictEqual(resolveRunStatus({ status: "success" }), "success");
+  assert.strictEqual(resolveRunStatus({}), "");
+  assert.strictEqual(isIncompleteRunStatus("partial"), true);
+  assert.strictEqual(isIncompleteRunStatus("complete"), false);
+  assert.strictEqual(isIncompleteRunStatus(""), false);
 }
 
 async function testIncrementalSkipsOverlapping() {
@@ -2798,6 +2985,13 @@ async function main() {
   await testZeroFindingSummaryRendersWarnings();
   await testZeroFindingWarningsPreserveSummaryOwnership();
   await testZeroFindingWarningsDoNotBlockCheckpoint();
+  // Incomplete-run coverage banner
+  await testZeroFindingsPartialShowsCoverageBanner();
+  await testZeroFindingsFailedShowsBannerWithEmptyWarnings();
+  await testZeroFindingsIncompleteWithoutCoverageNamesStatus();
+  await testFindingsPartialBannerPrecedesFindings();
+  await testCompleteReviewRendersWithoutBanner();
+  testCoverageBannerUnitHelpers();
   await testIncrementalSkipsOverlapping();
   await testIncrementalPrefersHighestSeverityOverlap();
   await testIncrementalSkipsSameRunIoUOverlapping();

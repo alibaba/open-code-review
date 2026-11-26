@@ -498,7 +498,8 @@ class PublishTest(unittest.TestCase):
 
     def test_failed_review_not_lgtm(self):
         # A failed review also has zero comments, but must not post the
-        # success glyph / LGTM message on the durable MR record.
+        # success glyph / LGTM message on the durable MR record. Without
+        # coverage in the report the banner says so instead of inventing counts.
         stats, rec = run_publish({"status": "failed",
                                   "message": "Review failed: 0 finding(s); 3 of 3 selected item(s) failed."})
         self.assertEqual(stats["inline"], 0)
@@ -506,7 +507,8 @@ class PublishTest(unittest.TestCase):
         self.assertNotIn("Looks good to me", rec.final_summary_body)
         self.assertEqual(rec.final_summary_body,
                          "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
-                         "⚠️ **OpenCodeReview**: Review failed: 0 finding(s); 3 of 3 selected item(s) failed.")
+                         "⚠️ **Failed review (status=failed); coverage details are unavailable in this report.**"
+                         "\n\nReview failed: 0 finding(s); 3 of 3 selected item(s) failed.")
 
     def test_partial_review_not_lgtm(self):
         # Partial means some selected items were never reviewed, so zero
@@ -514,14 +516,153 @@ class PublishTest(unittest.TestCase):
         stats, rec = run_publish({"status": "partial",
                                   "message": "Review partially complete: 0 finding(s); 2 of 3 selected item(s) failed."})
         self.assertEqual(stats["inline"], 0)
+        self.assertNotIn("✅", rec.final_summary_body)
         self.assertEqual(rec.final_summary_body,
                          "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
-                         "⚠️ **OpenCodeReview**: Review partially complete: 0 finding(s); 2 of 3 selected item(s) failed.")
+                         "⚠️ **Partial review (status=partial); coverage details are unavailable in this report.**"
+                         "\n\nReview partially complete: 0 finding(s); 2 of 3 selected item(s) failed.")
 
     def test_incomplete_review_without_message_names_status(self):
         stats, rec = run_publish({"status": "partial"})
         self.assertNotIn("✅", rec.final_summary_body)
         self.assertIn("review did not complete (status=partial)", rec.final_summary_body)
+
+    def test_zero_comments_partial_with_coverage_lists_unfinished(self):
+        # Coverage in the manifest turns the banner concrete: reused counts as
+        # covered, excluded files stay out of the denominator, and the
+        # unfinished path carries its recorded classification and reason.
+        manifest = {
+            "terminal_state": "partial",
+            "coverage": {
+                "selected": [{"path": "src/a.go"}, {"path": "src/b.go"}, {"path": "src/c.go"}],
+                "completed": [{"path": "src/a.go"}],
+                "reused": [{"path": "src/c.go"}],
+                "failed": [{"path": "src/b.go", "classification": "budget",
+                            "reason": "token budget reached"}],
+                "waived": [],
+                "excluded": [{"path": "vendor/d.go", "exclude_reason": "vendor"}],
+            },
+        }
+        stats, rec = run_publish({
+            "status": "partial",
+            "message": "Review partially complete: 0 finding(s); 1 of 3 selected item(s) failed.",
+            "manifest": manifest,
+        })
+        body = rec.final_summary_body
+        self.assertTrue(body.startswith(
+            "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
+            "⚠️ **Partial review: 2 of 3 selected file(s) reviewed.**\n\n"
+            "Not completed:\n- `src/b.go` (budget: token budget reached)"), body)
+        self.assertIn("Review partially complete: 0 finding(s); 1 of 3 selected item(s) failed.", body)
+        self.assertNotIn("✅", body)
+        self.assertNotIn("Looks good to me", body)
+
+    def test_zero_comments_failed_with_empty_warnings(self):
+        stats, rec = run_publish({
+            "status": "failed",
+            "warnings": [],
+            "message": "Review failed: 0 finding(s); 3 of 3 selected item(s) failed.",
+            "manifest": {
+                "terminal_state": "failed",
+                "coverage": {
+                    "selected": [{"path": "a"}, {"path": "b"}, {"path": "c"}],
+                    "completed": [],
+                    "reused": [],
+                    "failed": [{"path": "a", "classification": "timeout"},
+                               {"path": "b", "classification": "provider", "reason": "upstream 503"},
+                               {"path": "c"}],
+                    "waived": [],
+                    "excluded": [],
+                },
+            },
+        })
+        body = rec.final_summary_body
+        self.assertTrue(body.startswith(
+            "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
+            "⚠️ **Failed review: 0 of 3 selected file(s) reviewed.**\n\n"
+            "Not completed:\n- `a` (timeout)\n- `b` (provider: upstream 503)\n- `c`"), body)
+        self.assertNotIn("✅", body)
+
+    def test_coverage_banner_counts_reused_and_waived(self):
+        # Waived files are stated separately so the counts add up: they are
+        # neither reviewed nor failed.
+        banner = pr.build_coverage_banner({
+            "manifest": {
+                "terminal_state": "partial",
+                "coverage": {
+                    "selected": [{"path": "a"}, {"path": "b"}, {"path": "c"}, {"path": "d"}],
+                    "completed": [{"path": "a"}, {"path": "b"}],
+                    "reused": [],
+                    "failed": [{"path": "d", "classification": "budget"}],
+                    "waived": [{"path": "c", "classification": "waived", "reason": "rule waiver"}],
+                    "excluded": [],
+                },
+            },
+        })
+        self.assertEqual(banner,
+                         "⚠️ **Partial review: 2 of 4 selected file(s) reviewed; 1 waived.**\n\n"
+                         "Not completed:\n- `d` (budget)")
+        # Complete runs get no banner at all.
+        self.assertEqual(pr.build_coverage_banner({"status": "success"}), "")
+        self.assertEqual(pr.build_coverage_banner({"status": "skipped"}), "")
+        self.assertEqual(pr.build_coverage_banner({}), "")
+        # Rendered fields cannot carry control characters into the summary,
+        # and a backtick cannot break the path's code span.
+        self.assertEqual(
+            pr.format_unfinished_item({"path": "a\x01b`c.go", "classification": "budget\r\nx"}),
+            "`abc.go` (budgetx)")
+
+    def test_findings_partial_banner_precedes_findings(self):
+        result = {
+            "comments": [comment()],
+            "status": "partial",
+            "manifest": {
+                "terminal_state": "partial",
+                "coverage": {
+                    "selected": [{"path": "main.py"}, {"path": "other.py"}],
+                    "completed": [{"path": "main.py"}],
+                    "reused": [],
+                    "failed": [{"path": "other.py", "classification": "budget"}],
+                    "waived": [],
+                    "excluded": [],
+                },
+            },
+        }
+        stats, rec = run_publish(result)
+        body = rec.final_summary_body
+        banner_idx = body.find("⚠️ **Partial review: 1 of 2 selected file(s) reviewed.**")
+        findings_idx = body.find("🔍 **OpenCodeReview** found **1** issue(s)")
+        self.assertGreaterEqual(banner_idx, 0)
+        self.assertLess(banner_idx, findings_idx)
+        self.assertIn("- `other.py` (budget)", body)
+        # The pre-review anchor leads with the banner too.
+        self.assertTrue(rec.note_calls[0].startswith(
+            "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
+            "⚠️ **Partial review: 1 of 2 selected file(s) reviewed.**"), rec.note_calls[0])
+
+    def test_complete_review_has_no_banner(self):
+        result = {
+            "comments": [comment()],
+            "status": "complete",
+            "manifest": {
+                "terminal_state": "complete",
+                "coverage": {
+                    "selected": [{"path": "main.py"}],
+                    "completed": [{"path": "main.py"}],
+                    "reused": [],
+                    "failed": [],
+                    "waived": [],
+                    "excluded": [],
+                },
+            },
+        }
+        stats, rec = run_publish(result)
+        body = rec.final_summary_body
+        self.assertNotIn("Partial review", body)
+        self.assertNotIn("coverage details are unavailable", body)
+        self.assertTrue(body.startswith(
+            "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
+            "🔍 **OpenCodeReview** found **1** issue(s)"), body)
 
     def test_warnings_in_summary(self):
         stats, rec = run_publish({"comments": [comment()], "warnings": [{"file": "a.py", "message": "skipped"}]})

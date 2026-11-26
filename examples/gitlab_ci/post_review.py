@@ -354,6 +354,94 @@ def format_warnings(warnings):
     return body
 
 
+def resolve_run_status(result):
+    """The status a summary should trust: manifest terminal state first.
+
+    The CLI mirrors the manifest's terminal_state on the top-level status, so
+    the manifest wins when present; reports without one fall back to the
+    top-level status, and legacy reports with neither render as complete.
+    """
+    manifest = result.get("manifest")
+    if isinstance(manifest, dict):
+        status = manifest.get("terminal_state")
+        if status:
+            return status
+    return result.get("status") or ""
+
+
+def is_incomplete_run_status(status):
+    return status in ("partial", "failed", "completed_with_errors")
+
+
+def format_unfinished_item(item):
+    """One coverage item that never got reviewed, as `` `path` (class: reason)``.
+
+    Classification and reason are optional. Rendered values go through the
+    control-character sanitizer here too — the summary is the record reviewers
+    read, and this script cannot see whether the producer sanitized — and
+    backticks are dropped so a hostile path cannot break out of the code span.
+    """
+    if not isinstance(item, dict):
+        return "`(unknown path)`"
+    raw_path = sanitize_metadata(item.get("path")) if item.get("path") else "(unknown path)"
+    shown = "`%s`" % raw_path.replace("`", "")
+    details = [sanitize_metadata(v) for v in (item.get("classification"), item.get("reason")) if v]
+    if details:
+        return "%s (%s)" % (shown, ": ".join(details))
+    return shown
+
+
+def build_coverage_banner(result):
+    """Lead line for a partial/failed report plus the unfinished file list.
+
+    Counts come from this run's manifest coverage: reviewed is completed +
+    reused over the selected denominator, waived files are stated separately
+    (a waiver is not a review), and excluded files stay outside the
+    denominator. When coverage is missing the banner says so rather than
+    inventing counts or causes. Returns "" for complete runs so complete
+    reviews render exactly as before.
+    """
+    status = resolve_run_status(result)
+    if not is_incomplete_run_status(status):
+        return ""
+    if status == "completed_with_errors":
+        return ("⚠️ **Review did not complete (status=%s); "
+                "coverage details are unavailable in this report.**" % status)
+    label = "Failed" if status == "failed" else "Partial"
+    manifest = result.get("manifest")
+    coverage = manifest.get("coverage") if isinstance(manifest, dict) else None
+    selected = coverage.get("selected") if isinstance(coverage, dict) else None
+    if not isinstance(selected, list):
+        return ("⚠️ **%s review (status=%s); "
+                "coverage details are unavailable in this report.**" % (label, status))
+
+    def count(key):
+        items = coverage.get(key)
+        return len(items) if isinstance(items, list) else 0
+
+    reviewed = count("completed") + count("reused")
+    waived = count("waived")
+    headline = "⚠️ **%s review: %d of %d selected file(s) reviewed" % (label, reviewed, len(selected))
+    if waived:
+        headline += "; %d waived" % waived
+    headline += ".**"
+    lines = [headline]
+    failed_items = coverage.get("failed")
+    if isinstance(failed_items, list) and failed_items:
+        lines.append("")
+        lines.append("Not completed:")
+        for item in failed_items:
+            lines.append("- %s" % format_unfinished_item(item))
+    return "\n".join(lines)
+
+
+def prepend_coverage_banner(banner, body):
+    """Prepend the coverage banner to a summary body when one is due."""
+    if not banner:
+        return body
+    return "%s\n\n%s" % (banner, body)
+
+
 def build_summary_body(total, inline, summary, skipped, routed, failed, warnings):
     """Merged summary header. Counts are mutually exclusive and sum to total."""
     body = "🔍 **OpenCodeReview** found **%d** issue(s) in this MR." % total
@@ -1267,17 +1355,22 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     rate_limit_threshold = config["rate_limit_threshold"]
     stats = {"total": len(comments), "inline": 0, "summary": 0,
              "routed": 0, "skipped": 0, "failed": 0, "summary_url": None}
+    # Lead banner for a partial/failed report ("" on a complete run), rendered
+    # at the top of every summary body below so an incomplete review is never
+    # mistaken for a complete one.
+    coverage_banner = build_coverage_banner(result)
 
     # No comments: LGTM summary (sticky-aware). A failed or partial review has
     # zero comments too, but it must not post the success glyph: that is the
     # one durable record a reviewer reads, and an all-clear on a review that
-    # skipped selected items is worse than no note.
+    # skipped selected items is worse than no note. An incomplete review leads
+    # with the coverage banner; a complete one renders exactly as before.
     if not comments:
-        status = result.get("status")
-        if status in ("failed", "partial"):
+        status = resolve_run_status(result)
+        if is_incomplete_run_status(status):
             message = result.get("message") or "review did not complete (status=%s)" % status
-            body = wrap_summary_body("⚠️ **OpenCodeReview**: %s" % message,
-                                     config.get("run_tag", "0-0"))
+            lead = prepend_coverage_banner(coverage_banner, message)
+            body = wrap_summary_body(lead, config.get("run_tag", "0-0"))
         else:
             message = result.get("message", "No comments generated. Looks good to me.")
             body = wrap_summary_body("✅ **OpenCodeReview**: %s" % message,
@@ -1339,7 +1432,10 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     run_tag = config.get("run_tag", "0-0")
     anchor_id = None
     anchor_body = wrap_summary_body(
-        build_pre_review_summary_body(stats["total"], no_line, routed, warnings),
+        prepend_coverage_banner(
+            coverage_banner,
+            build_pre_review_summary_body(stats["total"], no_line, routed, warnings),
+        ),
         run_tag,
     )
     anchor_id = ensure_summary_anchor(poster, anchor_body, sticky,
@@ -1409,9 +1505,12 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     stats["failed"] = len(failed_comments)
 
     # Finalize the summary with the complete body.
-    summary_body = build_summary_body(
-        stats["total"], stats["inline"], stats["summary"],
-        stats["skipped"], stats["routed"], stats["failed"], warnings,
+    summary_body = prepend_coverage_banner(
+        coverage_banner,
+        build_summary_body(
+            stats["total"], stats["inline"], stats["summary"],
+            stats["skipped"], stats["routed"], stats["failed"], warnings,
+        ),
     )
     summary_body += format_summary_comments(no_line)
     summary_body += format_summary_comments(routed)
