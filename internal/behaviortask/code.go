@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/config/allowlist"
@@ -34,6 +35,30 @@ type codeTools struct {
 	allowed    map[string]map[string]bool
 	diffs      map[string]model.Diff
 	scope      []Change
+	filePaths  *[2]fileFindIndex
+}
+
+type fileFindIndex struct {
+	once  sync.Once
+	paths []string
+}
+
+func (code *codeTools) sortedFilePaths(side string) []string {
+	if code.filePaths == nil {
+		return slices.Sorted(maps.Keys(code.allowed[side]))
+	}
+	var index *fileFindIndex
+	switch side {
+	case "old":
+		index = &code.filePaths[0]
+	case "new":
+		index = &code.filePaths[1]
+	default:
+		return nil
+	}
+	// Each side is the immutable inventory of one resolved commit.
+	index.once.Do(func() { index.paths = slices.Sorted(maps.Keys(code.allowed[side])) })
+	return index.paths
 }
 
 func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
@@ -71,7 +96,7 @@ func prepareCodeTools(ctx context.Context, input Input) (*codeTools, error) {
 		return nil, err
 	}
 	result := &codeTools{runner: gitRunner, registry: tool.NewRegistry(), comparison: comparison,
-		allowed: map[string]map[string]bool{}, diffs: map[string]model.Diff{}, scope: []Change{}}
+		allowed: map[string]map[string]bool{}, diffs: map[string]model.Diff{}, scope: []Change{}, filePaths: &[2]fileFindIndex{}}
 	for side, reader := range map[string]tool.FileReader{"old": previous, "new": current} {
 		result.allowed[side] = map[string]bool{}
 		if reader.Mode == tool.ModeEmpty {
@@ -171,7 +196,7 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 		if err := ctx.Err(); err != nil {
 			return observation, err
 		}
-		paths := slices.Sorted(maps.Keys(code.allowed[side]))
+		paths := code.sortedFilePaths(side)
 		query, _ := args["query_name"].(string)
 		sensitive, _ := args["case_sensitive"].(bool)
 		matches, err := tool.MatchFileNames(ctx, paths, query, sensitive, 101, func(filePath string) bool { return code.allowed[side][filePath] })
