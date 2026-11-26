@@ -587,6 +587,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 		r.cancelPendingCompression(st)
 		var err error
 		*messages, err = r.runCompression(ctx, *messages, taskKey)
+		st.tokens.reset()
 		if err != nil && !errors.Is(err, llm.ErrTokenBudget) {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", r.progressError(err))
 		}
@@ -595,7 +596,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 
 	// A conversation can already be over the warning threshold before this
 	// round's messages are appended (e.g. an oversized initial prompt).
-	budgetDenied := CountMessagesTokens(*messages) > warnLimit && errors.Is(compress(), llm.ErrTokenBudget)
+	budgetDenied := st.tokens.count(*messages) > warnLimit && errors.Is(compress(), llm.ErrTokenBudget)
 
 	if len(toolCalls) > 0 {
 		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls, native, reasoningContent))
@@ -610,12 +611,12 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 		return StopTokenBudget
 	}
 
-	finalCount := CountMessagesTokens(*messages)
+	finalCount := st.tokens.count(*messages)
 	if finalCount >= warnLimit {
 		if errors.Is(compress(), llm.ErrTokenBudget) {
 			return StopTokenBudget
 		}
-		finalCount = CountMessagesTokens(*messages)
+		finalCount = st.tokens.count(*messages)
 		if finalCount >= warnLimit {
 			return StopCompression
 		}
