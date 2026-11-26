@@ -715,7 +715,7 @@ func TestAnalysisSkippedReviewStatus(test *testing.T) {
 				test.Errorf("Review delivery failure was hidden or buried: %s", human.String())
 			}
 			var machine bytes.Buffer
-			if err := outputJSONWithWarnings(comments, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, reviewer.SessionID(), manifest, false, nil, &machine, nil, nil, output); err != nil {
+			if err := outputJSONWithWarnings(comments, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, reviewer.SessionID(), manifest, false, nil, false, nil, &machine, nil, nil, output); err != nil {
 				test.Fatal(err)
 			}
 			var payload jsonOutput
@@ -762,7 +762,7 @@ func TestAnalysisTextAndStatus(test *testing.T) {
 		}
 		var machine bytes.Buffer
 		manifest := &session.RunManifest{TerminalState: session.TerminalState(fixture.review)}
-		if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", manifest, false, nil, &machine, nil, nil, output); err != nil {
+		if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", manifest, false, nil, false, nil, &machine, nil, nil, output); err != nil {
 			test.Fatal(err)
 		}
 		var payload jsonOutput
@@ -786,7 +786,7 @@ func TestAnalysisTextAndStatus(test *testing.T) {
 func TestAnalysisWithoutReviewManifest(test *testing.T) {
 	output := &analysisOutput{ReviewStatus: "failed", Report: &workflow.Report{Status: "completed", Markdown: "Analysis result."}}
 	var machine bytes.Buffer
-	if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", nil, false, nil, &machine, nil, nil, output); err != nil {
+	if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", nil, false, nil, false, nil, &machine, nil, nil, output); err != nil {
 		test.Fatal(err)
 	}
 	var payload jsonOutput
@@ -834,7 +834,7 @@ func TestAnalysisTextOmitsProcessWarnings(test *testing.T) {
 				test.Fatalf("text output mutated the report: %s %v", after, err)
 			}
 			var machine bytes.Buffer
-			if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", nil, false, nil, &machine, nil, nil, combined); err != nil {
+			if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", nil, false, nil, false, nil, &machine, nil, nil, combined); err != nil {
 				test.Fatal(err)
 			}
 			var payload jsonOutput
@@ -895,7 +895,7 @@ func TestAnalysisTextBrief(test *testing.T) {
 				test.Fatalf("unexpected brief:\ngot: %q\nwant: %q", human.String(), want)
 			}
 			var machine bytes.Buffer
-			if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", nil, false, nil, &machine, nil, nil, combined); err != nil {
+			if err := outputJSONWithWarnings(nil, nil, 0, 0, 0, 0, 0, 0, 0, "", nil, nil, "", nil, "", nil, false, nil, false, nil, &machine, nil, nil, combined); err != nil {
 				test.Fatal(err)
 			}
 			var payload jsonOutput

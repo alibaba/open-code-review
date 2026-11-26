@@ -50,6 +50,8 @@ type reviewOptions struct {
 	maxGitProcs             int
 	maxTokens               int
 	maxTokensBudget         int
+	maxCostBudget           float64
+	pricePerM               string
 	effort                  string
 	noFilter                bool
 	preview                 bool
@@ -203,6 +205,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	cc.Template.ApplyEffort(effort)
 
+	costBudget, price, err := resolveCostBudget(rt.AppCfg, opts.maxCostBudget, opts.pricePerM, rt)
+	if err != nil {
+		return err
+	}
+
 	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
 	// input it returns pins the run to the very commits this check passed on, so
 	// the decision cannot be undone by a ref moving afterwards.
@@ -275,6 +282,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Resume:                resumeState,
 		SealedInput:           codeTools.resolution,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		MaxCostBudget:         costBudget,
+		Price:                 price,
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
