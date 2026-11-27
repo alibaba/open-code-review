@@ -70,9 +70,8 @@ for (const field of CARRIED_FIELDS) {
 }
 manifest.pi = source.pi
 manifest.files = PUBLISHED_FILES
-// The source package is private so `npm publish` here cannot ship the development
-// tree; only this output is publishable.
-delete manifest.private
+// CARRIED_FIELDS is an allowlist, so the source package's "private" never reaches
+// the published manifest; only this output is publishable.
 
 const manifestPath = join(OUTPUT_DIR, "package.json")
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)

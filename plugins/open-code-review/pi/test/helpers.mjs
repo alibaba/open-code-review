@@ -23,8 +23,9 @@ export async function createHost(exec) {
 }
 
 export async function callTool(state, name, params, extra = {}) {
-  const context = { cwd: WORKTREE, ui: { notify: () => {} }, ...extra }
-  return await state.tools.get(name).execute("call-1", params, extra.signal, undefined, context)
+  const { signal, ...contextOverrides } = extra
+  const context = { cwd: WORKTREE, ui: { notify: () => {} }, ...contextOverrides }
+  return await state.tools.get(name).execute("call-1", params, signal, undefined, context)
 }
 
 export async function runCommand(state, name, args) {

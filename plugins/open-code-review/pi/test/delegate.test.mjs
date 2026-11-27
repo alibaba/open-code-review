@@ -2,9 +2,12 @@
 // Copyright 2026 alibaba/open-code-review Contributors
 
 import assert from "node:assert/strict"
-import { readFileSync, rmSync } from "node:fs"
-import { dirname } from "node:path"
+import { existsSync, readFileSync, rmSync } from "node:fs"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
 import test from "node:test"
+import { writeScratch } from "../src/ocr.ts"
 import { WORKTREE, callTool, createHost, stdoutExec, textOf } from "./helpers.mjs"
 
 const PREVIEW_JSON = JSON.stringify({ schema_version: "1", mode: "range", merge_base: "abc", reviewable_count: 1, reviewable_files: [{ path: "internal/foo.go", status: "modified", insertions: 3, deletions: 1 }] })
@@ -16,7 +19,7 @@ const ARGV_CASES = [
   { name: "an explicit range", params: { action: "preview", from: "main", to: "feature" }, flags: ["--from", "main", "--to", "feature"] },
   { name: "a commit", params: { action: "preview", commit: "abc123" }, flags: ["--commit", "abc123"] },
   { name: "background and exclude", params: { action: "preview", background: "Login rate limiting", exclude: "**/gen/*" }, flags: ["--background", "Login rate limiting", "--exclude", "**/gen/*"] },
-  { name: "rule paths after the flags", params: { action: "rule", from: "main", paths: ["internal/foo.go", "internal/bar.go"] }, flags: ["--from", "main", "--to", "HEAD", "internal/foo.go", "internal/bar.go"] },
+  { name: "rule paths after the flags", params: { action: "rule", from: "main", paths: ["internal/foo.go", "internal/bar.go"] }, flags: ["--from", "main", "--to", "HEAD", "--", "internal/foo.go", "internal/bar.go"] },
 ]
 
 test("ocr_delegate builds the delegate argv from its parameters", async () => {
@@ -105,4 +108,11 @@ test("ocr_delegate never parses output it cannot use", async () => {
   assert.equal(raw.isError, true)
   assert.match(textOf(raw), /not json at all/)
   assert.match(textOf(raw), /exit 0/)
+})
+
+test("a failed scratch write leaves no directory behind", async (t) => {
+  const scratch = await mkdtemp(join(tmpdir(), "ocr-pi-test-"))
+  t.after(() => rm(scratch, { recursive: true, force: true }))
+  await assert.rejects(writeScratch(scratch, join("missing", "delegate.json"), "{}"), /ENOENT/)
+  assert.equal(existsSync(scratch), false)
 })

@@ -87,3 +87,10 @@ test("ocr-review rejects a value that looks like a flag", async () => {
 test("ocr-review keeps an expressly quoted empty string as a value", async () => {
   assert.deepEqual(tokenizeCommandArgs('--background "" --preview'), ["--background", "", "--preview"])
 })
+
+test("ocr-review reads an escaped quote inside a quoted value", () => {
+  assert.deepEqual(tokenizeCommandArgs('--background "fix \\"quoted\\" issue" --preview'), ["--background", 'fix "quoted" issue', "--preview"])
+  assert.deepEqual(tokenizeCommandArgs("--background 'it\\'s'"), ["--background", "it's"])
+  assert.deepEqual(tokenizeCommandArgs('--exclude "C:\\temp\\**"'), ["--exclude", "C:\\temp\\**"])
+  assert.deepEqual(tokenizeCommandArgs('--exclude "C:\\temp\\\\**"'), ["--exclude", "C:\\temp\\**"])
+})

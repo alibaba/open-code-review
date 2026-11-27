@@ -231,7 +231,7 @@ function delegateArgs(plan: DelegatePlan, params: DelegateParams, options: { rep
   if (background !== "") args.push("--background", background)
   const exclude = text(params.exclude)
   if (exclude !== "") args.push("--exclude", exclude)
-  if (plan.paths.length > 0) args.push(...plan.paths)
+  if (plan.paths.length > 0) args.push("--", ...plan.paths)
   return args
 }
 
@@ -377,6 +377,18 @@ async function discard(directory: string): Promise<void> {
   }
 }
 
+/** Writes into a scratch directory this process created; removes it and rethrows when the write fails. */
+export async function writeScratch(ownedDirectory: string, name: string, content: string): Promise<string> {
+  const path = join(ownedDirectory, name)
+  try {
+    await writeFile(path, content, "utf8")
+  } catch (error) {
+    await discard(ownedDirectory)
+    throw error
+  }
+  return path
+}
+
 async function readOutput(path: string, fallback: string): Promise<string> {
   try {
     return await readFile(path, "utf8")
@@ -506,8 +518,7 @@ export async function runDelegate(
 
   if (stdout.trim().length > RAW_OUTPUT_LIMIT) {
     const scratch = await mkdtemp(join(tmpdir(), "ocr-pi-delegate-"))
-    const outputPath = join(scratch, "delegate.json")
-    await writeFile(outputPath, stdout, "utf8")
+    const outputPath = await writeScratch(scratch, "delegate.json", stdout)
     return {
       ok: true,
       text: `${truncated(stdout.trim(), PAYLOAD_HEAD_LIMIT)}\n\nFull JSON: ${outputPath}`,
@@ -537,8 +548,19 @@ export function tokenizeCommandArgs(raw: string): string[] {
   let current = ""
   let quote = ""
   let quoted = false
-  for (const character of raw) {
+  for (let index = 0; index < raw.length; index += 1) {
+    const character = raw.charAt(index)
     if (quote !== "") {
+      if (character === "\\") {
+        const next = raw.charAt(index + 1)
+        // Only the quote being read and the backslash itself escape, so a Windows
+        // path inside quotes keeps its separators.
+        if (next === quote || next === "\\") {
+          current += next
+          index += 1
+          continue
+        }
+      }
       if (character === quote) {
         quote = ""
         continue

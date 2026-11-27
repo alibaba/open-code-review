@@ -106,6 +106,9 @@ Flags accepted by `/ocr-review`: `--from`, `--to`, `--commit`/`-c`, `--backgroun
 the same flags after a `preview` or `rule` action, and treats the remaining arguments as
 paths.
 
+Quoted values accept `\"` and `\\` as escapes; any other backslash is kept as typed, so a
+Windows path survives.
+
 ## Output handling
 
 `ocr review` writes its JSON to a temp file and reads it back. The report inlines up to 20

@@ -45,17 +45,23 @@ function notifyOutcome(ctx: ExtensionCommandContext, outcome: OcrOutcome): void 
   ctx.ui.notify(outcome.text, outcome.ok ? "info" : "error")
 }
 
+export function registerSkillDiscovery(pi: ExtensionAPI, sources: readonly string[]): void {
+  pi.on("resources_discover", (_event, ctx) => {
+    const found = sources.find((candidate) => existsSync(candidate))
+    if (found !== undefined) return { skillPaths: [found] }
+    ctx.ui.notify(`open-code-review: no skills directory at ${sources.join(" or ")}; the ocr skill is unavailable.`, "warning")
+    return {}
+  })
+}
+
 export default function openCodeReviewExtension(pi: ExtensionAPI): void {
   // A published tarball carries its own `skills/`, placed there by `npm run build`
   // (scripts/build-package.mjs, published via `npm run release`); a checkout keeps
   // them at the repository root. Both are relative to this file, so moving the
-  // package or this file means adjusting them: discovery fails silently otherwise.
+  // package or this file means adjusting them.
   const here = dirname(fileURLToPath(import.meta.url))
   const skillSources = [resolve(here, "../skills"), resolve(here, "../../../../skills")]
-  pi.on("resources_discover", () => {
-    const found = skillSources.find((candidate) => existsSync(candidate))
-    return found ? { skillPaths: [found] } : {}
-  })
+  registerSkillDiscovery(pi, skillSources)
 
   const reviewParameters = Type.Object({
     scope: Type.Optional(
