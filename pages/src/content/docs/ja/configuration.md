@@ -367,6 +367,7 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 SDK がすでにリトライするため、設定ファイルから読み込む際には無視されます。
 `ocr config set` で指定した場合は、OCR が警告を出し、これらのコードを保存しません。
 5xx のレスポンスも SDK がデフォルトでリトライするため、`retry_codes` には追加できません。
+なお、`429` または `retry_codes` のレスポンスが構造化された予算・クォータ枯渇エラー（`budget_exceeded`、`insufficient_quota`）を示す場合は SDK リトライをバイパスして即座に停止しますが、一時的なレート制限による `429` レスポンスは従来のリトライ動作を維持します。
 
 ### プロンプト上限
 

@@ -681,7 +681,6 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		a.runner.RecordUsage(groupResult.usage)
 	}
 	if groupResult.err != nil {
-		a.budgetExceeded.Store(true)
 		a.recordWarning("provider_budget_exceeded", "", providerBudgetExceededReason)
 		if b := a.session.Manifest(); b != nil {
 			if err := b.SetPendingFailureCause(session.FailureProvider, providerBudgetExceededReason); err != nil {
@@ -705,6 +704,18 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
 	defer cancelDispatch()
 	var providerBudgetErr atomic.Pointer[error]
+	tripProviderBudget := func(groupLabel string, err error) {
+		errCopy := err
+		if providerBudgetErr.CompareAndSwap(nil, &errCopy) {
+			a.recordWarning("provider_budget_exceeded", groupLabel, providerBudgetExceededReason)
+			if b := a.session.Manifest(); b != nil {
+				if setErr := b.SetPendingFailureCause(session.FailureProvider, providerBudgetExceededReason); setErr != nil {
+					a.recordWarning("manifest_error", "", setErr.Error())
+				}
+			}
+			cancelDispatch()
+		}
+	}
 
 	var dispatched int64
 dispatchLoop:
@@ -788,22 +799,14 @@ dispatchLoop:
 				groupCtx = dispatchCtx
 			}
 
-			completed, stop, err := a.executeGroupSubtask(groupCtx, g)
+			completed, stop, err := a.executeGroupSubtaskWithQuota(groupCtx, g, func(qErr error) {
+				tripProviderBudget(g.Label, qErr)
+			})
 			if err != nil {
 				atomic.AddInt64(&a.subtaskFailed, int64(len(g.Diffs)))
 				isBudget := llm.IsBudgetExceededError(err)
 				if isBudget {
-					errCopy := err
-					if providerBudgetErr.CompareAndSwap(nil, &errCopy) {
-						a.budgetExceeded.Store(true)
-						a.recordWarning("provider_budget_exceeded", g.Label, providerBudgetExceededReason)
-						if b := a.session.Manifest(); b != nil {
-							if setErr := b.SetPendingFailureCause(session.FailureProvider, providerBudgetExceededReason); setErr != nil {
-								a.recordWarning("manifest_error", "", setErr.Error())
-							}
-						}
-						cancelDispatch()
-					}
+					tripProviderBudget(g.Label, err)
 				}
 				class, reason := classifyItemError(err)
 				if !isBudget && errors.Is(err, context.Canceled) && ctx.Err() == nil && providerBudgetErr.Load() != nil {
@@ -1498,6 +1501,10 @@ func diffsChurn(diffs []model.Diff) (total, maxFile int64) {
 // for a non-error early exit (token budget, main-loop stop) carrying the manifest
 // class recorded at its trigger point. A completed review returns (true, nil, nil).
 func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *subtaskStop, error) {
+	return a.executeGroupSubtaskWithQuota(ctx, g, nil)
+}
+
+func (a *Agent) executeGroupSubtaskWithQuota(ctx context.Context, g FileGroup, onProviderBudget func(error)) (bool, *subtaskStop, error) {
 	groupKey := fileGroupKey(g.Diffs)
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)
 	defer span.End()
@@ -1621,6 +1628,14 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		if err != nil {
 			if round == 1 {
 				return false, nil, err
+			}
+			if llm.IsBudgetExceededError(err) {
+				a.recordWarning("review_round_failed", groupKey, fmt.Sprintf("round %d: %s", round, providerBudgetExceededReason))
+				fmt.Fprintf(stdout.Writer(), "[ocr] Round %d stopped by provider budget/quota limit for group %q (keeping earlier findings)\n", round, groupKey)
+				if onProviderBudget != nil {
+					onProviderBudget(err)
+				}
+				break
 			}
 			a.recordWarning("review_round_failed", groupKey, fmt.Sprintf("round %d: %v", round, err))
 			fmt.Fprintf(stdout.Writer(), "[ocr] Round %d failed for group %q: %v (keeping earlier findings)\n", round, groupKey, err)

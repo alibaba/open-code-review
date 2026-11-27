@@ -72,6 +72,13 @@ func isTerminalQuotaPayload(body []byte) bool {
 		isTerminalQuotaToken(decodeJSONString(envelope.Code))
 }
 
+// terminalQuotaHeader is an internal response header set exclusively by
+// nonRetryableQuotaMiddleware (stripped from incoming server headers first) so
+// IsBudgetExceededError retains terminal quota classification even when an SDK
+// error decoder (such as openai-go v3) drops flat top-level JSON fields outside
+// a nested "error" object.
+const terminalQuotaHeader = "X-Ocr-Terminal-Quota"
+
 // nonRetryableQuotaMiddleware marks HTTP 429 (and any retry-forced 4xx)
 // responses whose JSON error payload reports an exhausted budget or billing
 // quota with x-should-retry: false so the SDK stops after the first attempt
@@ -83,9 +90,7 @@ func nonRetryableQuotaMiddleware() func(*http.Request, func(*http.Request) (*htt
 		if err != nil || resp == nil || resp.Body == nil {
 			return resp, err
 		}
-		if resp.Header.Get("x-should-retry") == "false" {
-			return resp, nil
-		}
+		resp.Header.Del(terminalQuotaHeader)
 		shouldCheck := resp.StatusCode == http.StatusTooManyRequests ||
 			(resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.Header.Get("x-should-retry") == "true")
 		if !shouldCheck {
@@ -102,14 +107,19 @@ func nonRetryableQuotaMiddleware() func(*http.Request, func(*http.Request) (*htt
 
 		if readErr == nil && int64(len(peeked)) <= maxErrorBodyBytes && isTerminalQuotaPayload(peeked) {
 			resp.Header.Set("x-should-retry", "false")
+			resp.Header.Set(terminalQuotaHeader, "true")
 		}
 		return resp, nil
 	}
 }
 
+func hasTerminalQuotaHeader(resp *http.Response) bool {
+	return resp != nil && resp.Header.Get(terminalQuotaHeader) == "true"
+}
+
 // IsBudgetExceededError reports whether err is a terminal provider or gateway
-// budget/quota exhaustion error (such as LiteLLM's budget_exceeded or OpenAI's
-// insufficient_quota) that cannot succeed on subsequent calls in the same run.
+// budget/quota exhaustion error (such as budget_exceeded or insufficient_quota)
+// that cannot succeed on subsequent calls in the same run.
 func IsBudgetExceededError(err error) bool {
 	if err == nil {
 		return false
@@ -120,14 +130,17 @@ func IsBudgetExceededError(err error) bool {
 	}
 	var openAI *openai.Error
 	if errors.As(err, &openAI) {
-		if isTerminalQuotaToken(openAI.Type) || isTerminalQuotaToken(openAI.Code) ||
+		if hasTerminalQuotaHeader(openAI.Response) ||
+			isTerminalQuotaToken(openAI.Type) ||
+			isTerminalQuotaToken(openAI.Code) ||
 			isTerminalQuotaPayload([]byte(openAI.RawJSON())) {
 			return true
 		}
 	}
 	var anthropicErr *anthropic.Error
 	if errors.As(err, &anthropicErr) {
-		if isTerminalQuotaToken(string(anthropicErr.Type())) ||
+		if hasTerminalQuotaHeader(anthropicErr.Response) ||
+			isTerminalQuotaToken(string(anthropicErr.Type())) ||
 			isTerminalQuotaPayload([]byte(anthropicErr.RawJSON())) {
 			return true
 		}

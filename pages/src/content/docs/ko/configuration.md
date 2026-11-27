@@ -294,7 +294,7 @@ ocr config set llm.retry_codes 403,400
 ocr config set custom_providers.my-gateway.retry_codes 403,400
 ```
 
-4xx HTTP 상태 코드만 허용됩니다. `408`, `409`, `429`는 SDK가 이미 재시도합니다. 설정 파일에서 읽을 때 이런 중복 코드는 무시되며, `ocr config set`으로 전달하면 OCR이 경고를 출력하고 저장 값에서 제외합니다. 5xx 응답은 모두 SDK가 이미 재시도하므로 `retry_codes`에 추가할 수 없습니다.
+4xx HTTP 상태 코드만 허용됩니다. `408`, `409`, `429`는 SDK가 이미 재시도합니다. 설정 파일에서 읽을 때 이런 중복 코드는 무시되며, `ocr config set`으로 전달하면 OCR이 경고를 출력하고 저장 값에서 제외합니다. 5xx 응답은 모두 SDK가 이미 재시도하므로 `retry_codes`에 추가할 수 없습니다. 단, `429` 또는 `retry_codes` 응답에 구조화된 예산·할당량 소진 오류(`budget_exceeded`, `insufficient_quota`)가 포함된 경우에는 불필요한 재시도를 막기 위해 SDK 재시도를 건너뛰고 즉시 중단하며, 일시적인 레이트 리밋 `429` 응답은 기존 재시도 동작을 유지합니다.
 
 ### 프롬프트 상한 {#prompt-limit}
 
