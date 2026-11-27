@@ -484,6 +484,8 @@ ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
 
 `sync` koddaki örüntüleri, yapılandırmayı, yakın testleri, önceki dosya sürümlerini ve commit mesajlarını inceler. Her aday kuralın kaynağını, kapsamını ve geçerlilik koşullarını saklar. `--memory-discussions` ile bir GitHub PR bağlantısı, GitLab MR bağlantısı veya dışa aktarılmış bir JSON dosyası ekleyebilirsiniz. Bağlantılar için ilgili depoda oturum açmış bir `gh` veya `glab` istemcisi gerekir. Geçmiş bir incelemeyi yeniden çalıştırırken `memory sync --as-of` ve `review --memory-as-of` için aynı RFC3339 zamanını kullanın.
 
+Değişen satır bir Python modülünde üst düzey bir işlevin içindeyse OCR, karşılaştırmanın başlangıç sürümünde bu işlevi göreli içe aktarma yoluyla doğrudan çağıran diğer modülleri de arar. Örneğin sipariş oluşturma kodu, hesaplanan tutarın siparişe nasıl kaydedildiğini gösterebilir. Etki çağrıdan anlaşılamıyorsa OCR, başlangıç sürümünde ve incelenen kodda alan tanımını, değeri kullanan kodu veya ilgili testleri arayabilir. Değişen işlev için bulgu eklemeden önce çağrıyı ve gözlemlenebilir sonucunu doğrular. Ayrı bir `memory sync` çalıştırmasında aynı aramayı `--at yol:satır` ile başlatabilirsiniz.
+
 Squash ile birleştirilen bir istekte OCR, değişikliğin sağ tarafındaki satır yorumunu barındırma hizmetinden doğrular. Alıntılanan kodun hem birleştirme sürümünde hem de incelenen sürümde tek bir yerde bulunması gerekir. Kayıt, yorumun yazıldığı commit ve kaynak satırlarıyla birlikte birleştirme commit'ini ve zamanını saklar. Geçmiş incelemeler bu kaydı birleştirme anından itibaren kullanabilir.
 
 ### Açık kısıtlar ve inceleme kararları {#explicit-constraints-and-decisions}

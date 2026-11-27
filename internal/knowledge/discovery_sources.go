@@ -340,21 +340,50 @@ func (t Tree) discoverySources(ctx context.Context, opts DiscoverOptions, result
 		}
 	}
 	ranked := rankDiscoveryFiles(blobs, files, priority, explicit)
+	callSources, inspected, err := t.discoveryCallers(ctx, opts, ranked, files, result)
+	if err != nil {
+		return nil, err
+	}
+	if len(callSources) > 0 {
+		targets := map[string]bool{}
+		for _, excerpts := range callSources {
+			for _, excerpt := range excerpts {
+				if link := excerpt.Caller; link != nil {
+					targets[link.CalleePath] = true
+				}
+			}
+		}
+		priority := func(p string) int {
+			switch {
+			case targets[p]:
+				return 0
+			case len(callSources[p]) != 0:
+				return 1
+			default:
+				return 2
+			}
+		}
+		slices.SortStableFunc(ranked, func(a, b discoveryBlob) int { return priority(a.path) - priority(b.path) })
+	}
 	var sources []discoverySource
 	selected := map[string]string{}
-	for i, b := range ranked {
-		if i == 32 {
+	for _, b := range ranked {
+		if !inspected[b.path] && len(inspected) >= 32 {
 			result.limit("inspected up to 32 candidate blobs")
-			break
+			continue
 		}
 		if len(selected) == discoveryFiles {
 			result.limit("sampled up to 16 current files")
 			break
 		}
-		source := discoverySource{Kind: discoveryKind(b.path), Path: b.path, Revision: t.Commit}
-		excerpts, err := t.discoveryBlobSources(ctx, b, source, 3200, result, opts.FocusLines[b.path])
-		if err != nil {
-			return nil, err
+		inspected[b.path] = true
+		excerpts := callSources[b.path]
+		if len(excerpts) == 0 {
+			source := discoverySource{Kind: discoveryKind(b.path), Path: b.path, Revision: t.Commit}
+			excerpts, err = t.discoveryBlobSources(ctx, b, source, 3200, result, opts.FocusLines[b.path])
+			if err != nil {
+				return nil, err
+			}
 		}
 		if len(excerpts) > 0 {
 			sources = append(sources, excerpts...)
@@ -677,27 +706,30 @@ func (t Tree) discoveryDiscussions(ctx context.Context, opts DiscoverOptions, re
 }
 
 func latestDiscussionInputs(eligible []Discussion, cutoff time.Time) []Discussion {
-	newest := map[string]Discussion{}
+	positions := map[string]int{}
 	var active []Discussion
 	for _, d := range eligible {
-		if prior, ok := newest[d.ID]; ok {
-			// Withhold contradictory exports at the same edit time from rule
-			// inference. The independently recorded editions remain auditable.
-			if discussionTime(d).Equal(discussionTime(prior)) && (d.Body != prior.Body || d.Path != prior.Path || d.Revision != prior.Revision || d.URL != prior.URL || d.ExpiresAt != prior.ExpiresAt || d.landing.value() != prior.landing.value()) {
-				active = slices.DeleteFunc(active, func(note Discussion) bool { return note.ID == d.ID })
+		if i, ok := positions[d.ID]; ok {
+			if d.landing != nil && active[i].landing == nil && discussionTime(d).Equal(discussionTime(active[i])) {
+				active[i] = d
 			}
 			continue
 		}
-		newest[d.ID] = d
-		if d.ExpiresAt != "" {
-			expires, _ := time.Parse(time.RFC3339, d.ExpiresAt) // Validated at import.
-			if !cutoff.Before(expires) {
-				continue // This edition also rules out its predecessors.
-			}
-		}
+		positions[d.ID] = len(active)
 		active = append(active, d)
 	}
-	return active
+	conflicts := map[string]bool{}
+	for _, d := range eligible {
+		best := active[positions[d.ID]]
+		if discussionTime(d).Equal(discussionTime(best)) && (d.Body != best.Body || d.Path != best.Path || d.URL != best.URL ||
+			d.ExpiresAt != best.ExpiresAt || !matchesDiscussionOrigin(best.Revision, best.landing.value(), d.Revision, d.landing)) {
+			conflicts[d.ID] = true
+		}
+	}
+	return slices.DeleteFunc(active, func(d Discussion) bool {
+		expires, _ := time.Parse(time.RFC3339Nano, d.ExpiresAt)
+		return conflicts[d.ID] || d.ExpiresAt != "" && !cutoff.Before(expires)
+	})
 }
 
 func discussionTime(d Discussion) time.Time {

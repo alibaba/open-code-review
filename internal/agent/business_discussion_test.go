@@ -289,6 +289,46 @@ func TestScopedRefutationBindsTheDecisionAndSeparateImplementation(t *testing.T)
 		}
 		return string(data)
 	}
+	t.Run("import verification receives the matching input from each assessment", func(t *testing.T) {
+		bound := archive
+		bound.ScopeWitnesses = nil
+		fg := group(bound, knowledge.StatusCandidate)
+		selected := nomination
+		selected.SourceID, selected.SourceQuote = current.ID, body
+		rush := row
+		rush.Observable = "destination queue"
+		ordinary := rush
+		ordinary.Input = "one scheduled consignment"
+		ordinary.Expected, ordinary.Before, ordinary.After = "standard", "standard", "standard"
+		response := func(verified discussionAssessment) string {
+			data, err := json.Marshal(map[string]any{"applications": []discussionAssessment{ordinary, verified}, "checks": []businessCheck{selected}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(data)
+		}
+		first := response(rush)
+		rush.Expected, rush.Before, rush.After = "express queue", "express queue", "express queue"
+		second := response(rush)
+		var outcomes []string
+		fg.business.verifyImport = func(_ knowledge.Fact, c businessCheck) bool {
+			if len(c.scopeCases) != 1 || c.scopeCases[0].Input != selected.Trigger {
+				t.Fatalf("wrong verified input: %+v", c.scopeCases)
+			}
+			outcomes = append(outcomes, c.scopeCases[0].After)
+			return true
+		}
+		client := &fakeAgentClient{responses: []*llm.ChatResponse{
+			{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &first}}}},
+			{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &second}}}},
+		}}
+		a := New(Args{RepoDir: t.TempDir(), LLMClient: client, Template: template.Template{MaxTokens: 20000}})
+		a.args.CommentCollector.Add(draft)
+		a.verifyBusinessFindings(t.Context(), fg, "", fg.Diffs[0].Diff)
+		if len(outcomes) != 2 || outcomes[0] != "express" || outcomes[1] != "express queue" || len(a.args.CommentCollector.CommentsForPath(draft.Path)) != 0 {
+			t.Fatalf("verified outcomes = %v; finding should be resolved", outcomes)
+		}
+	})
 	for _, tc := range []struct {
 		name string
 		edit func(*businessCheck, *knowledge.Fact, *string)

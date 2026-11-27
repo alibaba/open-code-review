@@ -29,6 +29,7 @@ func TestSquashedDiscussionOriginalLandedAndCurrentEvidence(t *testing.T) {
 	const line = "    return shipment.is_ready()"
 	const body = "A shipment may leave after its readiness check passes."
 	sourceRepo.write(path, prefix+"    return True\n")
+	sourceRepo.write("billing/charge.py", "def charge(order):\n    return order.total\n")
 	base := sourceRepo.commit("establish dispatch")
 	sourceRepo.git("switch", "-c", "review")
 	sourceRepo.write(path, prefix+line+"\n")
@@ -197,6 +198,112 @@ func TestSquashedDiscussionOriginalLandedAndCurrentEvidence(t *testing.T) {
 			if originalReads != 1 {
 				t.Fatal("ineligible inputs fetched an original file")
 			}
+			t.Run("scope excludes remote read and still retires accepted moves", func(t *testing.T) {
+				note := first[0]
+				remote := *note.remote
+				attempts := 0
+				remote.api = func(context.Context, string, string, string) ([]byte, error) {
+					attempts++
+					return nil, fmt.Errorf("original file unavailable")
+				}
+				note.remote = &remote
+				scoped := DiscoverOptions{Scope: "billing", AsOf: after, Discussions: []Discussion{note}}
+				res := discoverWithoutRules(t, tree, scoped)
+				if attempts != 0 || !res.Cacheable() || res.SourceKinds["discussion"] != 0 {
+					t.Fatalf("outside scope: attempted %d reads, cacheable %v", attempts, res.Cacheable())
+				}
+				db := testStore(t)
+				if err := db.SaveDiscovery(ctx, "billing-only", res.DiscussionObservations()); err != nil {
+					t.Fatal(err)
+				}
+				if cached, err := db.Scanned(ctx, "billing-only"); err != nil || !cached {
+					t.Fatalf("missing scoped receipt: %v %v", cached, err)
+				}
+				scoped.Scope = "shipping"
+				res = discoverWithoutRules(t, tree, scoped)
+				if attempts != 1 || res.Cacheable() {
+					t.Fatalf("in-scope read failure: %d attempts, cacheable %v", attempts, res.Cacheable())
+				}
+				old := Discussion{ID: note.ID, Path: "billing/charge.py", Body: "Keep the invoice open.", UpdatedAt: "2025-04-30T00:00:00Z"}
+				scoped.Scope, scoped.Discussions = "billing", []Discussion{old}
+				if err := db.Save(ctx, discoverWithoutRules(t, tree, scoped).DiscussionObservations()); err != nil {
+					t.Fatal(err)
+				}
+				if len(checkedFacts(t, tree, storedFacts(t, db))) != 1 {
+					t.Fatal("original scoped source is missing")
+				}
+				note.Revision = landed.Commit
+				scoped.Discussions = []Discussion{note}
+				if err := db.Save(ctx, discoverWithoutRules(t, tree, scoped).DiscussionObservations()); err != nil {
+					t.Fatal(err)
+				}
+				if got := checkedFacts(t, tree, storedFacts(t, db)); len(got) != 0 || attempts != 1 {
+					t.Fatalf("accepted move left %d sources or fetched a file (%d)", len(got), attempts)
+				}
+			})
+			t.Run("matching export and landed source", func(t *testing.T) {
+				unpinned := Discussion{ID: first[0].ID, Path: path, Body: body, URL: first[0].URL, UpdatedAt: edited}
+				weak := discoverWithoutRules(t, tree, DiscoverOptions{AsOf: after, Discussions: []Discussion{unpinned}}).DiscussionSources
+				if len(weak) != 1 {
+					t.Fatal("the independent dated export was not imported")
+				}
+				for _, pair := range [][]Discussion{{unpinned, first[0]}, {first[0], unpinned}} {
+					_, err := tree.Discover(ctx, DiscoverOptions{AsOf: after, Discussions: pair}, func(_ context.Context, _, corpus string) (string, error) {
+						var rows []discoverySource
+						if err := json.Unmarshal([]byte(corpus), &rows); err != nil {
+							return "", err
+						}
+						var found []discoverySource
+						for _, s := range rows {
+							if s.Kind == "discussion" {
+								found = append(found, s)
+							}
+						}
+						if len(found) != 1 || found[0].Landing == nil || found[0].Revision != landed.Commit {
+							t.Errorf("equal mixed editions yielded %d model sources with landing=%v", len(found), len(found) == 1 && found[0].Landing != nil)
+						}
+						return `{"records":[]}`, nil
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				check := func(t *testing.T, copy Fact, conflict bool) {
+					t.Helper()
+					db := testStore(t)
+					if err := db.Save(ctx, []Fact{copy}); err != nil {
+						t.Fatal(err)
+					}
+					if err := db.Save(ctx, append(result.Facts, result.DiscussionObservations()...)); err != nil {
+						t.Fatal(err)
+					}
+					var raw, strong, dependent bool
+					for _, c := range checkedFacts(t, tree, storedFacts(t, db)) {
+						if c.Status == StatusDiscussionSource {
+							raw = true
+							strong = c.Citations[0].Landing != nil
+						}
+						if c.Category == CategoryBusinessRule && c.Status == StatusCandidate {
+							dependent = true
+						}
+					}
+					if !conflict && (!strong || !dependent) || conflict && (raw || dependent) {
+						t.Errorf("conflicting=%v: raw=%v verified landing=%v inferred rule=%v", conflict, raw, strong, dependent)
+					}
+				}
+				check(t, weak[0], false)
+				alternate := unpinned
+				alternate.Revision = base.Commit
+				opposing := discoverWithoutRules(t, tree, DiscoverOptions{AsOf: after, Discussions: []Discussion{alternate}}).DiscussionSources
+				if len(opposing) != 1 {
+					t.Fatal("the opposing explicit revision was not eligible")
+				}
+				check(t, opposing[0], true)
+				alternate = unpinned
+				alternate.Body = "Dispatch readiness is optional."
+				other := discoverWithoutRules(t, tree, DiscoverOptions{AsOf: after, Discussions: []Discussion{alternate}}).DiscussionSources
+				check(t, other[0], true)
+			})
 			status = "opened"
 			without("proposed merge", tree, after, load())
 			status = "merged"

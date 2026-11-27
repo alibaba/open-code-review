@@ -467,6 +467,8 @@ func (r *rechecker) discussionImportTargets(scope, name string) []discussionImpo
 				if level == 1 && imp.Module != "" {
 					p := path.Join(dir, strings.ReplaceAll(imp.Module, ".", "/"))
 					target.paths = []string{p + ".py", path.Join(p, "__init__.py")}
+				} else if level == 1 {
+					target.paths = []string{path.Join(dir, "__init__.py")}
 				}
 				targets = append(targets, target)
 			}
@@ -884,6 +886,10 @@ func pythonDiscussionDefinitions(module, text string) ([]discussionDefinition, b
 	if err != nil {
 		return nil, false
 	}
+	return parsedPythonDiscussionDefinitions(module, text, m), true
+}
+
+func parsedPythonDiscussionDefinitions(module, text string, m *parser2.Module) []discussionDefinition {
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 	var out []discussionDefinition
 	var collect func([]parser2.Stmt, string, int)
@@ -936,7 +942,7 @@ func pythonDiscussionDefinitions(module, text string) ([]discussionDefinition, b
 		}
 	}
 	collect(m.Body, "", len(lines))
-	return out, true
+	return out
 }
 
 var javascriptDeclaration = regexp.MustCompile(`(?m)(?:^|[;}])[ \t]*((?:export[ \t]+(?:default[ \t]+)?)?(?:async[ \t]+)?(function(?:[ \t]*\*)?|class|const|let|var)[ \t]+(` + discussionSymbolName + `))`)
@@ -948,8 +954,8 @@ var javascriptDestructuring = regexp.MustCompile(`(?m)(?:^|[;}])[ \t]*(?:export[
 // intentionally handles only ordinary source, without evaluating modules.
 func maskJavaScript(text string) ([]byte, bool) {
 	code := []byte(text)
-	previous, afterControl := -1, false
-	var controlParens []bool
+	previous, afterControl, afterObject := -1, false, false
+	var controlParens, objectBraces []bool
 	for i := 0; i < len(text); {
 		c := text[i]
 		var end int
@@ -991,14 +997,14 @@ func maskJavaScript(text string) ([]byte, bool) {
 			}
 			literal = true
 		default:
-			if c == '/' && previous >= 0 && code[previous] == '}' {
+			if c == '/' && previous >= 0 && code[previous] == '}' && !afterObject {
 				// A closing brace may end either a statement or an operand.
 				if next := strings.IndexAny(text[i+1:], "/\r\n"); next >= 0 && text[i+1+next] == '/' {
 					return nil, false
 				}
 			}
 			if !strings.ContainsRune(" \t\r\n\v\f", rune(c)) {
-				afterControl = false
+				afterControl, afterObject = false, false
 				switch c {
 				case '(':
 					word := unqualifiedJavaScriptWord(code, previous)
@@ -1008,6 +1014,13 @@ func maskJavaScript(text string) ([]byte, bool) {
 					if n := len(controlParens); n > 0 {
 						afterControl = controlParens[n-1]
 						controlParens = controlParens[:n-1]
+					}
+				case '{':
+					objectBraces = append(objectBraces, previous >= 0 && strings.ContainsRune("=([,?", rune(code[previous])))
+				case '}':
+					if n := len(objectBraces); n > 0 {
+						afterObject = objectBraces[n-1]
+						objectBraces = objectBraces[:n-1]
 					}
 				}
 				previous = i
@@ -1022,7 +1035,7 @@ func maskJavaScript(text string) ([]byte, bool) {
 		}
 		if literal {
 			code[i] = '_'
-			previous, afterControl = i, false
+			previous, afterControl, afterObject = i, false, false
 		}
 		i = end
 	}

@@ -33,6 +33,19 @@ func storedFacts(t *testing.T, db *Store) []Fact {
 	return facts
 }
 
+func TestEmptyStoredDiscussionSourceCitations(t *testing.T) {
+	repo := newLifecycleRepo(t)
+	repo.write("queue.py", "def dispatch(): return True\n")
+	tree := repo.commit("accept dispatch")
+	db := testStore(t)
+	if err := db.Save(t.Context(), []Fact{{Category: CategoryDiscussionSource, Authority: AuthorityHistorical, Origin: "discovery", Scope: "queue.py", Source: "queue.py", Revision: tree.Commit, ObservedAt: "2025-04-01T12:00:00Z"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := checkedFacts(t, tree, storedFacts(t, db)); len(got) != 0 {
+		t.Fatalf("incomplete discussion source was admitted: %+v", got)
+	}
+}
+
 func TestDirectDiscussionSourcesWithoutExtractedRule(t *testing.T) {
 	ctx := t.Context()
 	repo := newDiscoveryRepo(t)

@@ -106,6 +106,7 @@ type discoverySource struct {
 	Landing    *DiscussionLanding `json:"landing,omitempty"`
 	StartLine  int                `json:"start_line"`
 	Text       string             `json:"text"`
+	Caller     *discoveryCaller   `json:"caller,omitempty"`
 	digest     string
 }
 
@@ -193,7 +194,11 @@ func (t Tree) Discover(ctx context.Context, opts DiscoverOptions, extract Extrac
 	if err != nil {
 		return result, err
 	}
-	raw, err := extract(ctx, discoveryInstructions, string(data))
+	instructions := discoveryInstructions
+	if slices.ContainsFunc(sources, func(s discoverySource) bool { return s.Caller != nil }) {
+		instructions += "\nA caller excerpt identifies the local function it calls. When a rule depends on how a return value is used, cite the implementation and the consumer lines that show what happens to that value."
+	}
+	raw, err := extract(ctx, instructions, string(data))
 	if err != nil {
 		return result, fmt.Errorf("extract repository knowledge: %w", err)
 	}
@@ -237,6 +242,7 @@ func (t Tree) Discover(ctx context.Context, opts DiscoverOptions, extract Extrac
 			result.RejectionReasons = append(result.RejectionReasons, fmt.Sprintf("record %d: %s", i+1, err))
 			continue
 		}
+		rule.preferCallerCitations(&fact, byID)
 		result.Facts = append(result.Facts, fact)
 	}
 	return result, ctx.Err()
@@ -298,6 +304,17 @@ func (r discoveryRule) fact(scope string, sources map[string]discoverySource) (F
 				current = append(current, c)
 			}
 			evidence.WriteString(s.Text + "\n" + s.Path + "\n")
+			// A narrow call-site excerpt can omit its enclosing declaration.
+			// The parser supplies that name when this quote covers the actual use.
+			if caller := s.Caller; caller != nil && s.Kind == "code" {
+				line := caller.CallLine
+				if caller.Role == "result_use" {
+					line = caller.ResultLine
+				}
+				if c.StartLine <= line && line <= c.EndLine {
+					evidence.WriteString(caller.Function + "\n")
+				}
+			}
 		}
 	}
 	current = append(current, tests...)

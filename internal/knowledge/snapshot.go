@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 type Snapshot []Fact
@@ -67,12 +69,13 @@ func (f Fact) scopeMatches(p string) bool {
 }
 
 type changeQuery struct {
-	paths       map[string]bool
-	identifiers map[string]bool
+	paths             map[string]bool
+	identifiers       map[string]bool
+	landedIdentifiers map[string]map[string]bool
 }
 
 func newChangeQuery(paths, identifiers []string) changeQuery {
-	q := changeQuery{map[string]bool{}, map[string]bool{}}
+	q := changeQuery{paths: map[string]bool{}, identifiers: map[string]bool{}}
 	for _, p := range paths {
 		if validPath(p) {
 			q.paths[p] = true
@@ -81,6 +84,12 @@ func newChangeQuery(paths, identifiers []string) changeQuery {
 	for _, id := range identifiers {
 		if id != "" {
 			q.identifiers[id] = true
+		}
+	}
+	if len(q.paths) == 1 {
+		q.landedIdentifiers = map[string]map[string]bool{}
+		for p := range q.paths {
+			q.landedIdentifiers[p] = q.identifiers
 		}
 	}
 	return q
@@ -103,7 +112,7 @@ func (q changeQuery) relevance(f Fact) (int, bool) {
 			break
 		}
 	}
-	anchored := q.paths[f.Source]
+	anchored := q.paths[f.Source] || f.AcceptedCall != nil && q.paths[f.AcceptedCall.CalleePath]
 	f.eachCitation(func(c Citation) {
 		anchored = anchored || c.live() && (q.paths[c.Path] || q.paths[c.CurrentPath])
 	})
@@ -244,7 +253,11 @@ func (f Fact) promptRecord() contextRecord {
 	var supplemental *Citation
 	for _, c := range citations {
 		if c.live() && len(rec.Citations) < 2 {
-			rec.Citations = append(rec.Citations, compactCitation(c, 220))
+			limit := 220
+			if f.Origin == "discovery" && c.Kind == "code" && c.Symbol != "" && c.Reference == "" {
+				limit = maxCallerQuote
+			}
+			rec.Citations = append(rec.Citations, compactCitation(c, limit))
 		} else if !c.live() && (supplemental == nil || c.Kind == "discussion" && supplemental.Kind != "discussion") {
 			supplemental = &c
 		}
@@ -373,12 +386,57 @@ func coversDiscussionWitness(shown, wanted Citation) bool {
 	return end <= len(lines) && strings.Join(lines[start:end], "\n") == wanted.Quote
 }
 
+// A checked inline discussion has an exact line in the accepted and reviewed
+// file. A member or distinctive identifier shared with the reviewed hunks is
+// a better retrieval lead than an otherwise equal file-wide conversation.
+func (q changeQuery) matchesLandedCode(f Fact) bool {
+	if f.contextStatus != StatusDiscussionSource || len(q.landedIdentifiers) == 0 {
+		return false
+	}
+	for _, c := range f.Citations {
+		if c.Landing == nil || len(q.landedIdentifiers[c.Path]) == 0 {
+			continue
+		}
+		for _, token := range reviewLandingTokens(c.Path, c.Landing.Quote) {
+			if dot := strings.LastIndexByte(token, '.'); dot >= 0 {
+				token = token[dot+1:]
+			} else if !discussionCodeName.MatchString(token) {
+				continue
+			}
+			if q.landedIdentifiers[c.Path][token] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (s Snapshot) SelectForChange(paths, identifiers []string) Snapshot {
+	return s.selectForQuery(newChangeQuery(paths, identifiers))
+}
+
+// ForReview keeps the file and hunk of landed code evidence through ranking and rendering.
+func (s Snapshot) ForReview(paths, identifiers []string, changes []model.Diff) (Snapshot, string) {
 	q := newChangeQuery(paths, identifiers)
+	landings := map[string]bool{}
+	for _, f := range s {
+		if f.contextStatus == StatusDiscussionSource && q.paths[f.Scope] && slices.ContainsFunc(f.Citations, func(c Citation) bool { return c.Landing != nil }) {
+			landings[f.Scope] = true
+		}
+	}
+	if len(landings) != 0 {
+		q.landedIdentifiers = reviewLandedIdentifiers(changes, landings)
+	}
+	selected := s.selectForQuery(q)
+	return selected, selected.reviewText()
+}
+
+func (s Snapshot) selectForQuery(q changeQuery) Snapshot {
 	origins := s.discussionWitnessOrigins()
 	type ranked struct {
 		Fact
 		score, symbols int
+		landedMatch    bool
 	}
 	var relevant []ranked
 	for _, f := range s {
@@ -412,7 +470,7 @@ func (s Snapshot) SelectForChange(paths, identifiers []string) Snapshot {
 				matches++
 			}
 		}
-		relevant = append(relevant, ranked{f, score, matches})
+		relevant = append(relevant, ranked{f, score, matches, q.matchesLandedCode(f)})
 	}
 	slices.SortStableFunc(relevant, func(a, b ranked) int {
 		if a.score != b.score {
@@ -420,6 +478,12 @@ func (s Snapshot) SelectForChange(paths, identifiers []string) Snapshot {
 		}
 		if a.symbols != b.symbols {
 			return b.symbols - a.symbols
+		}
+		if a.landedMatch != b.landedMatch {
+			if a.landedMatch {
+				return -1
+			}
+			return 1
 		}
 		if len(a.Citations) != len(b.Citations) {
 			return len(b.Citations) - len(a.Citations)
@@ -487,7 +551,10 @@ func (s Snapshot) SelectForChange(paths, identifiers []string) Snapshot {
 func (s Snapshot) ForPaths(paths []string) string { return s.ForChange(paths, nil) }
 
 func (s Snapshot) ForChange(paths, identifiers []string) string {
-	selected := s.SelectForChange(paths, identifiers)
+	return s.SelectForChange(paths, identifiers).reviewText()
+}
+
+func (selected Snapshot) reviewText() string {
 	if len(selected) == 0 {
 		return ""
 	}

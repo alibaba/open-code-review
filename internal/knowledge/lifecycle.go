@@ -28,6 +28,7 @@ const (
 	StatusSuperseded       = "superseded"
 	StatusConflict         = "conflict"
 	StatusRejected         = "rejected"
+	StatusWithdrawn        = "withdrawn"
 	StatusDiscussionSource = "discussion_source"
 )
 
@@ -79,6 +80,7 @@ func (t Tree) Prepare(ctx context.Context, f Fact) (Fact, error) {
 		}
 	}
 	f.ID, f.Revision, f.Feedback, f.contextStatus = "", t.Commit, nil, ""
+	f.AcceptedCall = nil // Discovery attaches this only after stamping both source citations.
 	f.Citations = slices.Clone(f.Citations)
 	f.Conditions = slices.Clone(f.Conditions)
 	recheck := newRechecker(ctx, t)

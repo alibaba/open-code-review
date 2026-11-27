@@ -600,6 +600,8 @@ ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
 
 OCR samples committed code, configuration, nearby tests, commit messages and earlier file versions at the comparison base. Changed paths and hunk locations help it find relevant code. The proposed implementation is reviewed against that knowledge. Add `--memory-discussions <url-or-file>` to ingest review feedback. GitHub pull requests and GitLab merge requests use the signed-in `gh` or `glab` CLI for a repository remote. Other workflows can supply a JSON array of objects with a stable `id`, a `body`, and optional `path`, `revision`, `url`, `created_at`, `updated_at` and `expires_at`. Use RFC3339 timestamps.
 
+When a changed line belongs to a top-level Python function, OCR can also follow a relative import from another module in the comparison base to find a direct call. The caller shows how the application uses the result, for example when writing an order. If the caller leaves an effect unclear, review can look up a field, consumer or test in the base and reviewed code. It rechecks the call and its observable result before adding a finding in the changed function. Standalone discovery can use the same caller search with `--at path:line`.
+
 After a squash merge, OCR can recover a right-side inline comment when the hosting service confirms the merge and the quoted lines identify one location in both the landed file and the selected revision. The record keeps the original review revision, source lines, merge revision and merge time. Historical reviews use this evidence from the merge time onward.
 
 To curate a database separately, run discovery on a chosen commit and provide the resulting database read-only to review jobs:

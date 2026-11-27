@@ -110,6 +110,16 @@ func TestReviewEffectEvidenceReturnsCompleteModuleDeclarations(t *testing.T) {
 			declaration: "ALLOWED: int = (\n    4 + 1\n)", between: "\n\n# Dispatch entry point\n",
 			body: "def total(quantity):\n    return quantity + ALLOWED", start: 2, end: 4, changed: 8,
 		},
+		{
+			name: "Go map literal key", path: "pricing.go", prefix: "package pricing\n",
+			declaration: "const index = 2", between: "\n\n",
+			body: "func total() int {\n\treturn map[int]int{index: 7}[2]\n}", start: 2, end: 2, changed: 5,
+		},
+		{
+			name: "Go indexed array literal key", path: "pricing.go", prefix: "package pricing\n",
+			declaration: "const index = 2", between: "\n\n",
+			body: "func total() int {\n\treturn [...]int{index: 7}[2]\n}", start: 2, end: 2, changed: 5,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			content := tc.prefix + tc.declaration + tc.between + tc.body + "\n"
@@ -154,7 +164,7 @@ func TestJavaScriptRegexMaskPreservesDivisionAndCoordinates(t *testing.T) {
 		"  if (n > 0) /[(]/.test(other);\r\n" +
 		"  return other.return / (n + 1) / n++ / n;\r\n}"
 	const source = `const regexp = /[()\/\]]+/gi;` + "\r\n" +
-		"const count = {valueOf() { return 9; }} / 3;\r\n" + function + "\r\n"
+		"const ratio = {} / 2 / 3;\r\n" + function + "\r\n"
 	masked, ok := maskJavaScript(source)
 	if !ok || len(masked) != len(source) {
 		t.Fatalf("invalid source mask: %q", masked)
@@ -165,7 +175,7 @@ func TestJavaScriptRegexMaskPreservesDivisionAndCoordinates(t *testing.T) {
 			t.Fatalf("regex was not masked at its offsets: %q", masked)
 		}
 	}
-	if !strings.Contains(string(masked), "other.return / (n + 1) / n++ / n;") || !strings.Contains(string(masked), "}} / 3;") {
+	if !strings.Contains(string(masked), "other.return / (n + 1) / n++ / n;") || !strings.Contains(string(masked), "{} / 2 / 3;") {
 		t.Fatalf("division changed in masked code: %q", masked)
 	}
 	got := EnclosingReviewFunctions("pricing.js", source, 4)[0]

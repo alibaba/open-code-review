@@ -16,6 +16,7 @@ import (
 // DescribeReviewChanges compares both ends of the review. A rule that stopped
 // applying before the base cannot identify a contract changed by this patch.
 func (s Snapshot) DescribeReviewChanges(ctx context.Context, before, after Tree, checked []Checked) error {
+	s.restoreAcceptedCalls(ctx, before, checked)
 	rechecker := newRechecker(ctx, after)
 	positions := map[string]int{}
 	for i, f := range s {
@@ -47,6 +48,7 @@ func (s Snapshot) DescribeReviewChanges(ctx context.Context, before, after Tree,
 			continue
 		}
 		if (c.Status == StatusCurrent || c.Status == StatusCandidate) && !c.IsDecision() {
+			c.Fact.AcceptedCall = s[i].AcceptedCall
 			s[i] = rechecker.transition(c.Fact, before.Commit, &archives)
 			continue
 		}
@@ -178,6 +180,7 @@ func (r *rechecker) transition(f Fact, base string, archives *reviewArchives) Fa
 		}
 		f.Citations = append(f.Citations, current)
 	})
+	r.retainCallerInvocation(&f, prior, archives.base)
 	return f
 }
 

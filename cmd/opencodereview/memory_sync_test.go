@@ -157,6 +157,77 @@ func TestMemorySyncHistoricalSchemaRetainsWithdrawal(t *testing.T) {
 		if err := json.Unmarshal(memory("list", "--ref", head), &now); err != nil || len(now) != 0 {
 			t.Fatalf("tree clock %v: historical replay revived a withdrawn mapping: %v, %v", treeClock, now, err)
 		}
+		gap := time.Now().UTC().Format(time.RFC3339Nano)
+		var learned []knowledge.Fact
+		if err := json.Unmarshal(memory("learn", "policy.json", "--scope", "delivery.go", "--ref", head), &learned); err != nil || len(learned) != 1 {
+			t.Fatalf("explicitly learning the new value: %+v, %v", learned, err)
+		}
+		if err := json.Unmarshal(memory("list", "--ref", head), &now); err != nil || len(now) != 1 || now[0].ID != learned[0].ID || string(now[0].Value) != "24" || now[0].Status != knowledge.StatusVerified {
+			t.Errorf("after explicitly learning the new value: %+v, %v", now, err)
+		}
+		if err := json.Unmarshal(memory("list", "--ref", head, "--as-of", gap), &now); err != nil || len(now) != 0 {
+			t.Errorf("the new learn changed the earlier withdrawal interval: %+v, %v", now, err)
+		}
+		memory("revoke", learned[0].ID)
+		memory("learn", "policy.json", "--scope", "delivery.go", "--ref", head)
+		if err := json.Unmarshal(memory("list", "--ref", head), &now); err != nil || len(now) != 0 {
+			t.Errorf("an explicit withdrawal of the new value was undone: %+v, %v", now, err)
+		}
+	}
+}
+
+func TestMemoryLearnReportsAnUnclassifiedLegacyWithdrawal(t *testing.T) {
+	repo := initResumeRepo(t)
+	commitFile(t, repo, "policy.json", `{"properties":{"mode":{"const":"send"},"window":{"const":30}}}`, "establish dispatch constraints")
+	commitFile(t, repo, "ship.go", "package ship\n", "add dispatch")
+	db := filepath.Join(t.TempDir(), "legacy.db")
+	call := func(args ...string) []byte {
+		t.Helper()
+		cmd := newMemoryCommand()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetArgs(append([]string{"--repo", repo, "--memory-db", db}, args...))
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		return out.Bytes()
+	}
+	var initial []knowledge.Fact
+	if err := json.Unmarshal(call("learn", "policy.json", "--scope", "ship.go"), &initial); err != nil || len(initial) != 2 {
+		t.Fatalf("ordinary four-column insert: %v %+v", err, initial)
+	}
+	var withdrawn string
+	for _, f := range initial {
+		if f.Property == "window" {
+			withdrawn = f.ID
+		}
+	}
+	if withdrawn == "" {
+		t.Fatal("missing expected window mapping")
+	}
+	call("revoke", withdrawn)
+	legacy, err := sql.Open("sqlite", db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = legacy.Exec("DROP TABLE schema_withdrawals; DROP TABLE schema_parents")
+	if closeErr := legacy.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checked []knowledge.Checked
+	if err = json.Unmarshal(call("learn", "policy.json", "--scope", "ship.go"), &checked); err != nil || len(checked) != 2 {
+		t.Fatalf("learning mixed live and withdrawn values: %+v %v", checked, err)
+	}
+	for _, c := range checked {
+		if c.ID == withdrawn && (c.Status != "withdrawn" || !strings.Contains(c.Detail, "withdrawn")) || c.ID != withdrawn && c.Status != knowledge.StatusVerified {
+			t.Errorf("learn reported %s: status %q, detail %q", c.Property, c.Status, c.Detail)
+		}
+	}
+	if err = json.Unmarshal(call("list"), &checked); err != nil || len(checked) != 1 || checked[0].Property != "mode" {
+		t.Fatalf("legacy withdrawal changed: %+v, %v", checked, err)
 	}
 }
 

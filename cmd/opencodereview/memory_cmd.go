@@ -81,28 +81,29 @@ func newMemoryCommand() *cobra.Command {
 				return err
 			}
 			defer s.Close()
-			var facts []knowledge.Fact
-			if name == "decide" {
-				start, end, lineErr := parseEvidenceLines(lines)
-				if lineErr != nil {
-					return lineErr
+			if name == "learn" {
+				learned, err := s.Learn(cmd.Context(), tree, args[0], scope, prop)
+				if err != nil {
+					return err
 				}
-				var fact knowledge.Fact
-				fact, err = tree.DecideWithCitation(cmd.Context(), args[0], scope, review, finding, reason, start, end)
-				if expires != "" {
-					until, err := time.Parse(time.RFC3339, expires)
-					if err != nil {
-						return fmt.Errorf("parse --expires-at: %w", err)
-					}
-					fact.ExpiresAt = until.UTC().Format(time.RFC3339)
-				}
-				facts = []knowledge.Fact{fact}
-			} else {
-				facts, err = tree.Learn(cmd.Context(), args[0], scope, prop)
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(learned)
 			}
+			start, end, err := parseEvidenceLines(lines)
 			if err != nil {
 				return err
 			}
+			fact, err := tree.DecideWithCitation(cmd.Context(), args[0], scope, review, finding, reason, start, end)
+			if err != nil {
+				return err
+			}
+			if expires != "" {
+				until, err := time.Parse(time.RFC3339, expires)
+				if err != nil {
+					return fmt.Errorf("parse --expires-at: %w", err)
+				}
+				fact.ExpiresAt = until.UTC().Format(time.RFC3339)
+			}
+			facts := []knowledge.Fact{fact}
 			if err = s.Save(cmd.Context(), facts); err != nil {
 				return err
 			}
@@ -203,5 +204,5 @@ func reviewMemoryTree(cc *commonContext, opts reviewOptions, code *reviewCodeToo
 	if cc.FileFilter != nil {
 		tree.AllowPath = func(p string) bool { return !cc.FileFilter.IsUserExcluded(p) }
 	}
-	return tree
+	return tree.WithoutDiscussionExports(opts.memoryDiscussions)
 }

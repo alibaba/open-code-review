@@ -42,6 +42,17 @@ func (l *DiscussionLanding) value() DiscussionLanding {
 	return *l
 }
 
+// An export may omit its revision or name either end of the verified squash.
+// A different explicit revision or a different verified landing is evidence
+// of a conflicting edition.
+func matchesDiscussionOrigin(revision string, landing DiscussionLanding, copyRevision string, copyLanding *DiscussionLanding) bool {
+	if landing == copyLanding.value() {
+		return revision == copyRevision
+	}
+	return landing.OriginalRevision != "" && copyLanding == nil &&
+		(copyRevision == "" || copyRevision == revision || copyRevision == landing.OriginalRevision)
+}
+
 type discussionKey struct {
 	note    Discussion
 	landing DiscussionLanding

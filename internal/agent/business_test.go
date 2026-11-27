@@ -4,12 +4,15 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/knowledge"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -160,6 +163,240 @@ func TestBusinessRetrievalRanksCodeSymbolsAndSkipsFileHeaders(t *testing.T) {
 	ctx := selectBusinessContext(knowledge.ReviewSnapshot(checked), changes)
 	if len(ctx.rules) != 2 || ctx.rules[0].ID != "z-matching" || ctx.rules[1].ID != "a-unrelated" {
 		t.Fatalf("ranked using metadata instead of touched code: %+v", ctx.rules)
+	}
+}
+
+func TestReviewRetrievesLandedDiscussionForChangedField(t *testing.T) {
+	const policy = "billing/policy.py"
+	const processor = "billing/processor.py"
+	const reference = "review:fee-calculation"
+	snapshot := competingLandedDiscussions(policy, reference, "    return self.net_fee")
+	file := func(path, patch, actualClass string) model.Diff {
+		change := model.Diff{NewPath: path, Diff: patch}
+		if path == policy {
+			_, changed, _ := strings.Cut(patch, "\n+")
+			change.NewFileContent = "from .processor import Processor\nclass LocalPolicy(Processor):\n" + changed + "\n"
+		} else if patch != "" {
+			lines := []string{"class " + actualClass + ":", "    def post(self, total):"}
+			for _, h := range diff.ParseHunks(patch) {
+				for len(lines) < h.NewStart-1 {
+					lines = append(lines, "")
+				}
+				for _, l := range h.Lines {
+					if l.Type != diff.HunkDeleted {
+						lines = append(lines, l.Content)
+					}
+				}
+			}
+			change.NewFileContent = strings.Join(lines, "\n")
+		}
+		return change
+	}
+	const local = "@@ -3 +3 @@ class LocalPolicy(Processor):\n-    floor_fee = 0\n+    floor_fee = 1"
+	const shared = "@@ -8,2 +8,4 @@ class Processor:\n+        if self.floor_fee > total:\n+            return None\n         self.net_fee = total\n         return total"
+	for _, tc := range []struct {
+		name, local, other string
+		want               bool
+	}{
+		{"own file owns exact member", strings.ReplaceAll(local, "floor_fee", "net_fee"), "", true},
+		{"unrelated file names landed member", local, "@@ -2 +2 @@\n-    return amount\n+    return self.net_fee", false},
+		{"different receiver member with same suffix", local, strings.ReplaceAll(shared, "self.net_fee", "self.total_fee"), false},
+		{"subclass field is read beside the landed member", local, shared, true},
+		{"other class happens to use the same two members", local, strings.ReplaceAll(shared, "class Processor:", "class Unrelated:"), false},
+		{"different receiver inside linked hunk", local, strings.ReplaceAll(shared, "self.net_fee", "peer.net_fee"), false},
+		{"read and landed member occur in separate hunks", local, strings.ReplaceAll(shared, "         self.net_fee", "@@ -90,2 +92,2 @@ class Processor:\n         self.net_fee"), false},
+		{"comment mentions the member in linked hunk", local, strings.ReplaceAll(shared, "self.net_fee = total", "# self.net_fee = total"), false},
+		{"read only occurs in unchanged context", local, strings.ReplaceAll(shared, "+        if self.floor_fee", "         if self.floor_fee"), false},
+		{"write does not read the overriding value", local, strings.ReplaceAll(shared, "if self.floor_fee > total:", "self.floor_fee = total"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			owner := "Processor"
+			if tc.name == "other class happens to use the same two members" {
+				owner = "Unrelated"
+			}
+			other := file(processor, tc.other, owner)
+			ctx := selectBusinessContext(snapshot, []model.Diff{file(policy, tc.local, ""), other})
+			if got := strings.Contains(ctx.text, reference); got != tc.want || len(ctx.rules) == 0 || len(ctx.rules) == len(snapshot) {
+				t.Fatalf("selected %d sources, landed discussion present=%t, want %t", len(ctx.rules), got, tc.want)
+			}
+			if got := selectBusinessContext(snapshot, []model.Diff{other}); strings.Contains(got.text, reference) {
+				t.Fatal("a matching field admitted a discussion outside its file scope")
+			}
+		})
+	}
+}
+
+func withHunkLabel(patch, label string) string {
+	lines := strings.Split(patch, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "@@ ") {
+			header, _, _ := strings.Cut(line, " @@")
+			lines[i] = strings.TrimSpace(header + " @@ " + label)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestLandedRetrievalUsesParsedChangeLocations(t *testing.T) {
+	const policy, processor = "policy.py", "processor.py"
+	const submitted = "review:accepted-member"
+	const local = "from .processor import Processor\nclass Local(Processor):\n    floor_fee: int = (\n        1\n    )\n    display_width = 1\n"
+	const engine = "class Processor:\n    def preview(self):\n        return 7\n    def charge(self, total):\n        total += 1\n        self.net_fee = total\n        return total\n\nclass Other:\n    def charge(self, total):\n        total -= 1\n        self.net_fee = total\n        return total\n"
+	tree := initPreviewRepo(t)
+	commitIn(t, tree, policy, local, "introduce a multiline override")
+	commitIn(t, tree, processor, engine, "define both processors")
+	git := gitcmd.New(1)
+	output := func(args ...string) string {
+		t.Helper()
+		out, err := git.Output(t.Context(), tree, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	base := output("rev-parse", "HEAD")
+	gitDiff := func(file, src string) model.Diff {
+		return model.Diff{NewPath: file, NewFileContent: src, Diff: output("diff", "--unified=3", base, "HEAD", "--", file)}
+	}
+	snapshot := competingLandedDiscussions(policy, submitted, "    return self.net_fee")
+	for _, tc := range []struct {
+		name, policyChange, engineChange string
+		want                             bool
+	}{
+		{"multiline override read on the imported base", strings.Replace(local, "        1", "        2", 1), strings.Replace(engine, "total += 1", "if self.floor_fee > total: return 0", 1), true},
+		{"ordinary override with equivalent hunk labels", strings.Replace(local, "(\n        1\n    )", "2", 1), strings.Replace(engine, "total += 1", "if self.floor_fee > total: return 3", 1), true},
+		{"field read in another class", strings.Replace(local, "(\n        1\n    )", "3", 1), strings.Replace(engine, "total -= 1", "if self.floor_fee > total: return 0", 1), false},
+		{"other attribute was changed", strings.Replace(local, "display_width = 1", "display_width = 2", 1), strings.Replace(engine, "total += 1", "if self.floor_fee > total: return 0", 1), false},
+		{"another method owns the neighbor in the same hunk", strings.Replace(local, "(\n        1\n    )", "4", 1), strings.Replace(engine, "return 7", "return self.floor_fee", 1), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			commitIn(t, tree, policy, tc.policyChange, tc.name+" policy")
+			commitIn(t, tree, processor, tc.engineChange, tc.name+" processor")
+			sub, baseChange := gitDiff(policy, tc.policyChange), gitDiff(processor, tc.engineChange)
+			if tc.name == "another method owns the neighbor in the same hunk" && (!strings.Contains(baseChange.Diff, "self.net_fee") || len(diff.ParseHunks(baseChange.Diff)) != 1) {
+				t.Fatal("control must place both members in the same hunk")
+			}
+			for _, title := range []string{"class Processor:", "def charge(self, total):", ""} {
+				current := baseChange
+				current.Diff = withHunkLabel(current.Diff, title)
+				ctx := selectBusinessContext(snapshot, []model.Diff{sub, current})
+				if got := strings.Contains(ctx.text, submitted); got != tc.want {
+					t.Errorf("label %q selected=%t, want %t", title, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestReviewRetrievesTheEditedEnclosingDeclaration(t *testing.T) {
+	const ref = "review:billing-limit"
+	for _, tc := range []struct{ file, decl, other, name, statement string }{
+		{"ledger.go", "package ledger\nfunc applyBillingLimit() int {", "func otherTotal() int {", "applyBillingLimit", "    value := 1"},
+		{"ledger.py", "def apply_billing_limit():", "def other_total():", "apply_billing_limit", "    value = 1"},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			end := ""
+			if strings.HasSuffix(tc.file, ".go") {
+				end = "}\n"
+			}
+			body := "\n" + strings.Repeat("\n", 7) + tc.statement + "\n    return value\n" + end
+			before := tc.decl + body + "\n" + tc.other + body
+			repo := initPreviewRepo(t)
+			commitIn(t, repo, tc.file, before, "introduce the two accounting functions")
+			git := gitcmd.New(1)
+			output := func(args ...string) string {
+				t.Helper()
+				out, err := git.Output(t.Context(), repo, args...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			base := output("rev-parse", "HEAD")
+			snap := competingLandedDiscussions(tc.file, ref, tc.decl)
+			for i, want := range []bool{true, false} {
+				oldSide := strings.SplitN(before, tc.other, 2)
+				oldSide[i] = strings.Replace(oldSide[i], tc.statement, strings.Replace(tc.statement, "1", "2", 1), 1)
+				head := strings.Join(oldSide, tc.other)
+				commitIn(t, repo, tc.file, head, "change one amount")
+				patch := output("diff", "--unified=1", base, "HEAD", "--", tc.file)
+				for _, title := range []string{tc.name, ""} {
+					change := model.Diff{NewPath: tc.file, NewFileContent: head, Diff: withHunkLabel(patch, title)}
+					if got := strings.Contains(selectBusinessContext(snap, []model.Diff{change}).text, ref); got != want {
+						t.Errorf("named %q and edited declaration %d: got %t want %t", title, i, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func competingLandedDiscussions(file, reference, code string) knowledge.Snapshot {
+	var facts []knowledge.Checked
+	add := func(id, ref string, landing *knowledge.DiscussionLanding) {
+		facts = append(facts, knowledge.Checked{Status: knowledge.StatusDiscussionSource, Fact: knowledge.Fact{
+			ID: id, Category: knowledge.CategoryDiscussionSource, Scope: file, Source: file,
+			Citations: []knowledge.Citation{{Kind: "discussion", Path: file, Reference: ref,
+				ObservedAt: "2025-01-01T00:00:00Z", Quote: strings.Repeat("Accepted repository discussion. ", 40), Landing: landing}},
+		}})
+	}
+	for _, ref := range []string{"a", "b", "c", "d", "e", "f"} {
+		add(ref, ref, nil)
+	}
+	add("z", reference, &knowledge.DiscussionLanding{Quote: code})
+	return knowledge.ReviewSnapshot(facts)
+}
+
+type landedReviewSpy struct{ evidence string }
+
+func (p *landedReviewSpy) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	if len(req.Messages) != 0 && strings.Contains(req.Messages[0].ExtractText(), businessReviewPrompt) {
+		p.evidence = req.Messages[len(req.Messages)-1].ExtractText()
+		reply := `{"checks":[]}`
+		return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &reply}}}}, nil
+	}
+	return agentTaskDoneResponse(), nil
+}
+
+func TestReviewGroupKeepsLandedRetryDiscussionInItsOwnFile(t *testing.T) {
+	const policy, queue = "policy.go", "queue.go"
+	const ref = "review:retry-accounting"
+	const quote = "    return cfg.MaxRetries"
+	dir := initPreviewRepo(t)
+	git := gitcmd.New(1)
+	output := func(args ...string) string {
+		t.Helper()
+		out, err := git.Output(t.Context(), dir, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	original := "package jobs\ntype Config struct { MaxRetries int }\nfunc limit(cfg Config) int {\n" + quote + "\n}\n" + strings.Repeat("\n", 9) + "func delay() int { return 1 }\n"
+	const oldQueue = "package jobs\nfunc queued(cfg Config) int { return 1 }\n"
+	const newQueue = "package jobs\nfunc queued(cfg Config) int { return cfg.MaxRetries }\n"
+	commitIn(t, dir, policy, original, "record the retry policy")
+	commitIn(t, dir, queue, oldQueue, "introduce a separate queue")
+	base := output("rev-parse", "HEAD")
+	commitIn(t, dir, queue, newQueue, "consult retry count in the queue")
+	for _, tc := range []struct {
+		name, after string
+		want        bool
+	}{
+		{"unrelated policy edit", strings.Replace(original, "return 1", "return 2", 1), false},
+		{"policy itself changes the retry calculation", strings.Replace(original, quote, quote+" + 2", 1), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			commitIn(t, dir, policy, tc.after, tc.name)
+			diffs := []model.Diff{{NewPath: policy, NewFileContent: tc.after, Diff: output("diff", base, "HEAD", "--", policy)}, {NewPath: queue, NewFileContent: newQueue, Diff: output("diff", base, "HEAD", "--", queue)}}
+			spy := &landedReviewSpy{}
+			a := newManifestFlowAgentWithClient(t, diffs, nil, spy)
+			a.args.Knowledge = competingLandedDiscussions(policy, ref, quote)
+			complete, stop, err := a.executeGroupSubtask(t.Context(), FileGroup{Diffs: diffs})
+			if !complete || stop != nil || err != nil || spy.evidence == "" || strings.Contains(spy.evidence, ref) != tc.want {
+				t.Fatalf("review complete=%t stop=%v err=%v evidence=%t reference=%t want=%t", complete, stop, err, spy.evidence != "", strings.Contains(spy.evidence, ref), tc.want)
+			}
+		})
 	}
 }
 

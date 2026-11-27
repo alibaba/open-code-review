@@ -122,7 +122,7 @@ func (t Tree) Learn(ctx context.Context, source, scope, property string) ([]Fact
 			continue
 		}
 		facts = append(facts, Fact{Source: source, Revision: t.Commit, Scope: scope,
-			Property: c.Property, Keyword: c.Keyword, Value: c.Value})
+			Property: c.Property, Keyword: c.Keyword, Value: c.Value, explicitSchemaLearn: true})
 	}
 	if len(facts) == 0 {
 		return nil, fmt.Errorf("no matching direct property const/enum constraints in %q", source)

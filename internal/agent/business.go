@@ -24,11 +24,13 @@ import (
 )
 
 type businessContext struct {
-	rules        knowledge.Snapshot
-	text         string
-	properties   []knowledge.PropertyCheck
-	discussions  []discussionTarget
-	verifyImport func(knowledge.Fact, businessCheck) bool
+	rules          knowledge.Snapshot
+	text           string
+	properties     []knowledge.PropertyCheck
+	discussions    []discussionTarget
+	lookupEvidence []knowledge.Citation
+	resolveCaller  func(knowledge.Fact, businessCheck) *knowledge.ReviewedCall
+	verifyImport   func(knowledge.Fact, businessCheck) bool
 }
 
 var businessIdentifier = regexp.MustCompile(`[\p{L}_][\p{L}\p{N}_]*`)
@@ -63,11 +65,10 @@ func selectBusinessContext(snapshot knowledge.Snapshot, changes []model.Diff) bu
 			}
 		}
 	}
-	selected := snapshot.SelectForChange(paths, names)
+	selected, text := snapshot.ForReview(paths, names, changes)
 	if len(selected) == 0 {
 		return businessContext{}
 	}
-	text := selected.ForChange(paths, names)
 	var checks []knowledge.PropertyCheck
 	for _, change := range changes {
 		if change.IsDeleted || !strings.EqualFold(path.Ext(change.NewPath), ".json") {
@@ -192,6 +193,7 @@ type businessCheck struct {
 	scopeCases   []discussionAssessment
 	scenario     businessScenario
 	confirmation string
+	caller       *knowledge.ReviewedCall
 }
 
 type businessAddition struct {
@@ -251,7 +253,56 @@ func citedBusinessLine(citations []knowledge.Citation, conditions []knowledge.Co
 	return false
 }
 
+type businessReviewMode uint8
+
+const (
+	standardBusinessReview businessReviewMode = iota
+	supplementalCallerReview
+)
+
 func (a *Agent) verifyBusinessFindings(ctx context.Context, g FileGroup, rule, patch string) {
+	callers := g.changedCallerRules()
+	if a.args.KnowledgeTree == nil || len(callers) == 0 {
+		a.applyBusinessReview(ctx, g, rule, patch, standardBusinessReview)
+		return
+	}
+	targets := map[string]string{}
+	for _, f := range callers {
+		targets[f.ID] = f.AcceptedCall.CalleePath
+	}
+	var records knowledge.Snapshot
+	for _, f := range g.business.rules {
+		callee, linked := targets[f.ID]
+		if !linked {
+			records = append(records, f)
+			continue
+		}
+		i := slices.IndexFunc(g.Diffs, func(d model.Diff) bool { return !d.IsDeleted && d.NewPath == callee })
+		if i >= 0 {
+			if direct, ok := a.args.KnowledgeTree.WithDirectCalleeEvidence(ctx, f, g.Diffs[i].NewFileContent); ok {
+				records = append(records, direct)
+				continue
+			}
+		}
+		if len(reviewDiscussions(knowledge.Snapshot{f}, g.Diffs)) != 0 || slices.ContainsFunc(g.Diffs, func(d model.Diff) bool {
+			return d.NewPath != callee && (f.Scope == "." || f.Scope == d.NewPath || strings.HasPrefix(d.NewPath, f.Scope+"/"))
+		}) {
+			records = append(records, f)
+		}
+	}
+	// Finish the independently supported findings before caller lookup spends budget.
+	if len(records) != 0 {
+		independent := g
+		independent.business = selectBusinessContext(records, g.Diffs)
+		a.applyBusinessReview(ctx, independent, rule, patch, standardBusinessReview)
+	}
+	lookupEvidence := g.business.lookupEvidence
+	g.business = selectBusinessContext(callers, g.Diffs)
+	g.business.lookupEvidence = lookupEvidence
+	a.applyBusinessReview(ctx, g, rule, patch, supplementalCallerReview)
+}
+
+func (a *Agent) applyBusinessReview(ctx context.Context, g FileGroup, rule, patch string, mode businessReviewMode) {
 	group := fileGroupKey(g.Diffs)
 	var drafts []model.LlmComment
 	var perPathIndex []int
@@ -267,21 +318,38 @@ func (a *Agent) verifyBusinessFindings(ctx context.Context, g FileGroup, rule, p
 	if len(g.business.discussions) > 0 {
 		instruction += discussionReviewPrompt
 	}
+	if mode == standardBusinessReview && len(g.changedCallerRules()) > 0 {
+		instruction += "\nUse the cited caller facts for independent in-scope findings and discussion checks. A separate investigation handles violations that require following the changed function into its caller."
+	}
 	messages, fits := a.appendBusinessContext(messages, g, instruction)
 	if !fits {
 		return
 	}
-	response, ok := a.runBusinessTask(ctx, group, session.BusinessReviewTask, messages)
+	var response string
+	var ok bool
+	if mode == standardBusinessReview {
+		response, ok = a.runBusinessTask(ctx, group, session.BusinessReviewTask, messages)
+	} else {
+		response, ok = a.reviewBusinessEvidence(ctx, group, &g, messages)
+	}
 	if !ok {
 		return
 	}
 	if a.args.KnowledgeTree != nil && len(g.business.discussions) != 0 {
 		g.business.verifyImport = a.businessImportVerifier(ctx, group, g.Diffs)
 	}
+	if mode == supplementalCallerReview {
+		g.business.resolveCaller = a.reviewedCallerResolver(ctx, g.Diffs)
+	}
 	grounded, proposed, err := groundBusinessChecks(response, g, drafts)
 	if err != nil {
 		a.recordWarning("business_check_unverified", group, err.Error())
 	}
+	if mode == supplementalCallerReview {
+		grounded = slices.DeleteFunc(grounded, func(c businessAddition) bool { return c.check.caller == nil })
+		proposed = nil
+	}
+	grounded = a.verifyCallerEffects(ctx, group, grounded, g.business.lookupEvidence)
 	add := a.verifyBusinessEffects(ctx, group, g.Diffs, grounded)
 	if !a.args.SkipFilter {
 		remove := a.confirmBusinessRefutations(ctx, g, rule, patch, drafts, proposed)
@@ -446,6 +514,9 @@ func (b businessContext) proves(rule knowledge.Fact, c businessCheck, lines []ch
 	}
 	inScope := rule.Scope == "." || c.Path == rule.Scope || strings.HasPrefix(c.Path, rule.Scope+"/")
 	if c.Outcome == "violation" {
+		if requiresCallerEffect(rule, c) {
+			return c.caller != nil && rule.ContextStatus() != knowledge.StatusHistorical
+		}
 		named := slices.ContainsFunc(businessIdentifier.FindAllString(c.Quote, -1), func(id string) bool { return slices.Contains(rule.Identifiers, id) })
 		if !inScope && !named && rule.ContextStatus() == knowledge.StatusTransition {
 			// A field updated here can be consumed by a different component.
@@ -614,18 +685,21 @@ func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rul
 		if p.confirmation != "" {
 			continue
 		}
-		scoped := nominated && c.Reference != "" && slices.ContainsFunc(satisfied[scopedSource{c.Path, c.Reference}], func(a discussionAssessment) bool {
-			if !a.identifies(c.Candidate, drafts[i].Content) || strings.TrimSpace(a.Input) != strings.TrimSpace(c.Trigger) {
-				return false
+		if nominated && c.Reference != "" {
+			for _, row := range satisfied[scopedSource{c.Path, c.Reference}] {
+				if !row.identifies(c.Candidate, drafts[i].Content) || strings.TrimSpace(row.Input) != strings.TrimSpace(c.Trigger) {
+					continue
+				}
+				if slices.ContainsFunc(p.scopeCases, func(first discussionAssessment) bool {
+					return first.Reference == c.Reference && (first.FindingQuote == "" || first.FindingQuote == row.FindingQuote) &&
+						strings.EqualFold(first.Observable, row.Observable) && strings.TrimSpace(first.Input) == strings.TrimSpace(row.Input)
+				}) {
+					c.scopeCases = append(c.scopeCases, row)
+				}
 			}
-			return slices.ContainsFunc(p.scopeCases, func(first discussionAssessment) bool {
-				return first.Reference == c.Reference && (first.FindingQuote == "" || first.FindingQuote == a.FindingQuote) &&
-					strings.EqualFold(first.Observable, a.Observable) && strings.TrimSpace(first.Input) == strings.TrimSpace(a.Input)
-			})
-		})
+		}
 		c.Line = line
-		if scoped {
-			c.scopeCases = p.scopeCases
+		if len(c.scopeCases) != 0 {
 			if _, proven := g.business.scopedRefutation(c, p.ID, lines[c.Path]); proven {
 				remove[i] = true
 			}
@@ -753,11 +827,14 @@ func groundBusinessChecks(response string, g FileGroup, drafts []model.LlmCommen
 				continue
 			}
 			rows := satisfied[scopedSource{c.Path, c.Reference}]
+			trigger := strings.TrimSpace(c.Trigger)
 			for _, row := range rows {
 				// An explicit, verbatim nomination can select a single assessed
 				// case even when the row does not repeat the candidate ID.
-				if row.identifies(c.Candidate, drafts[i].Content) || row.Candidate == "" &&
-					(len(rows) == 1 && c.Trigger == "" || c.Trigger != "" && strings.TrimSpace(c.Trigger) == strings.TrimSpace(row.Input)) {
+				if trigger != "" && trigger != strings.TrimSpace(row.Input) {
+					continue
+				}
+				if row.identifies(c.Candidate, drafts[i].Content) || row.Candidate == "" && (len(rows) == 1 || trigger != "") {
 					c.scopeCases = append(c.scopeCases, row)
 				}
 			}
@@ -767,8 +844,13 @@ func groundBusinessChecks(response string, g FileGroup, drafts []model.LlmCommen
 			if c, proven = g.business.scopedRefutation(c, "", current[c.Path]); !proven {
 				continue
 			}
-		} else if !g.business.proves(rule, c, current[c.Path]) {
-			continue
+		} else {
+			if requiresCallerEffect(rule, c) && g.business.resolveCaller != nil {
+				c.caller = g.business.resolveCaller(rule, c)
+			}
+			if !g.business.proves(rule, c, current[c.Path]) {
+				continue
+			}
 		}
 		switch c.Outcome {
 		case "refuted":

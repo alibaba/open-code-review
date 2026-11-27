@@ -195,6 +195,19 @@ func syncKnowledge(ctx context.Context, store *knowledge.Store, tree knowledge.T
 	for _, d := range opts.Discussions {
 		if key := d.LandingReceipt(tree.Now); key != "" {
 			landings = append(landings, key)
+			if slices.ContainsFunc(opts.Discussions, func(copy knowledge.Discussion) bool {
+				return copy.ID == d.ID && copy.LandingReceipt(tree.Now) == ""
+			}) {
+				// Old mixed-source receipts could withhold the entire edition.
+				version = "business-discovery-v8"
+			}
+		}
+	}
+	focusedCallerVersion := ""
+	for p, lines := range opts.FocusLines {
+		if len(lines) != 0 && strings.HasSuffix(p, ".py") {
+			focusedCallerVersion = "python-relative-calls-v4"
+			break
 		}
 	}
 	keyData, err := json.Marshal(struct {
@@ -204,7 +217,8 @@ func syncKnowledge(ctx context.Context, store *knowledge.Store, tree knowledge.T
 		Sources                            []string
 		NextEdit                           string   `json:",omitempty"`
 		Landings                           []string `json:",omitempty"`
-	}{Version: version, Revision: tree.Commit, Provider: rt.Provider, Model: rt.Model, Live: budget != nil, Options: opts, Sources: sources, NextEdit: nextEdit, Landings: landings})
+		FocusedCallerVersion               string   `json:",omitempty"`
+	}{Version: version, Revision: tree.Commit, Provider: rt.Provider, Model: rt.Model, Live: budget != nil, Options: opts, Sources: sources, NextEdit: nextEdit, Landings: landings, FocusedCallerVersion: focusedCallerVersion})
 	if err != nil {
 		return out, err
 	}

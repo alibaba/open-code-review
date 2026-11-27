@@ -266,11 +266,11 @@ func sameDiscussionFile(p string, before, after checkedFile) bool {
 }
 
 type discussionEdition struct {
-	date                                 time.Time
-	digest, scope, expiry, revision, url string
-	ambiguous                            bool
-	origins                              []string
-	landing                              DiscussionLanding
+	date                                       time.Time
+	digest, scope, path, expiry, revision, url string
+	ambiguous                                  bool
+	origins                                    []string
+	landing                                    DiscussionLanding
 }
 type discussionEditions struct {
 	latest      map[string]discussionEdition
@@ -280,7 +280,8 @@ type discussionEditions struct {
 func (r *rechecker) discussionEditions(facts []Fact) discussionEditions {
 	ed := discussionEditions{latest: map[string]discussionEdition{}, unavailable: map[string]map[string]time.Time{}}
 	latest := ed.latest
-	for _, f := range facts {
+	var accepted []int
+	for i, f := range facts {
 		if f.discussionNotice != 0 {
 			when, err := time.Parse(time.RFC3339Nano, f.ObservedAt)
 			if err != nil || !r.ancestor(f.Revision) {
@@ -314,15 +315,25 @@ func (r *rechecker) discussionEditions(facts []Fact) discussionEditions {
 		}
 		id := discussionSourceID(ref)
 		edition, ok := latest[id]
-		switch {
-		case !ok || when.After(edition.date):
-			edition = discussionEdition{date: when, digest: c.Digest, scope: f.Scope, expiry: f.ExpiresAt, revision: c.Revision, url: c.URL, landing: c.Landing.value()}
-		case when.Before(edition.date):
+		if !ok || when.After(edition.date) || when.Equal(edition.date) && edition.landing.OriginalRevision == "" && c.Landing != nil {
+			latest[id] = discussionEdition{date: when, digest: c.Digest, scope: f.Scope, path: c.Path, expiry: f.ExpiresAt, revision: c.Revision, url: c.URL, landing: c.Landing.value()}
+		}
+		accepted = append(accepted, i)
+	}
+	for _, i := range accepted {
+		f := facts[i]
+		c := f.Citations[0]
+		id := discussionSourceID(c.Reference)
+		edition := latest[id]
+		when, _ := time.Parse(time.RFC3339Nano, f.ObservedAt)
+		if !when.Equal(edition.date) {
 			continue
-		case edition.digest != c.Digest || edition.scope != f.Scope || edition.expiry != f.ExpiresAt || c.Revision != edition.revision || c.URL != edition.url || edition.landing != c.Landing.value():
+		}
+		if edition.digest != c.Digest || edition.scope != f.Scope || edition.path != c.Path || edition.expiry != f.ExpiresAt || c.URL != edition.url ||
+			!matchesDiscussionOrigin(edition.revision, edition.landing, c.Revision, c.Landing) {
 			edition.ambiguous = true
 		}
-		if c.Revision == "" && !edition.ambiguous {
+		if edition.revision == "" && !edition.ambiguous {
 			// Without a cited Git revision, keep the earliest actual binding
 			// on each accepted history. A repeated import does not reassign
 			// an unchanged old discussion to a replacement subsystem.
@@ -374,8 +385,13 @@ func (ed discussionEditions) withCitedExpiry(f Fact) Fact {
 
 func (ed discussionEditions) admits(f Fact) bool {
 	v, ok := ed.latest[discussionSourceID(f.discussionRef())]
+	if !ok || len(f.Citations) == 0 {
+		return false
+	}
 	when, _ := time.Parse(time.RFC3339Nano, f.ObservedAt)
-	return ok && !v.ambiguous && !ed.withheld(f, f.Citations[0], when) && when.Equal(v.date) && f.Citations[0].Digest == v.digest && f.Scope == v.scope && f.ExpiresAt == v.expiry &&
+	c := f.Citations[0]
+	return !v.ambiguous && !ed.withheld(f, c, when) && when.Equal(v.date) && c.Digest == v.digest && f.Scope == v.scope && f.ExpiresAt == v.expiry &&
+		v.revision == c.Revision && v.landing == c.Landing.value() &&
 		(v.revision != "" || slices.Contains(v.origins, f.Revision))
 }
 

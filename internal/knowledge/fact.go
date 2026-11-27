@@ -56,6 +56,7 @@ type Fact struct {
 	Predicate          string              `json:"predicate,omitempty"`
 	Identifiers        []string            `json:"identifiers,omitempty"`
 	Citations          []Citation          `json:"citations,omitempty"`
+	AcceptedCall       *AcceptedCall       `json:"accepted_call,omitempty"`
 	DiscussionBody     string              `json:"discussion_body,omitempty"`
 	DiscussionBindings *discussionBindings `json:"discussion_bindings,omitempty"`
 	ScopeWitnesses     []Citation          `json:"scope_witnesses,omitempty"`
@@ -74,7 +75,8 @@ type Fact struct {
 	discussionNotice   discussionNoticeKind
 	editionScopeDigest string
 	// Existing mappings that authorized a schema refresh. Used only while saving.
-	schemaParents []string
+	schemaParents       []string
+	explicitSchemaLearn bool
 }
 
 type Citation struct {

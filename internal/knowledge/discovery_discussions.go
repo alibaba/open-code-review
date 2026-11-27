@@ -125,28 +125,55 @@ func LoadDiscussions(ctx context.Context, repoDir, source string) ([]Discussion,
 		return nil, errors.New("expected a JSON array of discussions with id, body and optional url, path, revision, created_at, updated_at, expires_at")
 	}
 	// A tracked export is review history, even when its filename ends in .json.
-	root, err := filepath.EvalSymlinks(repoDir)
+	relative, err := localDiscussionExportPath(repoDir, source)
 	if err != nil {
 		return nil, err
+	}
+	for i := range comments {
+		comments[i].exportPath = relative
+	}
+	return comments, validateDiscussions(comments)
+}
+
+func localDiscussionExportPath(repoDir, source string) (string, error) {
+	root, err := filepath.EvalSymlinks(repoDir)
+	if err != nil {
+		return "", err
 	}
 	actual, err := filepath.EvalSymlinks(source)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	root, err = filepath.Abs(root)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	actual, err = filepath.Abs(actual)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if relative, err := filepath.Rel(root, actual); err == nil && filepath.IsLocal(relative) {
-		for i := range comments {
-			comments[i].exportPath = filepath.ToSlash(relative)
+		return filepath.ToSlash(relative), nil
+	}
+	return "", nil
+}
+
+// WithoutDiscussionExports keeps a supplied transcript out of repository
+// lookups. Its individual comments have their own effective dates and scopes.
+func (t Tree) WithoutDiscussionExports(sources []string) Tree {
+	excluded := map[string]bool{}
+	for _, source := range sources {
+		if !strings.Contains(source, "://") {
+			if p, err := localDiscussionExportPath(t.Repo, source); err == nil && p != "" {
+				excluded[p] = true
+			}
 		}
 	}
-	return comments, validateDiscussions(comments)
+	if len(excluded) > 0 {
+		allow := t.AllowPath
+		t.AllowPath = func(p string) bool { return !excluded[p] && (allow == nil || allow(p)) }
+	}
+	return t
 }
 
 type discussionPR struct {

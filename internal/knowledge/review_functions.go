@@ -148,9 +148,11 @@ func goReviewConstant(p, content string, lines []string, caller, start, end int)
 		}
 		ast.PreorderStack(function.Body, nil, func(node ast.Node, parents []ast.Node) bool {
 			if id, ok := node.(*ast.Ident); ok && id.Obj != nil && id.Obj.Kind == ast.Con {
-				// A bare literal key could be a struct field with the same name.
 				if pair, ok := parents[len(parents)-1].(*ast.KeyValueExpr); ok && pair.Key == id {
-					return true
+					literal, ok := parents[len(parents)-2].(*ast.CompositeLit)
+					if !ok || !goReviewIndexedLiteral(literal.Type) {
+						return true
+					}
 				}
 				if spec, ok := id.Obj.Decl.(*ast.ValueSpec); ok {
 					references[spec] = true
@@ -179,6 +181,27 @@ func goReviewConstant(p, content string, lines []string, caller, start, end int)
 		}
 	}
 	return Citation{}
+}
+
+func goReviewIndexedLiteral(expr ast.Expr) bool {
+	seen := map[*ast.Object]bool{}
+	for {
+		switch t := ast.Unparen(expr).(type) {
+		case *ast.ArrayType, *ast.MapType:
+			return true
+		case *ast.Ident:
+			if t.Obj == nil || seen[t.Obj] {
+				return false
+			}
+			spec, ok := t.Obj.Decl.(*ast.TypeSpec)
+			if !ok {
+				return false
+			}
+			seen[t.Obj], expr = true, spec.Type
+		default:
+			return false
+		}
+	}
 }
 
 func pythonReviewAssignment(p, text string, lines []string, function Citation, start, end int) Citation {

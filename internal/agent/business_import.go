@@ -78,7 +78,7 @@ func (a *Agent) businessImportVerifier(ctx context.Context, group string, change
 			return false
 		}
 		change := changes[index]
-		code, imported := a.args.KnowledgeTree.ReviewImport(ctx, q.Path, change.NewFileContent, c.Line, q.SourcePath)
+		code, imported := a.args.KnowledgeTree.ReviewImport(ctx, a.inputResolution.ResolvedBase, change, c.Line, q.SourcePath)
 		if !imported || uniqueBusinessQuoteLine(code.Implementation.Quote, q.SourceQuote) == 0 {
 			return false
 		}
@@ -112,7 +112,14 @@ func (a *Agent) traceBusinessImport(ctx context.Context, group string, q importQ
 		Implementation knowledge.ImportedReviewCode `json:"source"`
 		Anchors        map[string]string            `json:"implementation_anchors"`
 	}{q, selection, patch, code, anchors})
-	messages := []llm.Message{llm.NewTextMessage("system", businessImportPrompt), llm.NewTextMessage("user", string(payload))}
+	instruction := businessImportPrompt
+	if code.BaseCaller != nil {
+		instruction += " Trace the accepted invocation in base_caller. When supplied, base_called_imports and base_implementation identify its actual import and module. Supply base_quote, the exact accepted invocation line or one executable line from its resolved definition that explains the old result. Return linked false if the old result cannot be established."
+		if code.BaseImplementation == nil && len(code.BaseImports) != 0 {
+			instruction += " The accepted binding named by base_called_imports is in implementation, whose file and contents are identical in the base and head."
+		}
+	}
+	messages := []llm.Message{llm.NewTextMessage("system", instruction), llm.NewTextMessage("user", string(payload))}
 	if llmloop.CountMessagesTokens(messages) > llmloop.PromptTokenLimit(a.args.Template.MaxTokens) {
 		a.recordWarning("business_import_unverified", group, "imported source exceeds the verification budget")
 		return false
@@ -126,12 +133,16 @@ func (a *Agent) traceBusinessImport(ctx context.Context, group string, q importQ
 		Via                                                string `json:"via"`
 		Selection                                          string `json:"selection_quote"`
 		Anchor                                             string `json:"implementation_anchor"`
+		BaseQuote                                          string `json:"base_quote"`
 		Input, Observable, Expected, Before, After, Reason string
 	}
 	if json.Unmarshal([]byte(stripMarkdownFences(response)), &result) != nil || !result.Linked ||
 		strings.TrimSpace(result.Reason) == "" || strings.TrimSpace(result.Selection) == "" ||
 		result.Input != q.Input || result.Observable != q.Observable ||
 		result.Expected != q.Expected || result.Before != q.Before || result.After != q.After {
+		return false
+	}
+	if (code.BaseCaller != nil || result.BaseQuote != "") && !code.CitesBaseQuote(result.BaseQuote) {
 		return false
 	}
 	symbol := code.Imports[result.Via]

@@ -1095,7 +1095,7 @@ func (a *Agent) ruleConfigSHA256() string {
 	if identity := a.args.Knowledge.Identity(); identity != "" {
 		// A saved single-pass withdrawal has not received the independent
 		// reassessment required by the current review.
-		fields = append(fields, "review-knowledge-v11", identity)
+		fields = append(fields, "review-knowledge-v18", identity)
 	}
 	if cc, ok := a.args.SystemRule.(interface{ CanonicalConfig() []string }); ok {
 		fields = append(fields, cc.CanonicalConfig()...)

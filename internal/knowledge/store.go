@@ -32,11 +32,14 @@ func init() {
 }
 
 type Store struct {
-	db              *sql.DB
-	repo            string
-	lifecycle       bool
-	discussionEdits bool
-	editionNotices  bool
+	db                *sql.DB
+	repo              string
+	lifecycle         bool
+	discussionEdits   bool
+	editionNotices    bool
+	schemaWithdrawals bool
+	schemaParents     bool
+	schemaAdditions   bool
 }
 
 func Open(ctx context.Context, filename, repo string, write bool) (*Store, error) {
@@ -68,20 +71,23 @@ func Open(ctx context.Context, filename, repo string, write bool) (*Store, error
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	var lifecycle, discussionEdits, editionNotices bool
+	var lifecycle, discussionEdits, editionNotices, schemaWithdrawals, schemaParents, schemaAdditions bool
 	if write {
 		err = initialize(ctx, db)
 		lifecycle = err == nil
 		discussionEdits = err == nil
 		editionNotices = err == nil
+		schemaWithdrawals = err == nil
+		schemaParents = err == nil
+		schemaAdditions = err == nil
 	} else {
-		err = db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='fact_observations'), EXISTS(SELECT 1 FROM sqlite_schema WHERE name='discussion_edits'), EXISTS(SELECT 1 FROM sqlite_schema WHERE name='discussion_unavailable')").Scan(&lifecycle, &discussionEdits, &editionNotices)
+		err = db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='fact_observations'), EXISTS(SELECT 1 FROM sqlite_schema WHERE name='discussion_edits'), EXISTS(SELECT 1 FROM sqlite_schema WHERE name='discussion_unavailable'), EXISTS(SELECT 1 FROM sqlite_schema WHERE name='schema_withdrawals'), EXISTS(SELECT 1 FROM sqlite_schema WHERE name='schema_parents'), EXISTS(SELECT 1 FROM sqlite_schema WHERE name='schema_parent_additions')").Scan(&lifecycle, &discussionEdits, &editionNotices, &schemaWithdrawals, &schemaParents, &schemaAdditions)
 	}
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, repo: repo, lifecycle: lifecycle, discussionEdits: discussionEdits, editionNotices: editionNotices}, nil
+	return &Store{db: db, repo: repo, lifecycle: lifecycle, discussionEdits: discussionEdits, editionNotices: editionNotices, schemaWithdrawals: schemaWithdrawals, schemaParents: schemaParents, schemaAdditions: schemaAdditions}, nil
 }
 
 func initialize(ctx context.Context, db *sql.DB) error {
@@ -104,6 +110,9 @@ func initialize(ctx context.Context, db *sql.DB) error {
  PRIMARY KEY(fact_row,revision,body));
  CREATE TABLE IF NOT EXISTS discussion_unavailable(repo TEXT NOT NULL, source_id TEXT NOT NULL, revision TEXT NOT NULL, observed_at TEXT NOT NULL, scope_digest TEXT NOT NULL,
  PRIMARY KEY(repo,source_id,revision,observed_at,scope_digest));
+ CREATE TABLE IF NOT EXISTS schema_withdrawals(fact_row INTEGER PRIMARY KEY, withdrawn_at TEXT NOT NULL, learned_at TEXT);
+ CREATE TABLE IF NOT EXISTS schema_parents(fact_row INTEGER NOT NULL, parent_row INTEGER NOT NULL, learned_at TEXT, PRIMARY KEY(fact_row,parent_row));
+ CREATE TABLE IF NOT EXISTS schema_parent_additions(fact_row INTEGER NOT NULL, parent_row INTEGER NOT NULL, PRIMARY KEY(fact_row,parent_row));
  CREATE TABLE IF NOT EXISTS fact_feedback(
  event_id INTEGER PRIMARY KEY, fact_row INTEGER NOT NULL, action TEXT NOT NULL, revision TEXT NOT NULL,
  actor TEXT NOT NULL, reason TEXT NOT NULL, replacement_id TEXT NOT NULL, recorded_at TEXT NOT NULL,
@@ -129,12 +138,24 @@ func (s *Store) SaveDiscovery(ctx context.Context, key string, facts []Fact) err
 	if key == "" {
 		return fmt.Errorf("a discovery key is required")
 	}
-	return s.save(ctx, key, facts)
+	return s.save(ctx, key, facts, nil)
 }
 
-func (s *Store) Save(ctx context.Context, facts []Fact) error { return s.save(ctx, "", facts) }
+func (s *Store) Save(ctx context.Context, facts []Fact) error { return s.save(ctx, "", facts, nil) }
 
-func (s *Store) save(ctx context.Context, key string, facts []Fact) error {
+func (s *Store) Learn(ctx context.Context, tree Tree, source, scope, property string) ([]Checked, error) {
+	facts, err := tree.Learn(ctx, source, scope, property)
+	if err != nil {
+		return nil, err
+	}
+	report := make([]Checked, len(facts))
+	if err := s.save(ctx, "", facts, report); err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
+func (s *Store) save(ctx context.Context, key string, facts []Fact, report []Checked) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -166,30 +187,40 @@ func (s *Store) save(ctx context.Context, key string, facts []Fact) error {
 			return err
 		}
 		ids[i] = f.ID
+		if report != nil {
+			report[i].Status = StatusVerified
+		}
 		body, err := json.Marshal(f)
 		if err != nil {
 			return err
 		}
 		var rowid int64
-		var withdrawal sql.NullString
-		if len(f.schemaParents) != 0 {
-			// A historical replay can discover a changed value from a mapping
-			// that was withdrawn later. The new value inherits the last such
-			// withdrawal only when every authorizing mapping was withdrawn.
-			ids, _ := json.Marshal(f.schemaParents)
-			err = tx.QueryRowContext(ctx, `SELECT CASE WHEN COUNT(*) = COUNT(revoked_at)
- THEN MAX(rtrim(replace(revoked_at,' ','T'),'Z')) || 'Z' END
- FROM facts WHERE repo=? AND id IN (SELECT value FROM json_each(?))`, s.repo, string(ids)).Scan(&withdrawal)
-			if err != nil {
-				return err
-			}
+		var recordedAt any
+		if f.schema() {
+			recordedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		}
-		err = tx.QueryRowContext(ctx, `INSERT INTO facts(repo,id,review,body,revoked_at) VALUES(?,?,?,?,?)
-   ON CONFLICT(repo,id) DO NOTHING RETURNING rowid`, s.repo, f.ID, f.ReviewID, string(body), withdrawal).Scan(&rowid)
-		if err == sql.ErrNoRows {
-			err = tx.QueryRowContext(ctx, "SELECT rowid FROM facts WHERE repo=? AND id=?", s.repo, f.ID).Scan(&rowid)
+		err = tx.QueryRowContext(ctx, `INSERT INTO facts(repo,id,review,body,recorded_at) VALUES(?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP))
+   ON CONFLICT(repo,id) DO NOTHING RETURNING rowid`, s.repo, f.ID, f.ReviewID, string(body), recordedAt).Scan(&rowid)
+		existing := err == sql.ErrNoRows
+		if existing {
+			var revoked sql.NullString
+			err = tx.QueryRowContext(ctx, "SELECT rowid,revoked_at FROM facts WHERE repo=? AND id=?", s.repo, f.ID).Scan(&rowid, &revoked)
+			if err == nil && f.explicitSchemaLearn {
+				if !revoked.Valid {
+					at := time.Now().UTC().Format(time.RFC3339Nano)
+					_, err = tx.ExecContext(ctx, "UPDATE schema_withdrawals SET learned_at=? WHERE fact_row=? AND learned_at IS NULL", at, rowid)
+					if err == nil {
+						_, err = tx.ExecContext(ctx, "UPDATE schema_parents SET learned_at=? WHERE fact_row=? AND learned_at IS NULL", at, rowid)
+					}
+				} else if report != nil {
+					report[i].Status, report[i].Detail = StatusWithdrawn, "this memory ID was previously withdrawn and remains inactive"
+				}
+			}
 		} else if err == nil {
 			_, err = tx.ExecContext(ctx, "INSERT INTO fact_search(rowid,text) VALUES(?,?)", rowid, searchText(f))
+		}
+		if err == nil && len(f.schemaParents) != 0 {
+			err = s.saveSchemaParents(ctx, tx, rowid, f.schemaParents, existing)
 		}
 		if err != nil {
 			return err
@@ -214,6 +245,9 @@ func (s *Store) save(ctx context.Context, key string, facts []Fact) error {
 	}
 	for i, id := range ids {
 		facts[i].ID = id
+		if report != nil {
+			report[i].Fact = facts[i]
+		}
 	}
 	return nil
 }
@@ -251,6 +285,7 @@ func stableFactID(f Fact) (string, error) {
 	}
 	f = observationBody(f)
 	f.ID, f.Revision, f.ObservedAt = "", "", ""
+	f.AcceptedCall = nil // Derived from the accepted citation pair, including in older databases.
 	if f.Origin == "discovery" && slices.ContainsFunc(f.Citations, func(c Citation) bool { return c.Kind == "discussion" }) {
 		// Refreshing an inherited deadline preserves the ID and its feedback.
 		f.ExpiresAt = ""
@@ -351,6 +386,34 @@ func (s *Store) list(ctx context.Context, tx *sql.Tx, review, search, id string,
 		query += " AND revoked_at IS NULL"
 	}
 	args := []any{s.repo}
+	if s.schemaParents || !cutoff.IsZero() {
+		var at any
+		if !cutoff.IsZero() {
+			at = cutoff.UTC().Format(withdrawalTimeFormat)
+		}
+		// Databases predating parent mappings contain only root grants.
+		links := "SELECT NULL,NULL,NULL,NULL WHERE 0"
+		parents := ""
+		if s.schemaParents {
+			links = schemaParentLinks
+			if s.schemaAdditions {
+				links += " " + additionalSchemaLinks
+			}
+			parents = schemaParentAuthorization
+			query += " AND (NOT EXISTS(SELECT 1 FROM links d WHERE d.child=facts.rowid) OR facts.rowid IN (SELECT id FROM supported))"
+		}
+		query = fmt.Sprintf(schemaRootAuthorization, links) + parents + query + " AND NOT EXISTS(SELECT 1 FROM interrupted i WHERE i.id=facts.rowid)"
+		args = []any{s.repo, at, s.repo}
+	}
+	if s.schemaWithdrawals {
+		during := "w.learned_at IS NULL"
+		if !cutoff.IsZero() {
+			during = "ocr_withdrawal_time(w.withdrawn_at)<=? AND (w.learned_at IS NULL OR ?<ocr_withdrawal_time(w.learned_at))"
+			at := cutoff.UTC().Format(withdrawalTimeFormat)
+			args = append(args, at, at)
+		}
+		query += " AND NOT EXISTS(SELECT 1 FROM schema_withdrawals w WHERE w.fact_row=facts.rowid AND " + during + ")"
+	}
 	if id != "" {
 		query += " AND id=?"
 		args = append(args, id)
