@@ -207,6 +207,43 @@ func compareFixture(t *testing.T) string {
 	return root
 }
 
+func TestHandleCompareScanWithFailedCheckpoint(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "myrepo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const start = `{"type":"session_start","cwd":"/home/user/project","reviewMode":"full_scan","scanPaths":[]}`
+	const finding = "still present in the failed file"
+	writeJSONL(t, filepath.Join(dir, "before.jsonl"),
+		start,
+		`{"type":"review_item_done","filePath":"a.go","fingerprint":"a","comments":[`+
+			compareFinding("a.go", finding, "x := 1", "")+`]}`,
+		`{"type":"session_end"}`)
+	writeJSONL(t, filepath.Join(dir, "after.jsonl"),
+		start,
+		`{"type":"review_item_failed","filePath":"a.go","fingerprint":"a","error":"model request failed"}`,
+		`{"type":"review_item_done","filePath":"a.go","fingerprint":42}`,
+		`{"type":"review_item_done","filePath":"b.go","fingerprint":"b"}`,
+		`{"type":"session_end","files_reviewed":["a.go","b.go"]}`)
+
+	req := httptest.NewRequest(http.MethodGet, "/r/myrepo/compare?before=before&after=after", nil)
+	res := httptest.NewRecorder()
+	newMux(root).ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("compare status = %d, body: %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, "Resolved (0)") || !strings.Contains(body, "Not reviewed (1)") {
+		t.Fatalf("unexpected comparison buckets: %s", body)
+	}
+	earlier, section, ok := strings.Cut(body, `class="compare-bucket bucket-not-reviewed"`)
+	section, _, closed := strings.Cut(section, "</section>")
+	if !ok || !closed || !strings.Contains(section, finding) || strings.Contains(earlier, finding) {
+		t.Fatalf("expected the finding only in the Not reviewed section: %s", body)
+	}
+}
+
 func TestHandleCompare(t *testing.T) {
 	// No t.Parallel: handler_test.go's TestHandleRepos_PermissionDenied
 	// os.Chmods a shared root, so isolation across this package is not proven.

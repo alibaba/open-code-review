@@ -466,6 +466,10 @@ func safeSegment(s string) (string, error) {
 
 // LoadSession fully parses a JSONL file into a ViewSession.
 func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
+	return loadSession(root, encodedRepo, sessionID, nil)
+}
+
+func loadSession(root, encodedRepo, sessionID string, coverage *session.ScanCoverage) (*ViewSession, error) {
 	encodedRepo, err := safeSegment(encodedRepo)
 	if err != nil {
 		return nil, err
@@ -481,10 +485,10 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	}
 	defer f.Close()
 
-	return readSession(f, sessionID)
+	return readSession(f, sessionID, coverage)
 }
 
-func readSession(reader io.Reader, sessionID string) (*ViewSession, error) {
+func readSession(reader io.Reader, sessionID string, coverage *session.ScanCoverage) (*ViewSession, error) {
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
 	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
@@ -525,6 +529,9 @@ func readSession(reader io.Reader, sessionID string) (*ViewSession, error) {
 		switch header.Type {
 		case "session_start":
 			applySessionStart(&vs.Summary, rec)
+			if coverage != nil {
+				coverage.ObserveJSONRecord(line)
+			}
 
 		case "llm_response":
 			fp, _ := rec["filePath"].(string)
@@ -648,7 +655,13 @@ func readSession(reader io.Reader, sessionID string) (*ViewSession, error) {
 				}
 			}
 
-		case "review_item_done", "review_item_reused":
+		case "review_item_done", "review_item_reused", "review_item_failed":
+			if coverage != nil {
+				coverage.ObserveJSONRecord(line)
+			}
+			if header.Type == "review_item_failed" {
+				return
+			}
 			fp, _ := rec["filePath"].(string)
 			recUUID, _ := rec["uuid"].(string)
 			if comments, ok := rec["comments"].([]any); ok {

@@ -4,6 +4,7 @@
 package session
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -17,9 +18,58 @@ type CompareResult struct {
 	New        []model.LlmComment `json:"new"`
 	Persisting []model.LlmComment `json:"persisting"`
 	Resolved   []model.LlmComment `json:"resolved"`
-	// NotReviewed holds before-findings whose file the after run never looked
-	// at. They are not resolved: nobody re-checked them.
+	// NotReviewed holds before-findings whose file has no current verdict.
 	NotReviewed []model.LlmComment `json:"not_reviewed"`
+}
+
+// ScanCoverage tracks successful file checkpoints in a checkpoint-aware scan.
+// A nil map denotes a session without checkpoint coverage.
+type ScanCoverage map[string]bool
+
+// ObserveJSONRecord decodes a start or checkpoint using the same rules as
+// LoadSummaryForCompare.
+func (c *ScanCoverage) ObserveJSONRecord(line []byte) {
+	var rec summaryRecord
+	if json.Unmarshal(line, &rec) == nil {
+		c.observeRecord(rec)
+	}
+}
+
+func (c *ScanCoverage) observeRecord(rec summaryRecord) {
+	switch rec.Type {
+	case "session_start":
+		if rec.ReviewMode != ReviewModeFullScan || *c != nil {
+			return
+		}
+		// The array identifies the format even when it is empty.
+		var paths []*string
+		if json.Unmarshal(rec.ScanPaths, &paths) != nil || paths == nil {
+			return
+		}
+		for _, path := range paths {
+			if path == nil {
+				return
+			}
+		}
+		*c = make(ScanCoverage)
+	case "review_item_done", "review_item_reused", "review_item_failed":
+		if *c == nil || rec.Fingerprint == "" {
+			return
+		}
+		filePath := rec.FilePath
+		if filePath == "" {
+			filePath = rec.NewPath
+		}
+		path := normalizePath(filePath)
+		if path == "" {
+			return
+		}
+		if rec.Type == "review_item_failed" {
+			delete(*c, path)
+		} else {
+			(*c)[path] = true
+		}
+	}
 }
 
 // Compare buckets the findings of an earlier run (before) against a later one
@@ -28,13 +78,16 @@ type CompareResult struct {
 // side is longer. Persisting carries the after copy, which has the current line
 // numbers.
 //
-// afterManifest supplies both the paths the after run actually reviewed and
-// any old-to-new path pairs recorded for renamed files. When it is nil - a
-// legacy session that recorded no manifest - every unmatched before-finding is
-// reported as resolved and paths are matched as recorded.
-func Compare(before, after []model.LlmComment, afterManifest *RunManifest) CompareResult {
-	reviewed := ReviewedPaths(afterManifest)
-	renamed := renamedPaths(afterManifest)
+// A recognized after manifest takes precedence over scan checkpoints and also
+// supplies rename mappings. With neither source of coverage, every unmatched
+// before-finding is reported as resolved.
+func Compare(before, after []model.LlmComment, afterManifest *RunManifest, afterScan ScanCoverage) CompareResult {
+	reviewed := map[string]bool(afterScan)
+	var renamed map[string]string
+	if afterManifest != nil && afterManifest.SchemaVersion == ManifestSchemaVersion {
+		reviewed = ReviewedPaths(afterManifest)
+		renamed = renamedPaths(afterManifest)
+	}
 
 	pool := make(map[findingIdentity][]model.LlmComment, len(after))
 	for _, c := range after {
@@ -139,9 +192,8 @@ func sortFindings(findings []model.LlmComment) []model.LlmComment {
 	return findings
 }
 
-// ReviewedPaths returns the paths a run actually decided on, or nil when the run
-// recorded no manifest - nil tells Compare to treat every unmatched
-// before-finding as resolved.
+// ReviewedPaths returns the paths a manifest records as covered, or nil when
+// there is no manifest.
 //
 // Completed and Reused are the only partitions that mean "the LLM's verdict on
 // this file is current": Reused carries a checkpoint forward from a resume

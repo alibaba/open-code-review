@@ -88,14 +88,14 @@ Uzun listelerde (**File breakdown**, **Files Reviewed**, **Session Tasks**, **Co
 |---|---|
 | New | Yalnızca sonraki çalıştırma bildirdi. |
 | Persisting | İki çalıştırma da bildirdi. |
-| Resolved | Yalnızca önceki çalıştırma bildirdi; sonraki çalıştırma o dosyayı inceledi. |
-| Not reviewed | Yalnızca önceki çalıştırma bildirdi; sonraki çalıştırma o dosyayı hiç incelemedi. Yeniden kontrol edilmediği için çözülmüş sayılmaz. |
+| Resolved | Yalnızca önceki çalıştırma bildirdi. Sonraki çalıştırma dosyanın incelemesini tamamladı veya önceki inceleme sonucunu yeniden kullandı. |
+| Not reviewed | Yalnızca önceki çalıştırma bildirdi. Sonraki çalıştırmada dosyanın incelemesi başarısız oldu, yarım kaldı veya dosya kapsam dışındaydı. |
 
 CLI boş grupları atlar; sayfa dördünü de gösterir. `Resolved (0)` da bir sonuçtur; kaybolan bölüm bozuk sayfa izlenimi yaratabilir.
 
 Her grupta sayfa başına yirmi bulgu gösterilir; tek sayfada sayfalama gizlenir.
 
-Çalıştırma manifestlerinden eski oturumlarda kapsam kaydı yoktur; eşleşmeyen eski bulgular Not reviewed yerine Resolved altında yer alır.
+Kaydedilmiş bir tam dosya taramasında `scanPaths` dizisi varsa ve çalıştırma manifesti tanınmıyorsa, her dosyanın kapsamını son kontrol noktası belirler. Başarıyla tamamlanan incelemeler, hiç bulgu üretmese bile kapsama girer. Sonraki oturumda tanınan bir manifest ve tarama kontrol noktası biçimi yoksa, eski karşılaştırma kuralı eşleşmeyen önceki bulguların tümünü Resolved grubuna alır.
 
 Başka bir çifti karşılaştırmak için sorguyu düzenleyin: `/r/{repo}/compare?before=<older session id>&after=<newer session id>`. İki kimlik de URL'deki depoya ait olmalıdır.
 

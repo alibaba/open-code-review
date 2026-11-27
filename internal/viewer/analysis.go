@@ -148,7 +148,7 @@ func handleAnalysis(w http.ResponseWriter, r *http.Request, root, repo, id strin
 	if directory != nil {
 		if trace, err := directory.Open("trace.jsonl"); err == nil {
 			defer trace.Close()
-			if conversation, err := readSession(trace, id); err == nil {
+			if conversation, err := readSession(trace, id, nil); err == nil {
 				page.HasTrace = true
 				page.Requests = conversation.requests
 			}

@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -84,6 +85,144 @@ func TestExecuteScanRejectsFileReadDiff(t *testing.T) {
 	})
 	if got := requests.Load(); got != 2 {
 		t.Fatalf("LLM requests = %d, want 2; output: %s", got, output)
+	}
+}
+
+func TestScanSessionCompareUsesFileCheckpoints(t *testing.T) {
+	freshOCRHome(t)
+	repoDir := t.TempDir()
+	const finding = "Use a named constant for the limit"
+	for name, body := range map[string]string{
+		"a.go": "package p\n\nconst limitA = 17\n",
+		"b.go": "package p\n\nconst limitB = 23\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repoDir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	const (
+		reportFinding = iota
+		failFile
+		completeFile
+	)
+	var mode atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req llm.ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		var fileA, fileB, reported bool
+		for _, msg := range req.Messages {
+			if content, ok := msg.Content.(string); ok {
+				fileA = fileA || strings.Contains(content, "const limitA = 17")
+				fileB = fileB || strings.Contains(content, "const limitB = 23")
+			}
+			reported = reported || msg.ToolCallID == "finding"
+		}
+		if fileA == fileB {
+			t.Error("expected one file per scan request")
+			http.Error(w, "unexpected scan request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		currentMode := mode.Load()
+		if fileA && currentMode == failFile {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"cannot review a.go"}}`))
+			return
+		}
+		response := `{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"done","type":"function","function":{"name":"task_done","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`
+		if fileA && currentMode == reportFinding && !reported {
+			response = `{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"finding","type":"function","function":{"name":"code_comment","arguments":"{\"comments\":[{\"path\":\"a.go\",\"category\":\"bug\",\"severity\":\"medium\",\"existing_code\":\"const limitA = 17\",\"content\":\"` + finding + `\"}]}"}}]},"finish_reason":"tool_calls"}]}`
+		}
+		if _, err := w.Write([]byte(response)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("OCR_LLM_URL", server.URL+"/v1/chat/completions")
+	t.Setenv("OCR_LLM_TOKEN", "test-token")
+	t.Setenv("OCR_LLM_MODEL", "test-model")
+	t.Setenv("OCR_LLM_PROTOCOL", "openai")
+	t.Setenv("OCR_USE_ANTHROPIC", "false")
+
+	scan := func(t *testing.T, paths string) jsonOutput {
+		t.Helper()
+		opts, err := parseScanFlags([]string{
+			"--repo", repoDir, "--path", paths, "--concurrency", "1",
+			"--no-plan", "--no-dedup", "--no-summary", "--format", "json", "--audience", "agent",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		output := captureStdout(t, func() {
+			err = executeScan(opts)
+		})
+		if err != nil {
+			t.Fatalf("scan %s: %v\n%s", paths, err, output)
+		}
+		var result jsonOutput
+		if err := json.Unmarshal([]byte(output), &result); err != nil || result.SessionID == "" {
+			t.Fatalf("expected a saved scan session: %v\n%s", err, output)
+		}
+		return result
+	}
+
+	before := scan(t, "a.go")
+	if len(before.Comments) != 1 || before.Comments[0].Path != "a.go" || before.Comments[0].Content != finding {
+		t.Fatalf("before scan findings = %+v, want the finding on a.go", before.Comments)
+	}
+	useCompareRepo(t, repoDir, true)
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	for _, tc := range []struct {
+		name         string
+		paths        string
+		mode         int32
+		wantResolved bool
+	}{
+		{name: "failed", paths: "a.go,b.go", mode: failFile},
+		{name: "out of scope", paths: "b.go", mode: completeFile},
+		{name: "completed with zero findings", paths: "a.go", mode: completeFile, wantResolved: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mode.Store(tc.mode)
+			after := scan(t, tc.paths)
+			if len(after.Comments) != 0 {
+				t.Fatalf("after scan findings = %+v, want zero", after.Comments)
+			}
+			if tc.mode == failFile {
+				summary, err := session.LoadSummary(repoDir, after.SessionID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if after.Status != "completed_with_errors" || summary.FailedFiles != 1 || summary.CompletedFiles != 1 {
+					t.Fatalf("status = %q, failed_files = %d, completed_files = %d", after.Status, summary.FailedFiles, summary.CompletedFiles)
+				}
+			}
+			rootCmd.SetArgs([]string{"session", "compare", "--repo", repoDir, "--json", before.SessionID, after.SessionID})
+			var err error
+			output := captureStdout(t, func() {
+				err = rootCmd.Execute()
+			})
+			if err != nil {
+				t.Fatalf("session compare: %v", err)
+			}
+			var result session.CompareResult
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatalf("decode comparison: %v\n%s", err, output)
+			}
+			oldFinding, empty := result.NotReviewed, result.Resolved
+			if tc.wantResolved {
+				oldFinding, empty = result.Resolved, result.NotReviewed
+			}
+			if empty == nil || len(empty) != 0 || len(oldFinding) != 1 ||
+				oldFinding[0].Path != "a.go" || oldFinding[0].Content != finding {
+				t.Fatalf("comparison (want resolved = %v): %s", tc.wantResolved, output)
+			}
+		})
 	}
 }
 
