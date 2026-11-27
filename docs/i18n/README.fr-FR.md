@@ -221,6 +221,7 @@ La documentation complète est disponible à l'adresse **[open-codereview.ai/doc
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — installer un plugin doté de fonctionnalités de révision portables
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — installer un plugin proposant des commandes de révision « slash » et des compétences
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — installer des outils de révision natifs et des commandes « slash »
+  - [Pi](../../plugins/open-code-review/README.md#pi) — installer une extension proposant des outils de révision et des commandes « / »
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — exécuter le mode de délégation avec le modèle hôte QCA et un modèle prêt à être publié
   - [Agents compatibles avec les compétences](https://open-codereview.ai/docs/agent-skill) — installer la compétence « agent portable »
 - Modes d'exécution de la révision — une fois l'intégration effectuée, choisissez quel LLM effectuera la révision

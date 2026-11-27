@@ -221,6 +221,7 @@ Tüm belgeler **[open-codereview.ai/docs](https://open-codereview.ai/docs)** adr
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — taşınabilir inceleme becerileri sağlayan eklenti
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — inceleme komutları ve becerileri sağlayan eklenti
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — yerel inceleme araçları ve komutları
+  - [Pi](../../plugins/open-code-review/README.md#pi) — inceleme araçları ve komutları sağlayan eklenti
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA modeli ve yayıma hazır şablonla görev devri modu
   - [Beceri uyumlu ajanlar](https://open-codereview.ai/docs/agent-skill) — taşınabilir ajan becerisini kurma
 - İnceleme yürütme modları — entegrasyondan sonra modeli kimin çağıracağını seçin

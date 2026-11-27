@@ -221,6 +221,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — 移植可能なレビュースキルを含むプラグインをインストール
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — レビュー用スラッシュコマンドとスキルを含むプラグインをインストール
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — ネイティブレビュー・ツールとスラッシュコマンドをインストール
+  - [Pi](../../plugins/open-code-review/README.md#pi) — レビューツールとスラッシュコマンドを含む拡張機能をインストール
   - [QCA Forward](../../plugins/open-code-review/qca/README.md) — QCA ホストモデルと公開可能なテンプレートで委任モードを実行
   - [Skill 対応エージェント](https://open-codereview.ai/docs/agent-skill) — 移植可能なエージェントスキルをインストール
 - レビュー実行モード — 連携後、どの LLM がレビューを実行するかを選択
