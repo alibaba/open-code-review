@@ -185,7 +185,8 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusNotFound)
 		return
 	}
-	av, err := LoadSession(root, repo, after)
+	var afterScan session.ScanCoverage
+	av, err := loadSession(root, repo, after, &afterScan)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load session: %v", err), http.StatusNotFound)
 		return
@@ -205,12 +206,11 @@ func handleCompare(w http.ResponseWriter, r *http.Request, root, repo string) {
 		return
 	}
 
-	// Same call shape as the CLI: the after manifest supplies reviewed paths and
-	// old-to-new mappings for renamed files.
 	result := session.Compare(
 		toLlmComments(bv.Comments),
 		toLlmComments(av.Comments),
 		av.Summary.RunManifest,
+		afterScan,
 	)
 
 	name := filepath.Base(av.Summary.CWD)

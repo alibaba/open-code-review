@@ -413,7 +413,7 @@ func runSessionCompare(beforeID, afterID string) error {
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", beforeID, err)
 	}
-	afterSummary, err := session.LoadSummary(resolvedRepo, afterID)
+	afterSummary, afterScan, err := session.LoadSummaryForCompare(resolvedRepo, afterID)
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", afterID, err)
 	}
@@ -438,7 +438,7 @@ func runSessionCompare(beforeID, afterID string) error {
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", afterID, err)
 	}
-	result := session.Compare(beforeComments, afterComments, afterSummary.RunManifest)
+	result := session.Compare(beforeComments, afterComments, afterSummary.RunManifest, afterScan)
 
 	if sessionCompareJSON {
 		payload := struct {

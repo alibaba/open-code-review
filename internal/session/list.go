@@ -75,6 +75,7 @@ type summaryRecord struct {
 	GitBranch       string           `json:"gitBranch"`
 	Model           string           `json:"model"`
 	ReviewMode      string           `json:"reviewMode"`
+	ScanPaths       json.RawMessage  `json:"scanPaths"`
 	DiffFrom        string           `json:"diffFrom"`
 	DiffTo          string           `json:"diffTo"`
 	DiffCommit      string           `json:"diffCommit"`
@@ -135,7 +136,7 @@ func ListSessions(repoDir string) ([]Summary, error) {
 			continue
 		}
 		sessionID := strings.TrimSuffix(name, ".jsonl")
-		summary, err := loadSummaryFromFile(filepath.Join(dir, name), sessionID, repoDir)
+		summary, err := loadSummaryFromFile(filepath.Join(dir, name), sessionID, repoDir, nil)
 		if err != nil {
 			continue
 		}
@@ -154,7 +155,18 @@ func LoadSummary(repoDir, sessionID string) (*Summary, error) {
 	if err != nil {
 		return nil, err
 	}
-	return loadSummaryFromFile(path, sessionID, repoDir)
+	return loadSummaryFromFile(path, sessionID, repoDir, nil)
+}
+
+// LoadSummaryForCompare also replays scan coverage for the later session.
+func LoadSummaryForCompare(repoDir, sessionID string) (*Summary, ScanCoverage, error) {
+	path, err := SessionFilePath(repoDir, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var coverage ScanCoverage
+	summary, err := loadSummaryFromFile(path, sessionID, repoDir, &coverage)
+	return summary, coverage, err
 }
 
 // LoadDetail returns the summary plus per-file item records for one session.
@@ -191,7 +203,7 @@ func LoadDetailAt(path, sessionID, fallbackRepoDir string) (*Summary, []ItemDeta
 	return summary, items, nil
 }
 
-func loadSummaryFromFile(path, sessionID, repoDir string) (*Summary, error) {
+func loadSummaryFromFile(path, sessionID, repoDir string, coverage *ScanCoverage) (*Summary, error) {
 	summary := &Summary{
 		SessionID: sessionID,
 		FilePath:  path,
@@ -200,6 +212,9 @@ func loadSummaryFromFile(path, sessionID, repoDir string) (*Summary, error) {
 	}
 	if err := walkSessionFile(path, func(rec summaryRecord) {
 		applyRecordToSummary(summary, rec)
+		if coverage != nil {
+			coverage.observeRecord(rec)
+		}
 	}); err != nil {
 		return nil, err
 	}
@@ -365,5 +380,5 @@ func parseRecordTime(s string) time.Time {
 // from the record inside it. fallbackRepoDir is only used when the file carries
 // no cwd of its own.
 func LoadSummaryAt(path, sessionID, fallbackRepoDir string) (*Summary, error) {
-	return loadSummaryFromFile(path, sessionID, fallbackRepoDir)
+	return loadSummaryFromFile(path, sessionID, fallbackRepoDir, nil)
 }

@@ -140,8 +140,8 @@ Findings are sorted into four buckets:
 |---|---|
 | New | Only the later run reported it. |
 | Persisting | Both runs reported it. |
-| Resolved | Only the earlier run reported it, and the later run did review that file. |
-| Not reviewed | Only the earlier run reported it, and the later run never looked at that file. Nobody re-checked it, so it is not resolved. |
+| Resolved | Only the earlier run reported it, and the later run completed or reused the review for that file. |
+| Not reviewed | Only the earlier run reported it, and the later run failed to review the file, left it unfinished, or excluded it from its scope. |
 
 One thing the page does differently: the CLI omits a bucket that came
 out empty, the page always prints all four. `Resolved (0)` is an
@@ -151,9 +151,11 @@ page.
 Each bucket shows twenty findings per page; the pager stays hidden
 when the bucket fits on one page.
 
-A run old enough to predate run manifests recorded no coverage, so
-every unmatched finding from it falls into Resolved rather than Not
-reviewed.
+For a saved full-file scan with a `scanPaths` array, the last checkpoint for
+each file determines coverage when there is no recognized run manifest. A
+successful review counts even when it produced zero findings. If the later
+session has neither a recognized manifest nor the scan checkpoint format,
+the legacy comparison groups every unmatched older finding under Resolved.
 
 To compare any other pair, edit the query string:
 `/r/{repo}/compare?before=<older session id>&after=<newer session id>`.

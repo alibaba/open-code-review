@@ -5,12 +5,123 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/model"
 )
+
+func TestLoadSummaryForCompareScanCoverage(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	const scanStart = `{"type":"session_start","reviewMode":"full_scan","scanPaths":["src","skipped.go"]}`
+	const emptyScopeStart = `{"type":"session_start","reviewMode":"full_scan","scanPaths":[]}`
+	const end = `{"type":"session_end","files_reviewed":["skipped.go"]}`
+	tests := []struct {
+		name    string
+		records []string
+		want    ScanCoverage
+		aborted bool
+	}{
+		{
+			name: "interrupted scan takes the last valid checkpoint per normalized path",
+			records: []string{
+				scanStart,
+				`{"type":"review_item_done","filePath":"src/./no-comments.go","fingerprint":"done"}`,
+				`{"type":"review_item_reused","newPath":"src/reused.go","fingerprint":"reused","sourceSessionId":"prior"}`,
+				`{"type":"review_item_done","filePath":"src/retracted.go","fingerprint":"first"}`,
+				`{"type":"review_item_failed","filePath":"src\\retracted.go","fingerprint":"second"}`,
+				`{"type":"review_item_failed","filePath":"src/recovered.go","fingerprint":"third"}`,
+				`{"type":"review_item_done","filePath":"src/recovered.go","fingerprint":"fourth"}`,
+				`{"type":"review_item_failed","filePath":"src/no-comments.go","fingerprint":42}`,
+				`{"type":"review_item_failed","filePath":"src/no-comments.go"}`,
+				`{"type":"review_item_done","filePath":"src/retracted.go","fingerprint":""}`,
+				`{"type":"review_item_done","filePath":".","fingerprint":"invalid-path"}`,
+				`{"type":"review_item_done","fingerprint":"missing-path"}`,
+				`{"type":"review_item_failed","filePath":"src/no-comments.go",`,
+			},
+			want:    ScanCoverage{"src/no-comments.go": true, "src/reused.go": true, "src/recovered.go": true},
+			aborted: true,
+		},
+		{
+			name: "all failed",
+			records: []string{
+				scanStart,
+				`{"type":"review_item_failed","filePath":"skipped.go","fingerprint":"failed"}`,
+				end,
+			},
+			want: ScanCoverage{},
+		},
+		{
+			name:    "empty scope marker without successful checkpoints",
+			records: []string{emptyScopeStart, end},
+			want:    ScanCoverage{},
+		},
+		{
+			name:    "interrupted before any checkpoint",
+			records: []string{emptyScopeStart},
+			want:    ScanCoverage{},
+			aborted: true,
+		},
+		{
+			name: "legacy scan has no checkpoint format marker",
+			records: []string{
+				`{"type":"session_start","reviewMode":"full_scan"}`,
+				end,
+			},
+		},
+		{
+			name:    "null scope is not a format marker",
+			records: []string{`{"type":"session_start","reviewMode":"full_scan","scanPaths":null}`, end},
+		},
+		{
+			name:    "non-array scope is not a format marker",
+			records: []string{`{"type":"session_start","reviewMode":"full_scan","scanPaths":"src"}`, end},
+		},
+		{
+			name:    "scope must contain strings",
+			records: []string{`{"type":"session_start","reviewMode":"full_scan","scanPaths":[null]}`, end},
+		},
+		{
+			name:    "scope marker belongs to scan mode",
+			records: []string{`{"type":"session_start","reviewMode":"workspace","scanPaths":[]}`, end},
+		},
+	}
+	dir, err := SessionsDir(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const id = "scan"
+			if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(strings.Join(tt.records, "\n")+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			summary, got, err := LoadSummaryForCompare(repoDir, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("scan coverage = %#v, want %#v", got, tt.want)
+			}
+			if summary.Aborted != tt.aborted {
+				t.Errorf("aborted = %v, want %v", summary.Aborted, tt.aborted)
+			}
+		})
+	}
+	if _, _, err := LoadSummaryForCompare(repoDir, "missing"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing session error = %v, want ErrNotExist", err)
+	}
+}
 
 func TestListSessions_MissingDirReturnsEmptySlice(t *testing.T) {
 	tmpHome := t.TempDir()

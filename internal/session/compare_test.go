@@ -37,7 +37,7 @@ func TestCompareKeepsIdentityFieldsSeparate(t *testing.T) {
 	before := cmt("a.go", 1, "bug", "x.go|bug|value", "before")
 	after := cmt("a.go|bug|x.go", 2, "bug", "value", "after")
 
-	got := Compare([]model.LlmComment{before}, []model.LlmComment{after}, nil)
+	got := Compare([]model.LlmComment{before}, []model.LlmComment{after}, nil, nil)
 	if len(got.Persisting) != 0 || !reflect.DeepEqual(got.New, []model.LlmComment{after}) || !reflect.DeepEqual(got.Resolved, []model.LlmComment{before}) {
 		t.Fatalf("distinct findings sharing a delimiter-joined key were conflated: %+v", got)
 	}
@@ -219,7 +219,7 @@ func TestCompare(t *testing.T) {
 		{
 			name:            "failed rename remains not reviewed",
 			before:          []model.LlmComment{cmt("old/a.go", 5, "bug", "x := 1", "unused")},
-			manifest:        &RunManifest{Coverage: Coverage{Failed: []CoverageItem{{Path: "new/a.go", OldPath: "old/a.go"}}}},
+			manifest:        &RunManifest{SchemaVersion: ManifestSchemaVersion, Coverage: Coverage{Failed: []CoverageItem{{Path: "new/a.go", OldPath: "old/a.go"}}}},
 			wantNew:         []string{},
 			wantPersisting:  []string{},
 			wantResolved:    []string{},
@@ -261,9 +261,9 @@ func TestCompare(t *testing.T) {
 				for path := range tt.reviewed {
 					items = append(items, CoverageItem{Path: path})
 				}
-				manifest = &RunManifest{Coverage: Coverage{Completed: items}}
+				manifest = reviewedManifest(items...)
 			}
-			got := Compare(tt.before, tt.after, manifest)
+			got := Compare(tt.before, tt.after, manifest, nil)
 			want := map[string][]string{
 				"new":          tt.wantNew,
 				"persisting":   tt.wantPersisting,
@@ -297,7 +297,65 @@ func TestCompare(t *testing.T) {
 }
 
 func reviewedManifest(items ...CoverageItem) *RunManifest {
-	return &RunManifest{Coverage: Coverage{Completed: items}}
+	return &RunManifest{SchemaVersion: ManifestSchemaVersion, Coverage: Coverage{Completed: items}}
+}
+
+func TestCompareScanCoverage(t *testing.T) {
+	before := []model.LlmComment{
+		cmt("checked.go", 1, "bug", "a", "checked"),
+		cmt("skipped.go", 2, "bug", "b", "skipped"),
+		cmt("skipped.go", 3, "bug", "c", "still present"),
+	}
+	after := []model.LlmComment{cmt("skipped.go", 4, "bug", "c", "still present")}
+	tests := []struct {
+		name        string
+		manifest    *RunManifest
+		scan        ScanCoverage
+		resolved    []string
+		notReviewed []string
+	}{
+		{
+			name:        "checkpoint coverage",
+			scan:        ScanCoverage{"checked.go": true},
+			resolved:    []string{"checked.go:1"},
+			notReviewed: []string{"skipped.go:2"},
+		},
+		{
+			name:        "known empty scan coverage",
+			scan:        ScanCoverage{},
+			resolved:    []string{},
+			notReviewed: []string{"checked.go:1", "skipped.go:2"},
+		},
+		{
+			name:        "manifest takes precedence over checkpoints",
+			manifest:    reviewedManifest(CoverageItem{Path: "skipped.go"}),
+			scan:        ScanCoverage{"checked.go": true},
+			resolved:    []string{"skipped.go:2"},
+			notReviewed: []string{"checked.go:1"},
+		},
+		{
+			name:        "unrecognized manifest uses checkpoints",
+			manifest:    &RunManifest{SchemaVersion: "unknown"},
+			scan:        ScanCoverage{"checked.go": true},
+			resolved:    []string{"checked.go:1"},
+			notReviewed: []string{"skipped.go:2"},
+		},
+		{
+			name:        "legacy fallback",
+			resolved:    []string{"checked.go:1", "skipped.go:2"},
+			notReviewed: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Compare(before, after, tt.manifest, tt.scan)
+			if !reflect.DeepEqual(ids(got.Resolved), tt.resolved) ||
+				!reflect.DeepEqual(ids(got.NotReviewed), tt.notReviewed) ||
+				!reflect.DeepEqual(ids(got.Persisting), []string{"skipped.go:4"}) || len(got.New) != 0 {
+				t.Fatalf("comparison = %+v, want resolved %v, not reviewed %v, and the matching finding persisting", got, tt.resolved, tt.notReviewed)
+			}
+		})
+	}
 }
 
 // TestCompare_SortedOrderIsStableAcrossInputOrder pins that shuffling the
@@ -310,8 +368,8 @@ func TestCompare_SortedOrderIsStableAcrossInputOrder(t *testing.T) {
 	}
 	shuffled := []model.LlmComment{before[1], before[2], before[0]}
 
-	first := ids(Compare(before, nil, nil).Resolved)
-	second := ids(Compare(shuffled, nil, nil).Resolved)
+	first := ids(Compare(before, nil, nil, nil).Resolved)
+	second := ids(Compare(shuffled, nil, nil, nil).Resolved)
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("order depends on input: %v vs %v", first, second)
 	}
@@ -333,7 +391,7 @@ func TestCompare_SortBreaksTiesOnSnippet(t *testing.T) {
 	// tie-break shows up within a handful of repetitions.
 	for i := range 50 {
 		var got []string
-		for _, c := range Compare(nil, after, nil).New {
+		for _, c := range Compare(nil, after, nil, nil).New {
 			got = append(got, c.ExistingCode)
 		}
 		if !reflect.DeepEqual(got, want) {
