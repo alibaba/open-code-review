@@ -65,6 +65,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317   # implies exporter=otlp
 export OTEL_EXPORTER_OTLP_PROTOCOL=grpc             # default; http/protobuf and http/json
                                                     # are also supported
 export OTEL_SERVICE_NAME=open-code-review-prod      # optional; default: open-code-review
+export OTEL_METRICS_EXPORTER=none                   # optional; export spans only, for trace-only backends
 export OCR_CONTENT_LOGGING=0                        # reserved / currently a no-op (see Content logging)
 ```
 

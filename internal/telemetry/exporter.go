@@ -116,6 +116,10 @@ func initOTLPGRPCProviders(ctx context.Context, res *resource.Resource, cfg Conf
 	tracerProvider = tp
 	shutdownFuncs = append(shutdownFuncs, func(ctx context.Context) error { return tp.Shutdown(ctx) })
 
+	if cfg.NoMetrics {
+		return
+	}
+
 	metricOpts := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(addr)}
 	if insecure {
 		metricOpts = append(metricOpts, otlpmetricgrpc.WithInsecure())
@@ -165,6 +169,10 @@ func initOTLPHTTPProviders(ctx context.Context, res *resource.Resource, cfg Conf
 	tracerProvider = tp
 	shutdownFuncs = append(shutdownFuncs, func(ctx context.Context) error { return tp.Shutdown(ctx) })
 
+	if cfg.NoMetrics {
+		return
+	}
+
 	metricExp, err := otlpmetrichttp.New(ctx,
 		otlpmetrichttp.WithEndpointURL(otlpSignalURL(cfg.OTLPEndpoint, "/v1/metrics")))
 	if err != nil {
@@ -181,7 +189,7 @@ func initOTLPHTTPProviders(ctx context.Context, res *resource.Resource, cfg Conf
 }
 
 // initConsoleProviders sets up stdout exporters for traces and metrics.
-func initConsoleProviders(res *resource.Resource) {
+func initConsoleProviders(res *resource.Resource, cfg Config) {
 	traceExp, err := newStdoutTraceExporter()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to create console trace exporter: %v\n", err)
@@ -194,6 +202,10 @@ func initConsoleProviders(res *resource.Resource) {
 	)
 	tracerProvider = tp
 	shutdownFuncs = append(shutdownFuncs, func(ctx context.Context) error { return tp.Shutdown(ctx) })
+
+	if cfg.NoMetrics {
+		return
+	}
 
 	metricExp, err := newStdoutMetricExporter()
 	if err != nil {

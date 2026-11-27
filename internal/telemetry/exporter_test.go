@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
@@ -79,7 +80,7 @@ func TestInitConsoleProviders(t *testing.T) {
 		shutdownFuncs = nil
 	}()
 
-	initConsoleProviders(resource.Default())
+	initConsoleProviders(resource.Default(), DefaultConfig())
 	if tracerProvider == nil {
 		t.Error("expected tracerProvider to be set after initConsoleProviders")
 	}
@@ -297,4 +298,83 @@ func TestInitOTLPHTTPProviders_HonoursBasePath(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the collector was never called; the endpoint's base path was discarded")
 	}
+}
+
+func TestResolveEnv_MetricsExporterNone(t *testing.T) {
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
+	if cfg := ResolveConfig(""); !cfg.NoMetrics {
+		t.Error("OTEL_METRICS_EXPORTER=none should turn metrics off")
+	}
+	t.Setenv("OTEL_METRICS_EXPORTER", "otlp")
+	if cfg := ResolveConfig(""); cfg.NoMetrics {
+		t.Error("metrics should stay on unless OTEL_METRICS_EXPORTER=none")
+	}
+}
+
+func TestInitProviders_MetricsOff(t *testing.T) {
+	reset := func() {
+		for _, fn := range shutdownFuncs {
+			_ = fn(context.Background())
+		}
+		tracerProvider = nil
+		meterProvider = nil
+		shutdownFuncs = nil
+	}
+	for _, protocol := range []string{"grpc", "http/protobuf"} {
+		reset()
+		initOTLPProviders(context.Background(), resource.Default(), Config{
+			Exporter:     "otlp",
+			OTLPEndpoint: "localhost:0",
+			OTLPProtocol: protocol,
+			NoMetrics:    true,
+		})
+		if tracerProvider == nil {
+			t.Errorf("%s: tracerProvider should still be set", protocol)
+		}
+		if meterProvider != nil {
+			t.Errorf("%s: meterProvider should be nil with metrics off", protocol)
+		}
+	}
+	reset()
+	initConsoleProviders(resource.Default(), Config{NoMetrics: true})
+	if tracerProvider == nil || meterProvider != nil {
+		t.Error("console: want a tracer provider and no meter provider with metrics off")
+	}
+	reset()
+}
+
+func TestInit_MetricsExporterNoneRecordsNothing(t *testing.T) {
+	ctx := context.Background()
+	previousTracer := otel.GetTracerProvider()
+	previousMeter := otel.GetMeterProvider()
+	initialized = false
+	shutdownFuncs = nil
+	initMetricsOnce = false
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("OCR_ENABLE_TELEMETRY", "1")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:0")
+	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
+	t.Cleanup(func() {
+		ShutdownWithTimeout(ctx, time.Second)
+		otel.SetTracerProvider(previousTracer)
+		otel.SetMeterProvider(previousMeter)
+		tracerProvider = nil
+		meterProvider = nil
+		initialized = false
+		shutdownFuncs = nil
+		initMetricsOnce = false
+	})
+
+	if !Init(ctx) {
+		t.Fatal("traces should still be enabled")
+	}
+	if meterProvider != nil {
+		t.Fatal("no meter provider expected with OTEL_METRICS_EXPORTER=none")
+	}
+	RecordReviewDuration(ctx, time.Second)
+	RecordLLMRequest(ctx, "model", time.Second, 10, "ok")
 }
