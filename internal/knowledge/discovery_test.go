@@ -219,6 +219,42 @@ func TestDiscoveryRejectsMalformedAndMissingInputs(t *testing.T) {
 	}
 }
 
+func TestDiscoveryRetriesMalformedEnvelopeOnce(t *testing.T) {
+	const corpus = `[{"id":"s1","text":"limit = 8"}]`
+	const valid = `{"records":[{"claim":"The limit is eight"}]}`
+	for _, tc := range []struct {
+		name    string
+		replies []string
+		wantErr bool
+	}{
+		{"valid first response", []string{valid}, false},
+		{"retry missing array", []string{`{"records":null}`, valid}, false},
+		{"both responses malformed", []string{"untrusted response", `{}`}, true},
+		{"oversized response", []string{strings.Repeat("x", (128<<10)+1)}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			records, err := extractDiscoveryRecords(t.Context(), func(_ context.Context, system, data string) (string, error) {
+				if data != corpus || calls >= len(tc.replies) {
+					t.Fatalf("unexpected extraction request %d", calls+1)
+				}
+				if calls == 1 && (!strings.Contains(system, "previous response") || strings.Contains(system, tc.replies[0])) {
+					t.Fatal("retry must describe the format error without echoing the previous reply")
+				}
+				reply := tc.replies[calls]
+				calls++
+				return reply, nil
+			}, discoveryInstructions, corpus)
+			if calls != len(tc.replies) || (err != nil) != tc.wantErr {
+				t.Fatalf("calls=%d, err=%v", calls, err)
+			}
+			if !tc.wantErr && (len(records) != 1 || string(records[0]) != `{"claim":"The limit is eight"}`) {
+				t.Fatalf("missing accepted record: %s", records)
+			}
+		})
+	}
+}
+
 func TestTrackedDiscussionExportIsOnlyHistoricalInput(t *testing.T) {
 	r := newDiscoveryRepo(t)
 	r.write("src.py", "def ship(): pass")

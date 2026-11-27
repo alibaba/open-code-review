@@ -28,11 +28,12 @@ type AcceptedCall struct {
 // DirectCalleeAssertion is a checked test predicate that needs an outcome check
 // before a finding can rely on it to establish the rule.
 type DirectCalleeAssertion struct {
-	Source     Citation                `json:"source"`
-	Callee     string                  `json:"callee"`
-	Rule       string                  `json:"rule"`
-	Conditions []string                `json:"conditions,omitempty"`
-	Predicates []DirectCalleePredicate `json:"predicates"`
+	Source         Citation                `json:"source"`
+	Callee         string                  `json:"callee"`
+	Rule           string                  `json:"rule"`
+	Conditions     []string                `json:"conditions,omitempty"`
+	Predicates     []DirectCalleePredicate `json:"predicates"`
+	implementation DirectCalleeRevision
 }
 
 type noneComparison string
@@ -124,6 +125,75 @@ func (t Tree) WithDirectCalleeEvidence(ctx context.Context, f Fact, content stri
 	return f, true
 }
 
+// DirectCalleeRevision contains a resolved function and scalar declarations it
+// reads from the same module at one revision.
+type DirectCalleeRevision struct {
+	Function       Citation
+	ModuleLiterals []Citation
+}
+
+// ReviewDirectCallee reads the same resolved function at the accepted revision.
+func (t Tree) ReviewDirectCallee(ctx context.Context, base string, assertion DirectCalleeAssertion, change model.Diff, line int) (before, after DirectCalleeRevision) {
+	current := assertion.implementation.Function
+	if t.Git == nil || !validOID(base) || change.IsNew || change.IsDeleted || change.IsRenamed ||
+		current.Path != change.NewPath || line < current.StartLine || line > current.EndLine {
+		return DirectCalleeRevision{}, DirectCalleeRevision{}
+	}
+	lines := strings.Split(strings.ReplaceAll(change.NewFileContent, "\r\n", "\n"), "\n")
+	if reviewSourceSpan(current.Path, lines, current.StartLine, current.EndLine) != current {
+		return DirectCalleeRevision{}, DirectCalleeRevision{}
+	}
+	accepted := newRechecker(ctx, t).atRevision(base)
+	old, ok := accepted.callerTarget(current.Path, assertion.Callee, 0)
+	if !ok {
+		return DirectCalleeRevision{}, DirectCalleeRevision{}
+	}
+	before = accepted.directCalleeRevision(old)
+	if before.Function.Quote == "" || before.Function.Quote == current.Quote {
+		return DirectCalleeRevision{}, DirectCalleeRevision{}
+	}
+	return before, assertion.implementation
+}
+
+func (r *rechecker) focusedFunctionSource(target focusedFunction) Citation {
+	return reviewSourceSpan(target.path, strings.Split(r.discussionDefinitionFile(target.path).file.text, "\n"), target.first, target.last)
+}
+
+func (r *rechecker) directCalleeRevision(target focusedFunction) DirectCalleeRevision {
+	revision := DirectCalleeRevision{Function: r.focusedFunctionSource(target)}
+	if revision.Function.Quote == "" {
+		return revision
+	}
+	source := r.discussionDefinitionFile(target.path)
+	module, err := parser2.ParseFile(target.path, source.file.text)
+	if err != nil {
+		return revision
+	}
+	root := symbols2.Build(module).Root
+	lines := strings.Split(source.file.text, "\n")
+	for _, stmt := range module.Body {
+		id := pythonLiteralAssignmentName(stmt)
+		if id == nil {
+			continue
+		}
+		binding := pythonBindingInCallee(root, id.Id, target)
+		if binding == nil || binding.BindSites[0] != id.P {
+			continue
+		}
+		line := pythonNodeLine(stmt)
+		i := slices.IndexFunc(source.definitions, func(d discussionDefinition) bool {
+			return !d.unquotable && d.kind == "assign" && d.name == id.Id && d.start == line
+		})
+		if i >= 0 {
+			d := source.definitions[i]
+			if declaration := reviewSourceSpan(target.path, lines, d.start, d.end); declaration.Path != "" {
+				revision.ModuleLiterals = append(revision.ModuleLiterals, declaration)
+			}
+		}
+	}
+	return revision
+}
+
 func (r *rechecker) independentPythonWitness(c Citation, implementation focusedFunction) (*DirectCalleeAssertion, bool) {
 	if (c.Kind != "test" && c.Kind != "code") || path.Ext(c.CurrentPath) != ".py" {
 		return nil, false
@@ -139,8 +209,11 @@ func (r *rechecker) independentPythonWitness(c Citation, implementation focusedF
 	}
 	root := symbols2.Build(module).Root
 	if predicates := r.calleePredicates(c, implementation, source.definitions, lines, root); len(predicates) != 0 {
-		return &DirectCalleeAssertion{Source: Citation{Kind: c.Kind, Path: c.CurrentPath, StartLine: c.CurrentStartLine,
-			EndLine: c.CurrentEndLine, Quote: c.Quote}, Callee: implementation.name, Predicates: predicates}, true
+		revision := r.directCalleeRevision(implementation)
+		if revision.Function.Quote != "" {
+			return &DirectCalleeAssertion{Source: Citation{Kind: c.Kind, Path: c.CurrentPath, StartLine: c.CurrentStartLine,
+				EndLine: c.CurrentEndLine, Quote: c.Quote}, Callee: implementation.name, Predicates: predicates, implementation: revision}, true
+		}
 	}
 	if c.Kind != "code" {
 		return nil, false
@@ -174,27 +247,24 @@ func (r *rechecker) calleePredicates(c Citation, implementation focusedFunction,
 			if compare, ok := assertion.Test.(*parser2.Compare); ok {
 				operands = append([]parser2.Expr{compare.Left}, compare.Comparators...)
 			}
+			var affected *parser2.Call
 			for len(operands) != 0 {
 				call := pythonAssertionCall(operands[0])
 				operands = operands[1:]
 				if call == nil {
 					continue
 				}
-				operands = append(operands, call.Args...)
-				for _, arg := range call.Keywords {
-					operands = append(operands, arg.Value)
-				}
 				name, id := pythonInvokedName(call)
 				if id == nil {
-					continue
+					return false
 				}
 				at := start + id.P.Line - assertion.P.Line
 				if at < c.CurrentStartLine || at > c.CurrentEndLine {
-					continue
+					return false
 				}
 				binding := pythonModuleBindingAtUse(root, id.Id, func(p parser2.Pos) bool { return p.Line == at && p.Col == id.P.Col })
 				if binding == nil {
-					continue
+					return false
 				}
 				var matches bool
 				if c.CurrentPath == implementation.path {
@@ -204,17 +274,89 @@ func (r *rechecker) calleePredicates(c Citation, implementation focusedFunction,
 					matches = ok && target.Bound && target.Path == implementation.path && def.name == implementation.name && def.start == implementation.first
 				}
 				if matches {
-					if quote, end := pythonAssertionSpan(assertion, lines, start, min(d.end, c.CurrentEndLine)); end != 0 {
-						predicates = append(predicates, DirectCalleePredicate{StartLine: start, EndLine: end, Quote: quote,
-							NoneComparison: pythonNoneComparison(assertion.Test, call)})
-					}
-					break
+					affected = call
+					continue
+				}
+				// The verifier only has implementations present in the verified citation.
+				if !r.citedPythonWrapper(c, name, binding, definitions, root) {
+					return false
+				}
+				operands = append(operands, call.Args...)
+				for _, arg := range call.Keywords {
+					operands = append(operands, arg.Value)
+				}
+			}
+			if affected != nil {
+				if quote, end := pythonAssertionSpan(assertion, lines, start, min(d.end, c.CurrentEndLine)); end != 0 {
+					predicates = append(predicates, DirectCalleePredicate{StartLine: start, EndLine: end, Quote: quote,
+						NoneComparison: pythonNoneComparison(assertion.Test, affected)})
 				}
 			}
 			return false
 		})
 	}
 	return predicates
+}
+
+func (r *rechecker) citedPythonWrapper(c Citation, name string, binding *symbols2.Binding, definitions []discussionDefinition, root *symbols2.Scope) bool {
+	if binding.Has(symbols2.FlagImport) {
+		return false
+	}
+	return slices.ContainsFunc(definitions, func(d discussionDefinition) bool {
+		if d.name != name || d.start != binding.BindSites[0].Line || d.start < c.CurrentStartLine ||
+			!r.focusedPythonDefinition(c.CurrentPath, d, root) {
+			return false
+		}
+		body := r.focusedFunctionSource(focusedFunction{c.CurrentPath, name, d.start, d.end})
+		return body.Quote != "" && body.EndLine <= c.CurrentEndLine && closedPythonWrapper(body)
+	})
+}
+
+// A wrapper can establish a predicate when the excerpt contains its entire
+// transformation. A single scalar return needs no other declarations.
+func closedPythonWrapper(source Citation) bool {
+	module, err := parser2.ParseFile(source.Path, source.Quote+"\n")
+	if err != nil || len(module.Body) != 1 {
+		return false
+	}
+	fn, ok := module.Body[0].(*parser2.FunctionDef)
+	if !ok || len(fn.Body) != 1 || len(fn.DecoratorList) != 0 || len(fn.TypeParams) != 0 || fn.Returns != nil {
+		return false
+	}
+	args := fn.Args
+	if args == nil || args.Vararg != nil || args.Kwarg != nil || len(args.Defaults) != 0 || len(args.KwOnly) != 0 {
+		return false
+	}
+	parameters := map[string]bool{}
+	for _, arg := range slices.Concat(args.PosOnly, args.Args) {
+		if arg.Annotation != nil {
+			return false
+		}
+		parameters[arg.Name] = true
+	}
+	result, ok := fn.Body[0].(*parser2.Return)
+	return ok && closedPythonScalar(result.Value, parameters)
+}
+
+func closedPythonScalar(expr parser2.Expr, parameters map[string]bool) bool {
+	switch x := expr.(type) {
+	case *parser2.Constant:
+		return true
+	case *parser2.Name:
+		return parameters[x.Id]
+	case *parser2.UnaryOp:
+		return closedPythonScalar(x.Operand, parameters)
+	case *parser2.BinOp:
+		return closedPythonScalar(x.Left, parameters) && closedPythonScalar(x.Right, parameters)
+	case *parser2.IfExp:
+		return closedPythonScalar(x.Test, parameters) && closedPythonScalar(x.Body, parameters) && closedPythonScalar(x.OrElse, parameters)
+	case *parser2.Compare:
+		return closedPythonScalar(x.Left, parameters) && !slices.ContainsFunc(x.Comparators, func(e parser2.Expr) bool {
+			return !closedPythonScalar(e, parameters)
+		})
+	default:
+		return false
+	}
 }
 
 func pythonAssertionSpan(assertion *parser2.Assert, lines []string, start, last int) (string, int) {
@@ -274,22 +416,29 @@ func pythonCitedLiteral(c Citation, stmts []parser2.Stmt, root *symbols2.Scope) 
 		if pythonNodeLine(stmt) != c.CurrentStartLine {
 			continue
 		}
-		var target, value parser2.Expr
-		switch s := stmt.(type) {
-		case *parser2.Assign:
-			if len(s.Targets) == 1 {
-				target, value = s.Targets[0], s.Value
-			}
-		case *parser2.AnnAssign:
-			target, value = s.Target, s.Value
-		}
-		id, name := target.(*parser2.Name)
-		_, literal := value.(*parser2.Constant)
-		if name && literal && root.Symbols[id.Id] != nil && len(root.Symbols[id.Id].BindSites) == 1 {
+		id := pythonLiteralAssignmentName(stmt)
+		if id != nil && root.Symbols[id.Id] != nil && len(root.Symbols[id.Id].BindSites) == 1 {
 			return id.Id
 		}
 	}
 	return ""
+}
+
+func pythonLiteralAssignmentName(stmt parser2.Stmt) *parser2.Name {
+	var target, value parser2.Expr
+	switch s := stmt.(type) {
+	case *parser2.Assign:
+		if len(s.Targets) == 1 {
+			target, value = s.Targets[0], s.Value
+		}
+	case *parser2.AnnAssign:
+		target, value = s.Target, s.Value
+	}
+	if _, literal := value.(*parser2.Constant); !literal {
+		return nil
+	}
+	name, _ := target.(*parser2.Name)
+	return name
 }
 
 func pythonBindingInCallee(root *symbols2.Scope, name string, implementation focusedFunction) *symbols2.Binding {

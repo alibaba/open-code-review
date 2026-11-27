@@ -234,6 +234,11 @@ func TestMixedRuleGroupRetainsDirectCalleeChecks(t *testing.T) {
 	refute := businessCheck{ID: ids[external], Outcome: "refuted", Path: callee, Quote: newReturn, Line: line, Candidate: "c-0", RefutedText: falseFinding,
 		SourcePath: policy, SourceQuote: policyLimit, Reason: "The upper bound still caps the result at 100 cents.",
 		Trigger: "A raw amount of 100.", Effect: "The reported amount exceeds 100 cents."}
+	unresolved := refute
+	unresolved.counterproof = true
+	if selectBusinessContext(snapshot, []model.Diff{change}).proves(byID[refute.ID], unresolved, nil) {
+		t.Fatal("an inferred caller rule withdrew a finding without resolving its external policy")
+	}
 	effect, err := json.Marshal(map[string]any{"checks": []map[string]any{{
 		"id": "e-0", "verdict": "confirmed", "input": "ten cents", "expected": "10", "before": "10", "after": "11",
 		"reason": "The changed expression adds one cent before the cap.", "output_path": callee, "output_line": line, "output_quote": newReturn,

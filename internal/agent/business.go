@@ -228,11 +228,10 @@ func (c businessCheck) directCalleePremise(ctx context.Context, tree knowledge.T
 				f.Conditions[i].Citation = nil
 			}
 		}
-		var ok bool
-		f, ok = tree.WithDirectCalleeEvidence(ctx, f, content)
+		resolved, ok := tree.WithDirectCalleeEvidence(ctx, f, content)
 		if !ok {
-			if c.SourcePath != c.Path || c.counterproof {
-				return nil, c.SourcePath == c.Path
+			if c.SourcePath != c.Path {
+				return nil, false
 			}
 			// A second line in the changed routine adds no independent
 			// evidence. Only a separate premise reaches the outcome verifier.
@@ -244,10 +243,32 @@ func (c businessCheck) directCalleePremise(ctx context.Context, tree knowledge.T
 			changed, premise, _ := knowledge.ReviewEffectEvidence(c.Path, content, c.Line, line, end)
 			return nil, changed.Quote != "" && premise.Quote != "" && changed.StartLine != premise.StartLine
 		}
+		f = resolved
 	}
 	if assertion := f.DirectAssertion(); assertion != nil {
-		_, ok := assertion.MatchedPredicate(c.SourceQuote)
-		return assertion, ok
+		// Setup may accompany a single complete predicate. Keep its full
+		// source context, but bind the outcome verifier to that assertion.
+		offset := uniqueBusinessQuoteLine(assertion.Source.Quote, c.SourceQuote)
+		if offset == 0 {
+			return nil, false
+		}
+		start := assertion.Source.StartLine + offset - 1
+		end := start + strings.Count(strings.TrimSpace(c.SourceQuote), "\n")
+		selected := *assertion
+		selected.Predicates = nil
+		for _, predicate := range assertion.Predicates {
+			if predicate.EndLine < start || predicate.StartLine > end {
+				continue
+			}
+			if predicate.StartLine < start || predicate.EndLine > end || len(selected.Predicates) != 0 {
+				return nil, false
+			}
+			if _, ok := assertion.MatchedPredicate(predicate.Quote); !ok {
+				return nil, false
+			}
+			selected.Predicates = []knowledge.DirectCalleePredicate{predicate}
+		}
+		return &selected, len(selected.Predicates) == 1
 	}
 	return nil, true
 }
@@ -554,16 +575,20 @@ func (b businessContext) proves(rule knowledge.Fact, c businessCheck, lines []ch
 	if rule.ContextStatus() == knowledge.StatusConflict || rule.ContextStatus() == knowledge.StatusChanged {
 		return false
 	}
-	source, ok := b.currentPremise(rule, c)
-	if !ok || c.SourcePath == c.Path && strings.TrimSpace(c.SourceQuote) == strings.TrimSpace(c.Quote) {
-		return false
-	}
-	if resolve := b.directPremises[source]; c.counterproof && resolve != nil {
-		// A passing test can nominate a recheck. Its continued success alone
-		// does not disprove the original finding's specific consequence.
-		if assertion, independent := resolve(c); assertion != nil || !independent {
+	if c.counterproof && c.discussion == "" && rule.AcceptedCall != nil && rule.Authority == knowledge.AuthorityInferred && !rule.IsDecision() {
+		// A caller branch or a passing test may concern a different input.
+		// A separate policy declaration actually read by the callee can
+		// corroborate the independent reviewer's counterexample.
+		resolve := b.directPremises[rule.ID]
+		if resolve == nil || c.SourcePath == c.Path {
 			return false
 		}
+		if assertion, bound := resolve(c); !bound || assertion != nil {
+			return false
+		}
+	}
+	if _, ok := b.currentPremise(rule, c); !ok || c.SourcePath == c.Path && strings.TrimSpace(c.SourceQuote) == strings.TrimSpace(c.Quote) {
+		return false
 	}
 	inScope := rule.Scope == "." || c.Path == rule.Scope || strings.HasPrefix(c.Path, rule.Scope+"/")
 	if c.Outcome == "violation" {

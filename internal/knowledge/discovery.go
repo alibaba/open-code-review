@@ -198,24 +198,11 @@ func (t Tree) Discover(ctx context.Context, opts DiscoverOptions, extract Extrac
 	if slices.ContainsFunc(sources, func(s discoverySource) bool { return s.Caller != nil }) {
 		instructions += "\nA caller excerpt identifies the local function it calls. When a rule depends on how a return value is used, cite the implementation and the consumer lines that show what happens to that value."
 	}
-	raw, err := extract(ctx, instructions, string(data))
+	records, err := extractDiscoveryRecords(ctx, extract, instructions, string(data))
 	if err != nil {
-		return result, fmt.Errorf("extract repository knowledge: %w", err)
+		return result, err
 	}
-	if len(raw) > 128<<10 {
-		return result, errors.New("model returned over 128 KiB of discovery data")
-	}
-	raw = strings.TrimSpace(raw)
-	if strings.HasPrefix(raw, "```json\n") && strings.HasSuffix(raw, "\n```") {
-		raw = strings.TrimSuffix(strings.TrimPrefix(raw, "```json\n"), "\n```")
-	}
-	var response struct {
-		Records []json.RawMessage `json:"records"`
-	}
-	if err := decodeDiscoveryJSON([]byte(raw), &response); err != nil || response.Records == nil {
-		return result, errors.New("model must return one JSON object with a records array")
-	}
-	for i, rawRecord := range response.Records {
+	for i, rawRecord := range records {
 		if i == 12 {
 			result.limit("sampled the first 12 model records")
 			break
@@ -246,6 +233,36 @@ func (t Tree) Discover(ctx context.Context, opts DiscoverOptions, extract Extrac
 		result.Facts = append(result.Facts, fact)
 	}
 	return result, ctx.Err()
+}
+
+// Retry a malformed envelope once using the original sources. The extractor
+// accounts for each request against the same review budget.
+func extractDiscoveryRecords(ctx context.Context, extract Extractor, instructions, corpus string) ([]json.RawMessage, error) {
+	for range 2 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		raw, err := extract(ctx, instructions, corpus)
+		if err != nil {
+			return nil, fmt.Errorf("extract repository knowledge: %w", err)
+		}
+		if len(raw) > 128<<10 {
+			return nil, errors.New("model returned over 128 KiB of discovery data")
+		}
+		raw = strings.TrimSpace(raw)
+		if strings.HasPrefix(raw, "```json\n") && strings.HasSuffix(raw, "\n```") {
+			raw = strings.TrimSuffix(strings.TrimPrefix(raw, "```json\n"), "\n```")
+		}
+		var response struct {
+			Records []json.RawMessage `json:"records"`
+		}
+		if err := decodeDiscoveryJSON([]byte(raw), &response); err == nil && response.Records != nil {
+			return response.Records, nil
+		}
+		instructions += `
+The previous response could not be parsed. Return only a JSON object with a records array. If no rule is supported, return {"records":[]}.`
+	}
+	return nil, errors.New("model must return one JSON object with a records array")
 }
 
 func decodeDiscoveryJSON(raw []byte, dest any) error {

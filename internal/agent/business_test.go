@@ -850,12 +850,20 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 	const callee, caller, testFile = "sizing.py", "queue.py", "test_sizing.py"
 	const limit = "LIMIT = 8"
 	const missing = "if items is None:\n        return LIMIT"
-	const presence = "assert width(range(12)) is not None"
+	const presence = "assert width(values) is not None"
+	const strong = "assert width(\n        values\n    ) == 8"
+	const withSetup = "values = range(12)\n    " + presence
+	const both = withSetup + "\n    " + strong
+	const widthHeader = "def width( items ):"
+	const siblingTest = "assert preview_width(12) == 8"
+	const previewReturn = "return min(count, 8)"
 	const reviewed = "return len(items)"
 	const before = limit + "\nfrom .defaults import MAX_ITEMS\ndef width(items):\n    " + missing + "\n    return min(len(items), LIMIT, MAX_ITEMS)\n\n" +
 		"def export_width(items):\n    if items is None:\n        return width(items)\n    count = len(items)\n" +
-		"    if count < LIMIT:\n        return count\n    return min(count, LIMIT)\n"
+		"    if count < LIMIT:\n        return count\n    return min(count, LIMIT)\n\n" +
+		"def preview_width(count):\n    " + previewReturn + "\n\ndef test_preview():\n    " + siblingTest + "\n"
 	after := strings.Replace(before, "return min(count, LIMIT)", reviewed, 1)
+	after = strings.Replace(after, "def width(items):", widthHeader, 1)
 	const changedLine = 14
 	const realFinding = "An export of twelve items now returns 12, above the limit of eight."
 	const falseFinding = "Exporting with no items supplied now loses the fallback width of eight."
@@ -863,7 +871,7 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 	commitIn(t, dir, "defaults.py", "MAX_ITEMS = 8\n", "declare the permitted batch size")
 	commitIn(t, dir, callee, before, "apply the common limit to exports")
 	commitIn(t, dir, caller, "from .sizing import width\n\ndef enqueue(items):\n    return width(items)\n", "queue batches using the accepted width")
-	commitIn(t, dir, testFile, "from .sizing import width\n\ndef test_present():\n    "+presence+"\n", "check that width returns a result")
+	commitIn(t, dir, testFile, "from .sizing import width\n\ndef test_present():\n    "+both+"\n", "check batch presence and the cap")
 	ctx, git := t.Context(), gitcmd.New(1)
 	output := func(args ...string) string {
 		t.Helper()
@@ -877,10 +885,10 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 	commitIn(t, dir, callee, after, "return raw export count")
 	head := knowledge.Tree{Repo: dir, Git: git, Commit: strings.TrimSpace(output("rev-parse", "HEAD"))}
 	change := model.Diff{OldPath: callee, NewPath: callee, NewFileContent: after, Diff: output("diff", base.Commit, head.Commit, "--", callee)}
-	run := func(t *testing.T, includeLimit, constantFirst, separateRoutine bool) {
+	run := func(t *testing.T, includeLimit, constantFirst, separateRoutine bool, falseCounterproof string, decisions ...knowledge.Fact) {
 		t.Helper()
 		citations := []knowledge.Citation{{Kind: "code", Path: callee, StartLine: 4, EndLine: 6},
-			{Kind: "code", Path: caller, StartLine: 4, EndLine: 4}, {Kind: "test", Path: testFile, StartLine: 3, EndLine: 4},
+			{Kind: "code", Path: caller, StartLine: 4, EndLine: 4}, {Kind: "test", Path: testFile, StartLine: 3, EndLine: 8},
 			{Kind: "test", Path: testFile, StartLine: 1, EndLine: 1}}
 		defaultLimit := knowledge.Citation{Kind: "code", Path: "defaults.py", StartLine: 1, EndLine: 1}
 		citations = append(citations, defaultLimit)
@@ -891,18 +899,23 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 			citations = append(citations, knowledge.Citation{Kind: "code", Path: callee, StartLine: 1, EndLine: 1},
 				knowledge.Citation{Kind: "code", Path: callee, StartLine: 11, EndLine: 11})
 		}
+		if falseCounterproof == siblingTest || falseCounterproof == previewReturn {
+			line := uniqueBusinessQuoteLine(before, falseCounterproof)
+			citations = append(citations, knowledge.Citation{Kind: "code", Path: callee, StartLine: line, EndLine: line})
+		}
 		f, err := base.Prepare(ctx, knowledge.Fact{Origin: "discovery", Category: knowledge.CategoryBusinessRule, Authority: knowledge.AuthorityInferred,
 			Source: callee, Scope: callee, Claim: "Batch widths are capped at eight.", Citations: citations})
 		if err != nil {
 			t.Fatal(err)
 		}
 		f.Citations[1].Symbol = "enqueue"
-		checked, err := head.CheckReview(ctx, base.Commit, []knowledge.Fact{f})
+		facts := append([]knowledge.Fact{f}, decisions...)
+		checked, err := head.CheckReview(ctx, base.Commit, facts)
 		if err != nil {
 			t.Fatal(err)
 		}
 		snapshot := knowledge.ReviewSnapshot(checked)
-		if err := snapshot.DescribeReviewChanges(ctx, base, head, checked); err != nil || len(snapshot) != 1 {
+		if err := snapshot.DescribeReviewChanges(ctx, base, head, checked); err != nil || len(snapshot) != len(facts) {
 			t.Fatalf("snapshot = %+v, err = %v", snapshot, err)
 		}
 		direct, ok := head.WithDirectCalleeEvidence(ctx, snapshot[0], after)
@@ -915,7 +928,7 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 		}
 		check := businessCheck{ID: snapshot[0].ID, Path: callee, Line: changedLine, Quote: reviewed, Reason: realFinding,
 			Outcome: "violation", SourcePath: callee, SourceQuote: limit, Severity: "medium"}
-		var drafts []string
+		var drafts []model.LlmComment
 		var first, second string
 		if includeLimit {
 			if separateRoutine {
@@ -925,26 +938,41 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 			importOnly.SourcePath, importOnly.SourceQuote = testFile, "from .sizing import width"
 			importOnly.Reason = "Queued batches now drop items beyond the eighth."
 			weak := importOnly
-			weak.SourceQuote, weak.Reason = presence, "The queue now rejects a twelve-item batch."
-			testHeader := importOnly
+			weak.SourceQuote, weak.Reason = withSetup, "The queue now rejects a twelve-item batch."
+			weak.Quote, weak.Line = widthHeader, 3
+			testHeader := weak
 			testHeader.SourceQuote, testHeader.Reason = "def test_present():", "All queued batches now lack a result."
+			ambiguous, partial := weak, weak
+			ambiguous.SourceQuote, ambiguous.Reason = both, "Queued batches now return zero."
+			partial.SourceQuote, partial.Reason = "assert width(", "Queued batches now return a negative value."
 			sameRoutine := check
 			sameRoutine.SourceQuote, sameRoutine.Reason = "count = len(items)", "The changed width causes the queue to retry indefinitely."
-			first = businessReply(t, check, importOnly, weak, testHeader, sameRoutine)
-			second = `{"checks":[{"id":"e-0","verdict":"confirmed","input":"12 items","expected":"8","before":"8","after":"12","reason":"The export now returns the length of the batch.","output_path":"sizing.py","output_line":14,"output_quote":"return len(items)"}]}`
+			first = businessReply(t, check, importOnly, weak, testHeader, ambiguous, partial, sameRoutine)
+			second = `{"checks":[{"id":"e-0","verdict":"confirmed","input":"12 items","expected":"8","before":"8","after":"12","reason":"The export now returns the length of the batch.","output_path":"sizing.py","output_line":14,"output_quote":"return len(items)"},{"id":"e-1","verdict":"confirmed","input":"12 items","expected":"8","before":"8","after":"12","reason":"The numeric assertion fails.","output_path":"sizing.py","output_line":6,"output_quote":"return min(len(items), LIMIT, MAX_ITEMS)","assertion_quote":"assert width(\n        values\n    ) == 8","assertion_before_passes":true,"assertion_after_passes":false}]}`
 		} else {
 			if snapshot[0].ContextStatus() != knowledge.StatusCandidate {
 				t.Fatalf("expected a current inferred rule, got %s", snapshot[0].ContextStatus())
 			}
-			drafts = []string{realFinding, falseFinding}
+			for _, text := range []string{realFinding, falseFinding} {
+				drafts = append(drafts, model.LlmComment{Path: callee, StartLine: changedLine, EndLine: changedLine, ExistingCode: reviewed, Content: text})
+			}
 			check.Outcome, check.SourcePath, check.SourceQuote, check.Reason = "refuted", testFile, presence, "The width test still passes."
 			check.RefutedText, check.Candidate = realFinding, "c-0"
 			fallback := check
 			fallback.RefutedText, fallback.Candidate = falseFinding, "c-1"
+			if len(decisions) != 0 {
+				if !snapshot[1].IsDecision() || snapshot[1].ContextStatus() != knowledge.StatusHistorical {
+					t.Fatal("explicit review decision lost its current implementation witness")
+				}
+				fallback.ID, fallback.SourcePath, fallback.SourceQuote = snapshot[1].ID, callee, missing
+			}
 			first = businessReply(t, check, fallback)
 			check.Trigger, check.Effect = "Export twelve items.", "The finding reports a width above eight."
 			fallback.Trigger, fallback.Effect = "Export with items set to None.", "The finding reports that the fallback width is lost."
 			fallback.SourcePath, fallback.SourceQuote, fallback.Reason = callee, missing, "The unchanged branch returns the fallback limit."
+			if falseCounterproof != "" {
+				check.SourcePath, check.SourceQuote, check.Reason = callee, falseCounterproof, "The separately cited code still gives eight."
+			}
 			second = businessReply(t, check, fallback)
 		}
 		client := &fakeAgentClient{}
@@ -953,7 +981,7 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 		}
 		a := New(Args{RepoDir: dir, LLMClient: client, KnowledgeTree: &head, Template: template.Template{MaxTokens: 16000}})
 		for _, draft := range drafts {
-			a.args.CommentCollector.Add(model.LlmComment{Path: callee, StartLine: changedLine, EndLine: changedLine, ExistingCode: reviewed, Content: draft})
+			a.args.CommentCollector.Add(draft)
 		}
 		a.inputResolution.ResolvedBase = base.Commit
 		g := FileGroup{Diffs: []model.Diff{change}}
@@ -973,7 +1001,8 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 			}
 			if err := json.Unmarshal([]byte(payload), &request); err != nil || len(request.Proposals) != 2 ||
 				request.Proposals[0].Assertion != nil || request.Proposals[0].Premise != check.SourceQuote ||
-				request.Proposals[1].Premise != presence || request.Proposals[1].Assertion == nil {
+				request.Proposals[1].Premise != withSetup || request.Proposals[1].Assertion == nil ||
+				len(request.Proposals[1].Assertion.Predicates) != 1 || strings.TrimSpace(request.Proposals[1].Assertion.Predicates[0].Quote) != presence {
 				t.Fatalf("the selected premises did not reach their own outcome checks: %s", payload)
 			}
 			if separateRoutine {
@@ -986,13 +1015,33 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 		} else if len(tasks[session.BusinessRefutationTask]) != 1 {
 			t.Fatal("ordinary findings did not reach independent reassessment")
 		}
-		if len(comments) != 1 || !strings.Contains(comments[0].Content, realFinding) {
+		if !includeLimit && len(decisions) == 0 {
+			if !slices.Equal(comments, drafts) {
+				t.Fatalf("the inferred caller rule changed an ordinary finding: %+v", comments)
+			}
+		} else if len(comments) != 1 || !strings.Contains(comments[0].Content, realFinding) {
 			t.Fatalf("expected just the verified 12-item regression; published %+v", comments)
 		}
 	}
-	t.Run("a declaration after the test verifies the export", func(t *testing.T) { run(t, true, false, false) })
-	t.Run("a test after a declaration still needs its own outcome", func(t *testing.T) { run(t, true, true, false) })
-	t.Run("a different producing function still gets an outcome check", func(t *testing.T) { run(t, true, false, true) })
-	t.Run("only independent counterevidence withdraws a finding", func(t *testing.T) { run(t, false, false, false) })
-	t.Run("a secondary weak test cannot withdraw an ordinary finding", func(t *testing.T) { run(t, false, true, false) })
+	t.Run("a declaration after the test verifies the export", func(t *testing.T) { run(t, true, false, false, "") })
+	t.Run("a test after a declaration still needs its own outcome", func(t *testing.T) { run(t, true, true, false, "") })
+	t.Run("a different producing function still gets an outcome check", func(t *testing.T) { run(t, true, false, true, "") })
+	t.Run("own implementation evidence cannot withdraw an ordinary finding", func(t *testing.T) { run(t, false, false, false, "") })
+	t.Run("a secondary weak test cannot withdraw an ordinary finding", func(t *testing.T) { run(t, false, true, false, "") })
+	t.Run("the None decision cannot dismiss a twelve-item export", func(t *testing.T) {
+		witness, err := base.Cite(ctx, callee, 4, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decision := knowledge.Fact{ReviewID: "export-review", Revision: base.Commit, Scope: callee, Source: callee,
+			Finding: falseFinding, Reason: "An export with no items calls width(None) and returns the fallback of eight.",
+			Citations: []knowledge.Citation{witness}}
+		// Both independent verdicts cite the same branch at the same reviewed
+		// line. Only the None verdict has the recorded decision for its input.
+		run(t, false, false, false, missing, decision)
+	})
+	t.Run("a colocated test is not production counterevidence", func(t *testing.T) { run(t, false, false, false, siblingTest) })
+	t.Run("an unrelated production function cannot disprove an export result", func(t *testing.T) {
+		run(t, false, false, false, previewReturn)
+	})
 }
