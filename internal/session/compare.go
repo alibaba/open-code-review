@@ -113,6 +113,10 @@ func matchContainedSnippet(before model.LlmComment, after []model.LlmComment, in
 	if beforeText == "" {
 		return -1
 	}
+	beforeSnippet := normalizeSnippet(before.ExistingCode)
+	beforeLines := normalizedLines(before.ExistingCode)
+	beforeRunes := utf8.RuneCountInString(beforeSnippet)
+
 	best := -1
 	bestLengthDelta := 0
 	bestLineDelta := 0
@@ -124,11 +128,13 @@ func matchContainedSnippet(before model.LlmComment, after []model.LlmComment, in
 		if normalizeSnippet(candidate.Content) != beforeText {
 			continue
 		}
-		if !lineBlockContains(candidate.ExistingCode, before.ExistingCode) &&
-			!lineBlockContains(before.ExistingCode, candidate.ExistingCode) {
+		candidateSnippet := normalizeSnippet(candidate.ExistingCode)
+		candidateLines := normalizedLines(candidate.ExistingCode)
+		if !lineBlockContainsPrepared(candidateLines, beforeLines, beforeSnippet) &&
+			!lineBlockContainsPrepared(beforeLines, candidateLines, candidateSnippet) {
 			continue
 		}
-		lengthDelta := absInt(len(normalizeSnippet(candidate.ExistingCode)) - len(normalizeSnippet(before.ExistingCode)))
+		lengthDelta := absInt(utf8.RuneCountInString(candidateSnippet) - beforeRunes)
 		lineDelta := absInt(candidate.StartLine - before.StartLine)
 		if best < 0 || lengthDelta < bestLengthDelta ||
 			(lengthDelta == bestLengthDelta && lineDelta < bestLineDelta) {
@@ -149,11 +155,16 @@ const minContainedSnippetChars = 24
 // normalized lines in outer. Partial-line overlap is deliberately excluded:
 // it is too easy for a common expression to appear inside unrelated code.
 func lineBlockContains(outer, inner string) bool {
-	if utf8.RuneCountInString(normalizeSnippet(inner)) < minContainedSnippetChars {
+	return lineBlockContainsPrepared(normalizedLines(outer), normalizedLines(inner), normalizeSnippet(inner))
+}
+
+// lineBlockContainsPrepared is the allocation-aware form used by the
+// containment scan: innerSnippet must be normalizeSnippet(inner), and the line
+// slices must come from normalizedLines.
+func lineBlockContainsPrepared(outerLines, innerLines []string, innerSnippet string) bool {
+	if utf8.RuneCountInString(innerSnippet) < minContainedSnippetChars {
 		return false
 	}
-	outerLines := normalizedLines(outer)
-	innerLines := normalizedLines(inner)
 	if len(innerLines) == 0 || len(innerLines) >= len(outerLines) {
 		return false
 	}
