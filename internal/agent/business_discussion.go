@@ -307,13 +307,15 @@ func (b businessContext) assessedChecks(checks []businessCheck, rows []discussio
 			}
 			found, separate := false, len(cases[key]) > 0
 			for _, other := range cases[key] {
-				if strings.TrimSpace(a.Input) != strings.TrimSpace(other.Input) {
-					left, right := a.operation[0], a.operation[1]
-					otherLeft, otherRight := other.operation[0], other.operation[1]
-					separate = separate && left > 0 && otherLeft > 0 && (right < otherLeft || otherRight < left)
+				left, right := a.operation[0], a.operation[1]
+				otherLeft, otherRight := other.operation[0], other.operation[1]
+				if left > 0 && otherLeft > 0 && (right < otherLeft || otherRight < left) {
 					continue
 				}
 				separate = false
+				if strings.TrimSpace(a.Input) != strings.TrimSpace(other.Input) {
+					continue
+				}
 				found = true
 				// Two sources may constrain different outputs of one call.
 				// Opposite outcomes for the same output cannot establish a

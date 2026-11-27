@@ -430,3 +430,74 @@ func TestDiscussionStaticImportDisambiguatesSameNameAndSurvivesUnrelatedAddition
 		})
 	}
 }
+
+func TestGoDiscussionImportVerifiesUnsampledPackageSiblings(t *testing.T) {
+	r := newDiscoveryRepo(t)
+	const caller, definition, sibling = "api/dispatch.go", "policy/batch.go", "policy/support.go"
+	const entry = "package api\nimport chosen \"example.test/dispatch/policy\"\nfunc dispatch(n int) int { return chosen.BatchSize(n) }\n"
+	r.write("go.mod", "module example.test/dispatch\n")
+	r.write(caller, entry)
+	r.write(definition, "package policy\nfunc BatchSize(n int) int { return n + 1 }\n")
+	r.write(sibling, "package policy\ntype Plan struct{}\nfunc (Plan) BatchSize() int { return 2 }\n")
+	priority := []string{caller, definition}
+	for i := range discoveryFiles - len(priority) {
+		p := fmt.Sprintf("api/utility%02d.go", i)
+		r.write(p, "package api\n")
+		priority = append(priority, p)
+	}
+	base := r.commit("sample one definition in a multi-file imported package")
+	note := namedDiscussion(caller, "chosen.BatchSize", base.Commit)
+	discover := func(paths []string, admitted, omitted string, filter *rules.FileFilter) Fact {
+		t.Helper()
+		opts := DiscoverOptions{Paths: paths, Discussions: []Discussion{note}, FileFilter: filter}
+		result, err := base.Discover(t.Context(), opts, func(_ context.Context, _ string, corpus string) (string, error) {
+			if !strings.Contains(corpus, admitted) || strings.Contains(corpus, omitted) {
+				t.Fatalf("fixture did not sample %s and omit %s: %s", admitted, omitted, corpus)
+			}
+			return `{"records":[]}`, nil
+		})
+		if err != nil || len(result.DiscussionSources) != 1 {
+			t.Fatalf("missing discussion: %+v, %v", result.DiscussionSources, err)
+		}
+		return result.DiscussionSources[0]
+	}
+	raw := discover(priority, definition, sibling, nil)
+	witness := func(tree Tree) []Citation {
+		t.Helper()
+		return namedWitnessesIn(ReviewSnapshot(checkedFacts(t, tree, []Fact{raw})), caller)
+	}
+	if got := witness(base); len(got) != 1 || got[0].Path != definition || got[0].Symbol != "chosen.BatchSize" {
+		t.Fatalf("unsampled sibling prevented the package binding: %+v", got)
+	}
+	withoutDefinition := slices.Clone(priority)
+	withoutDefinition[1] = sibling
+	if got := discover(withoutDefinition, sibling, definition, nil); got.DiscussionBindings != nil {
+		t.Fatalf("unsampled definition was admitted: %+v", got.DiscussionBindings)
+	}
+	if got := discover(priority, definition, sibling, &rules.FileFilter{Exclude: []string{sibling}}); got.DiscussionBindings != nil {
+		t.Fatalf("uniqueness inferred through an excluded sibling: %+v", got.DiscussionBindings)
+	}
+	workspace := base
+	workspace.Workspace = true
+	if got := witness(workspace); len(got) != 1 || got[0].Path != definition {
+		t.Fatalf("working package omitted its actual definition: %+v", got)
+	}
+	for _, tc := range []struct{ name, source string }{
+		{"ambiguous", "package policy\nfunc BatchSize(n int) int { return 8 }\n"},
+		{"unavailable body", "package policy\nfunc BatchSize(n int) int\n"},
+		{"unparseable", "package policy\nfunc incomplete(\n"},
+		{"credential-shaped text", "package policy\nvar api_key = \"placeholderCredential\"\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r.write(sibling, tc.source)
+			if got := witness(workspace); len(got) != 0 {
+				t.Fatalf("binding retained despite %s sibling: %+v", tc.name, got)
+			}
+		})
+	}
+	r.write(sibling, "package policy\nfunc BatchSize(n int) int { return 8 }\n")
+	head := r.commit("add a competing package-level declaration")
+	if got := witness(head); len(got) != 0 {
+		t.Fatalf("commit binding retained despite two package members: %+v", got)
+	}
+}

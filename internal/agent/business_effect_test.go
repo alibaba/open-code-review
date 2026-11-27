@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/knowledge"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func TestBusinessEffectChecksTheFunctionThatProducesTheOutcome(t *testing.T) {
@@ -65,6 +67,91 @@ func TestBusinessEffectChecksTheFunctionThatProducesTheOutcome(t *testing.T) {
 	}
 }
 
+func TestBusinessEffectVerifiesTheOutcomeWithAModuleDeclaration(t *testing.T) {
+	const file, premise = "billing.go", "const ceiling = 100"
+	const function = "func approved(amount int) int {\n\tif amount > ceiling { return 0 }\n\treturn amount\n}"
+	const source = "package billing\n" + premise + "\n" + function + "\n"
+	const patch = "@@ -4 +4 @@\n-\tif amount > ceiling { return ceiling }\n+\tif amount > ceiling { return 0 }"
+	changes := []model.Diff{{NewPath: file, NewFileContent: source, Diff: patch}}
+	for _, tc := range []struct {
+		name, sourceQuote, verdict, output string
+		line                               int
+		called, kept                       bool
+	}{
+		{"confirmed", premise, "confirmed", "if amount > ceiling { return 0 }", 4, true, true},
+		{"refuted", premise, "refuted", "if amount > ceiling { return 0 }", 4, true, false},
+		{"outcome cites only the declaration", premise, "confirmed", premise, 2, true, false},
+		{"invented declaration", "const ceiling = 120", "confirmed", "if amount > ceiling { return 0 }", 4, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"checks": []map[string]any{{"id": "e-0", "verdict": tc.verdict, "input": "an amount of 150",
+				"expected": "100", "before": "100", "after": "0", "reason": "The changed branch returns zero above the ceiling.",
+				"output_path": file, "output_line": tc.line, "output_quote": tc.output}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reply := string(body)
+			client := &fakeAgentClient{responses: []*llm.ChatResponse{{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &reply}}}}}}
+			a := New(Args{RepoDir: t.TempDir(), LLMClient: client, Template: template.Template{MaxTokens: 16000}})
+			ordinary := model.LlmComment{Path: file, StartLine: 4, Content: "An existing ordinary review issue."}
+			a.args.CommentCollector.Add(ordinary)
+			addition := businessAddition{LlmComment: model.LlmComment{Path: file, StartLine: 4, Content: "Amounts above the ceiling now return zero."},
+				check: businessCheck{Path: file, SourcePath: file, SourceQuote: tc.sourceQuote, Reason: "Amounts above the ceiling now return zero."}}
+			got := a.verifyBusinessEffects(t.Context(), "billing", changes, []businessAddition{addition})
+			keptOrdinary := a.args.CommentCollector.CommentsForPath(file)
+			if (len(got) == 1) != tc.kept || len(keptOrdinary) != 1 || keptOrdinary[0].Content != ordinary.Content {
+				t.Fatalf("additions = %+v, ordinary = %+v", got, keptOrdinary)
+			}
+			calls := a.session.GetOrCreateFileSession("billing").TaskRecords[session.BusinessEffectTask]
+			wantCalls := 0
+			if tc.called {
+				wantCalls = 1
+			}
+			if len(calls) != wantCalls || client.calls != wantCalls {
+				t.Fatalf("verification calls = %d, client calls = %d", len(calls), client.calls)
+			}
+			if !tc.called {
+				return
+			}
+			var payload struct {
+				Proposals    []effectInput        `json:"proposals"`
+				Functions    []knowledge.Citation `json:"functions"`
+				Declarations []knowledge.Citation `json:"declarations"`
+				Patches      map[string]string    `json:"patches"`
+			}
+			if err := json.Unmarshal([]byte(calls[0].RequestMessages[1].ExtractText()), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if len(payload.Proposals) != 1 || len(payload.Functions) != 1 || len(payload.Declarations) != 1 || payload.Patches[file] != patch ||
+				payload.Functions[0].Quote != function || payload.Declarations[0].Quote != premise || payload.Declarations[0].StartLine != 2 {
+				t.Fatalf("incomplete verifier evidence: %+v", payload)
+			}
+			p := payload.Proposals[0]
+			if len(p.Routines) != 1 || p.Routines[0] != 0 || p.Declaration == nil || *p.Declaration != 0 {
+				t.Fatalf("incorrect proposal evidence indices: %+v", p)
+			}
+		})
+	}
+}
+
+func TestJavaScriptBusinessEffectWithRegularExpressionReachesVerifier(t *testing.T) {
+	const path = "billing.js"
+	const source = "const brackets = /[)]/g;\n" +
+		"function amount(total, rejected) {\n  return total - rejected;\n}\n" +
+		"function receipt(total, rejected) {\n  return amount(total, rejected) * 2;\n}\n"
+	const response = `{"checks":[{"id":"e-0","verdict":"confirmed","input":"total=10,rejected=4","expected":"6","before":"6","after":"12","reason":"The receipt doubles the approved amount.","output_path":"billing.js","output_line":6,"output_quote":"return amount(total, rejected) * 2;"}]}`
+	reply := response
+	client := &fakeAgentClient{responses: []*llm.ChatResponse{{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &reply}}}}}}
+	a := New(Args{RepoDir: t.TempDir(), LLMClient: client, Template: template.Template{MaxTokens: 16000}})
+	addition := businessAddition{LlmComment: model.LlmComment{Path: path, StartLine: 6, Content: "The receipt doubles the approved amount."},
+		check: businessCheck{Path: path, SourcePath: path, SourceQuote: "return total - rejected;", Reason: "The receipt doubles the approved amount."}}
+	changes := []model.Diff{{NewPath: path, NewFileContent: source,
+		Diff: "@@ -6 +6 @@\n-  return amount(total, rejected);\n+  return amount(total, rejected) * 2;"}}
+	if got := a.verifyBusinessEffects(t.Context(), "billing", changes, []businessAddition{addition}); len(got) != 1 || client.calls != 1 {
+		t.Fatalf("additions = %+v, verifier calls = %d", got, client.calls)
+	}
+}
+
 func TestUnlocatedBusinessEffectsPreserveOrdinaryReview(t *testing.T) {
 	const file = "billing.js"
 	const premise = "  return total - rejected;"
@@ -73,10 +160,11 @@ func TestUnlocatedBusinessEffectsPreserveOrdinaryReview(t *testing.T) {
 	for _, tc := range []struct{ name, content string }{
 		{"unavailable full file", ""},
 		{"ambiguous premise", regularExpression + "function second(total, rejected) {\n" + premise + "\n}\n"},
-		{"unavailable function boundaries", regularExpression},
+		{"unavailable function boundaries", strings.TrimSuffix(regularExpression, "}\n")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			client := &fakeAgentClient{}
+			reply := `{"checks":[]}`
+			client := &fakeAgentClient{responses: []*llm.ChatResponse{{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &reply}}}}}}
 			a := New(Args{RepoDir: t.TempDir(), LLMClient: client, Template: template.Template{MaxTokens: 16000}})
 			original := model.LlmComment{Path: file, StartLine: 5, Content: "Another issue in the ordinary review."}
 			a.args.CommentCollector.Add(original)

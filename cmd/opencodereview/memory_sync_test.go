@@ -31,7 +31,7 @@ func TestMemorySearchUsesTheDiscussionEditionAtTheReviewTime(t *testing.T) {
 	const late = "2025-04-01T00:00:00Z"
 	notes := []knowledge.Discussion{
 		{ID: "timing", Path: source, UpdatedAt: early, Body: "Keep the shipment pending."},
-		{ID: "timing", Path: source, UpdatedAt: late, Body: "Release the shipment immediately."},
+		{ID: "timing", Path: source, UpdatedAt: late, Body: "Release the shipment immediately. M\u00f6glich."},
 	}
 	result, err := tree.Discover(t.Context(), knowledge.DiscoverOptions{Discussions: notes}, func(context.Context, string, string) (string, error) {
 		return `{"records":[]}`, nil
@@ -44,8 +44,20 @@ func TestMemorySearchUsesTheDiscussionEditionAtTheReviewTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Save(t.Context(), result.DiscussionSources); err != nil {
-		t.Fatal(err)
+	// Persist the original first, as in separate imports, so only its text
+	// occupies the immutable fact_search row for this external source ID.
+	for _, stamp := range []string{early, late} {
+		for _, f := range result.DiscussionSources {
+			if f.ObservedAt == stamp {
+				if err := store.Save(t.Context(), []knowledge.Fact{f}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	lateCutoff, _ := time.Parse(time.RFC3339, late)
+	if matches, err := store.ListAt(t.Context(), "", "M\u00d6GLICH", lateCutoff); err != nil || len(matches) == 0 {
+		t.Fatalf("case-insensitive search did not locate the edited discussion: %v %v", matches, err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -53,6 +65,7 @@ func TestMemorySearchUsesTheDiscussionEditionAtTheReviewTime(t *testing.T) {
 	for _, tc := range []struct{ at, search, body string }{
 		{early, "PENDING", notes[0].Body}, {early, "immediately", ""},
 		{late, "pending", ""}, {late, "immediately", notes[1].Body}, {late, source, notes[1].Body},
+		{early, "M\u00d6GLICH", ""}, {late, "M\u00d6GLICH", notes[1].Body},
 	} {
 		c := newMemoryCommand()
 		var out bytes.Buffer
@@ -67,6 +80,82 @@ func TestMemorySearchUsesTheDiscussionEditionAtTheReviewTime(t *testing.T) {
 		}
 		if tc.body == "" && len(records) != 0 || tc.body != "" && (len(records) != 1 || records[0].DiscussionBody != tc.body) {
 			t.Errorf("search for %q at %s returned %+v", tc.search, tc.at, records)
+		}
+	}
+}
+
+func TestMemorySyncHistoricalSchemaRetainsWithdrawal(t *testing.T) {
+	ctx := t.Context()
+	startFakeLLM(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"schema","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"{\"records\":[]}"}],"stop_reason":"end_turn"}`)
+	}))
+	repo := initResumeRepo(t)
+	commitFile(t, repo, "delivery.go", "package delivery\nfunc ship() {}\n", "deliver packages")
+	commitFile(t, repo, "policy.json", `{"properties":{"window":{"const":12}}}`, "set dispatch window")
+	base := revParse(t, repo, "HEAD")
+	commitFile(t, repo, "policy.json", `{"properties":{"window":{"const":24}}}`, "change dispatch window")
+	head := revParse(t, repo, "HEAD")
+	for _, treeClock := range []bool{false, true} {
+		db := filepath.Join(t.TempDir(), "withdrawal.db")
+		memory := func(args ...string) []byte {
+			t.Helper()
+			var out bytes.Buffer
+			cmd := newMemoryCommand()
+			cmd.SetOut(&out)
+			cmd.SetArgs(append([]string{"--repo", repo, "--memory-db", db}, args...))
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("%v: %v", args, err)
+			}
+			return out.Bytes()
+		}
+		var old []knowledge.Fact
+		if err := json.Unmarshal(memory("learn", "policy.json", "--scope", "delivery.go", "--ref", base), &old); err != nil || len(old) != 1 {
+			t.Fatalf("learn returned %v: %v", old, err)
+		}
+		stamp := time.Now().UTC()
+		memory("revoke", old[0].ID)
+		if treeClock {
+			cc, err := loadCommonContext(repo, "", head, 0, 0, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{Context: ctx})
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := openMemory(ctx, db, repo, cc.GitRunner, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tree := knowledge.Tree{Repo: repo, Git: cc.GitRunner, Commit: head, Now: stamp}
+			_, err = syncKnowledge(ctx, store, tree, cc, rt, knowledge.DiscoverOptions{}, nil, nil)
+			if closeErr := store.Close(); closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			for range 2 {
+				memory("sync", "--ref", head, "--as-of", stamp.Format(time.RFC3339Nano))
+			}
+		}
+		var then []knowledge.Checked
+		if err := json.Unmarshal(memory("list", "--ref", head, "--as-of", stamp.Format(time.RFC3339Nano)), &then); err != nil {
+			t.Fatal(err)
+		}
+		values := map[string]string{}
+		for _, c := range then {
+			values[string(c.Value)] = c.Status
+		}
+		if values["12"] != knowledge.StatusChanged || values["24"] != knowledge.StatusVerified {
+			t.Errorf("tree clock %v: historical window did not refresh: %v", treeClock, values)
+		}
+		memory("sync", "--ref", head)
+		var now []knowledge.Checked
+		if err := json.Unmarshal(memory("list", "--ref", head), &now); err != nil || len(now) != 0 {
+			t.Fatalf("tree clock %v: historical replay revived a withdrawn mapping: %v, %v", treeClock, now, err)
 		}
 	}
 }
@@ -86,7 +175,7 @@ func TestMemorySyncRefreshesOlderDiscussionReceipts(t *testing.T) {
 		}
 		if bytes.Contains(body, []byte("Extract repository knowledge")) {
 			extractions.Add(1)
-			if !bytes.Contains(body, []byte(first)) || !bytes.Contains(body, []byte(second)) || bytes.Contains(body, []byte("proposed*2")) {
+			if !bytes.Contains(body, []byte(first)) || !bytes.Contains(body, []byte(second)) || bytes.Contains(body, []byte("proposed*2")) || bytes.Contains(body, []byte("omitted-value-123456")) {
 				t.Error("wrong accepted-side discovery corpus")
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -280,6 +369,72 @@ func TestMemorySyncRefreshesOlderDiscussionReceipts(t *testing.T) {
 	if extractions.Load() != 2 || !reviewedBoth.Load() {
 		t.Fatalf("ordinary review did not receive both independent original notes after empty extraction: %d extractions, visible=%t", extractions.Load(), reviewedBoth.Load())
 	}
+	t.Run("v6 scoped pathless update", func(t *testing.T) {
+		old := knowledge.Discussion{ID: "dispatch-slot", Body: "Dispatch after the slot opens.", UpdatedAt: notes[0].UpdatedAt}
+		edit := old
+		edit.Body, edit.UpdatedAt = "api_key = 'omitted-value-123456'", notes[1].UpdatedAt
+		historical := knowledge.DiscoverOptions{Scope: path, AsOf: cutoff, Discussions: []knowledge.Discussion{old}, FileFilter: cc.FileFilter}
+		original, err := tree.Discover(ctx, historical, func(context.Context, string, string) (string, error) { return `{"records":[]}`, nil })
+		if err != nil || len(original.DiscussionSources) != 1 {
+			t.Fatalf("missing original binding: %+v, %v", original, err)
+		}
+		historical.Discussions = append([]knowledge.Discussion{notes[0], notes[1], old}, edit)
+		historical.FocusLines = map[string][]int{}
+		scopeArchive := filepath.Join(root, "scoped-notes.json")
+		data, err := json.Marshal(historical.Discussions)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(scopeArchive, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		v6, err := json.Marshal(struct {
+			Version, Revision, Provider, Model string
+			Live                               bool
+			Options                            knowledge.DiscoverOptions
+			Sources                            []string
+		}{"business-discovery-v6", base, rt.Provider, rt.Model, false, historical, []string{scopeArchive}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		database := filepath.Join(root, "v6-scoped.db")
+		oldStore, err := openMemory(ctx, database, repo, cc.GitRunner, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := oldStore.SaveDiscovery(ctx, knowledge.Digest(v6), original.DiscussionObservations()); err != nil {
+			t.Fatal(err)
+		}
+		if err := oldStore.Close(); err != nil {
+			t.Fatal(err)
+		}
+		for _, cached := range []bool{false, true} {
+			var report memorySyncReport
+			if err := json.Unmarshal(memory(database, "sync", "--ref", base, "--scope", path, "--discussions", scopeArchive, "--as-of", cutoff.Format(time.RFC3339)), &report); err != nil || report.Cached != cached {
+				t.Fatalf("v6 replay cached=%t: %+v, %v", cached, report, err)
+			}
+		}
+		upgraded, err := openMemory(ctx, database, repo, cc.GitRunner, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v7 := bytes.Replace(v6, []byte("business-discovery-v6"), []byte("business-discovery-v7"), 1)
+		if found, err := upgraded.Scanned(ctx, knowledge.Digest(v7)); err != nil || !found {
+			t.Fatalf("upgraded receipt did not match the original inputs: %t, %v", found, err)
+		}
+		if err := upgraded.Close(); err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			at     string
+			active bool
+		}{{old.UpdatedAt, true}, {edit.UpdatedAt, false}} {
+			records := memory(database, "list", "--ref", base, "--as-of", tc.at)
+			if bytes.Contains(records, []byte(old.Body)) != tc.active || bytes.Contains(records, []byte("omitted-value")) {
+				t.Fatalf("v6 source after upgrade at %s: %s", tc.at, records)
+			}
+		}
+	})
 }
 
 func TestLiveDiscussionReceiptChangesAtVisibilityBoundary(t *testing.T) {

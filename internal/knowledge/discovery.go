@@ -24,14 +24,15 @@ import (
 type Extractor func(ctx context.Context, instructions, corpus string) (string, error)
 
 type DiscoverOptions struct {
-	Scope       string
-	Paths       []string         // Prefer these current files when refreshing earlier observations.
-	FocusLines  map[string][]int // Line numbers on the accepted side of a change.
-	AsOf        time.Time        // Latest admissible discussion edit in a replay.
-	Discussions []Discussion
-	FileFilter  *rules.FileFilter
-	allowPath   func(string) bool
-	exports     map[string]bool
+	Scope          string
+	Paths          []string         // Prefer these current files when refreshing earlier observations.
+	FocusLines     map[string][]int // Line numbers on the accepted side of a change.
+	AsOf           time.Time        // Latest admissible discussion edit in a replay.
+	Discussions    []Discussion
+	FileFilter     *rules.FileFilter
+	allowPath      func(string) bool
+	exports        map[string]bool
+	discussionFile string // Explicit file scope for supplied pathless discussions.
 }
 
 type DiscoveryResult struct {
@@ -44,7 +45,11 @@ type DiscoveryResult struct {
 	Rejected          int            `json:"rejected"`
 	RejectionReasons  []string       `json:"rejection_reasons,omitempty"`
 	discussionNotices []Fact
+	retryLanding      bool
 }
+
+// Cacheable reports whether all attempted provider reads finished.
+func (r DiscoveryResult) Cacheable() bool { return !r.retryLanding }
 
 // DiscussionObservations also retains edit dates and exact-edition deadlines
 // needed to recheck records that already cite these discussions.
@@ -52,13 +57,20 @@ func (r DiscoveryResult) DiscussionObservations() []Fact {
 	return append(slices.Clone(r.DiscussionSources), r.discussionNotices...)
 }
 
-func (r *DiscoveryResult) withholdEdition(revision string, d Discussion, scope string) {
-	if d.UpdatedAt != "" && d.Path != "" {
-		f := Fact{ID: discussionSourceID(d.ID), Revision: revision, ObservedAt: d.UpdatedAt, Origin: "discovery", discussionNotice: noticeUnavailable}
-		if scope != "" {
-			f.editionScopeDigest = Digest([]byte(scope))
-		}
-		r.discussionNotices = append(r.discussionNotices, f)
+func (r *DiscoveryResult) withholdEdition(revision string, d Discussion, scopeDigest string) {
+	if d.UpdatedAt != "" {
+		r.discussionNotices = append(r.discussionNotices, Fact{ID: discussionSourceID(d.ID), Revision: revision,
+			ObservedAt: d.UpdatedAt, Origin: "discovery", discussionNotice: noticeUnavailable, editionScopeDigest: scopeDigest})
+	}
+}
+
+func (r *DiscoveryResult) withholdFilteredEdition(revision string, d Discussion, fileScope string) {
+	if d.Path != "" {
+		r.withholdEdition(revision, d, "")
+	} else if fileScope != "" {
+		// The user bound this pathless input to one file. A directory with
+		// the same name in another revision does not bind its descendants.
+		r.withholdEdition(revision, d, exactDiscussionScope(fileScope))
 	}
 }
 
@@ -83,16 +95,17 @@ func (r *DiscoveryResult) limit(reason string) {
 }
 
 type discoverySource struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	Path       string `json:"path,omitempty"`
-	Revision   string `json:"revision,omitempty"`
-	Reference  string `json:"reference,omitempty"`
-	URL        string `json:"url,omitempty"`
-	ObservedAt string `json:"observed_at,omitempty"`
-	ExpiresAt  string `json:"expires_at,omitempty"`
-	StartLine  int    `json:"start_line"`
-	Text       string `json:"text"`
+	ID         string             `json:"id"`
+	Kind       string             `json:"kind"`
+	Path       string             `json:"path,omitempty"`
+	Revision   string             `json:"revision,omitempty"`
+	Reference  string             `json:"reference,omitempty"`
+	URL        string             `json:"url,omitempty"`
+	ObservedAt string             `json:"observed_at,omitempty"`
+	ExpiresAt  string             `json:"expires_at,omitempty"`
+	Landing    *DiscussionLanding `json:"landing,omitempty"`
+	StartLine  int                `json:"start_line"`
+	Text       string             `json:"text"`
 	digest     string
 }
 
@@ -394,6 +407,6 @@ func (q discoveryQuote) cite(sources map[string]discoverySource) (Citation, erro
 	if match < 0 {
 		return Citation{}, errors.New("quotation differs from supplied source lines")
 	}
-	return Citation{Kind: s.Kind, Path: s.Path, Revision: s.Revision, Reference: s.Reference, URL: s.URL, ObservedAt: s.ObservedAt, Digest: s.digest,
+	return Citation{Kind: s.Kind, Path: s.Path, Revision: s.Revision, Reference: s.Reference, URL: s.URL, ObservedAt: s.ObservedAt, Digest: s.digest, Landing: s.Landing,
 		StartLine: s.StartLine + match, EndLine: s.StartLine + match + width - 1, Quote: strings.Join(lines[match:match+width], "\n")}, nil
 }

@@ -176,15 +176,11 @@ func reviewMemory(ctx context.Context, cc *commonContext, opts reviewOptions, co
 	if err != nil {
 		return nil, err
 	}
-	tree := knowledge.Tree{Repo: cc.RepoDir, Git: cc.GitRunner, Commit: code.resolution.ResolvedHead, Workspace: code.reader.Mode == tool.ModeWorkspace, Now: opts.memoryTime}
+	tree := reviewMemoryTree(cc, opts, code)
 	if cc.FileFilter != nil {
 		facts = slices.DeleteFunc(facts, func(f knowledge.Fact) bool {
 			return cc.FileFilter.IsUserExcluded(f.Scope) || slices.ContainsFunc(f.EvidencePaths(), cc.FileFilter.IsUserExcluded)
 		})
-		tree.AllowPath = func(p string) bool { return !cc.FileFilter.IsUserExcluded(p) }
-	}
-	if tree.Workspace {
-		tree.Commit = code.resolution.ResolvedBase
 	}
 	checked, err := tree.CheckReview(ctx, code.resolution.ResolvedBase, facts)
 	if err != nil {
@@ -197,4 +193,15 @@ func reviewMemory(ctx context.Context, cc *commonContext, opts reviewOptions, co
 		return nil, err
 	}
 	return snapshot, nil
+}
+
+func reviewMemoryTree(cc *commonContext, opts reviewOptions, code *reviewCodeTools) knowledge.Tree {
+	tree := knowledge.Tree{Repo: cc.RepoDir, Git: cc.GitRunner, Commit: code.resolution.ResolvedHead, Workspace: code.reader.Mode == tool.ModeWorkspace, Now: opts.memoryTime}
+	if tree.Workspace {
+		tree.Commit = code.resolution.ResolvedBase
+	}
+	if cc.FileFilter != nil {
+		tree.AllowPath = func(p string) bool { return !cc.FileFilter.IsUserExcluded(p) }
+	}
+	return tree
 }

@@ -163,21 +163,38 @@ func syncKnowledge(ctx context.Context, store *knowledge.Store, tree knowledge.T
 		tree.AllowPath = func(p string) bool { return !cc.FileFilter.IsUserExcluded(p) }
 	}
 	now := time.Now().UTC()
-	tree.Now = now
+	cutoff := opts.AsOf
+	if cutoff.IsZero() {
+		cutoff = tree.Now
+	}
+	if cutoff.IsZero() && budget == nil {
+		var err error
+		cutoff, err = tree.HistoricalDiscussionCutoff(ctx)
+		if err != nil {
+			return out, err
+		}
+	}
+	tree.Now = cutoff
+	if tree.Now.IsZero() {
+		tree.Now = now
+	}
 	version, nextEdit := "business-discovery-v2", ""
 	if len(opts.Discussions) != 0 {
 		version = "business-discovery-v6"
-		if budget == nil && opts.AsOf.IsZero() {
-			// Checking out this very commit later changes an implicit
-			// historical sync into a live one with newly eligible edits.
-			var err error
-			opts.AsOf, err = tree.HistoricalDiscussionCutoff(ctx)
-			if err != nil {
-				return out, err
-			}
+		if opts.Scope != "" && opts.Scope != "." && slices.ContainsFunc(opts.Discussions, func(d knowledge.Discussion) bool { return d.Path == "" }) {
+			// V6 omitted a retirement notice when a pathless edition was
+			// ineligible at an explicitly selected file.
+			version = "business-discovery-v7"
 		}
+		opts.AsOf = cutoff
 		if opts.AsOf.IsZero() {
 			nextEdit = nextDiscussionEdit(opts.Discussions, now)
+		}
+	}
+	var landings []string
+	for _, d := range opts.Discussions {
+		if key := d.LandingReceipt(tree.Now); key != "" {
+			landings = append(landings, key)
 		}
 	}
 	keyData, err := json.Marshal(struct {
@@ -185,13 +202,14 @@ func syncKnowledge(ctx context.Context, store *knowledge.Store, tree knowledge.T
 		Live                               bool
 		Options                            knowledge.DiscoverOptions
 		Sources                            []string
-		NextEdit                           string `json:",omitempty"`
-	}{Version: version, Revision: tree.Commit, Provider: rt.Provider, Model: rt.Model, Live: budget != nil, Options: opts, Sources: sources, NextEdit: nextEdit})
+		NextEdit                           string   `json:",omitempty"`
+		Landings                           []string `json:",omitempty"`
+	}{Version: version, Revision: tree.Commit, Provider: rt.Provider, Model: rt.Model, Live: budget != nil, Options: opts, Sources: sources, NextEdit: nextEdit, Landings: landings})
 	if err != nil {
 		return out, err
 	}
 	key := knowledge.Digest(keyData)
-	previous, err := store.List(ctx, "", "")
+	previous, err := store.ListAt(ctx, "", "", tree.Now)
 	if err != nil {
 		return out, err
 	}
@@ -260,6 +278,9 @@ func syncKnowledge(ctx context.Context, store *knowledge.Store, tree knowledge.T
 	out.Sources, out.Rejected, out.Truncated, out.Facts = result.Sources, result.Rejected, result.Truncated, len(result.Facts)
 	out.SourceKinds, out.Limits, out.RejectionReasons = result.SourceKinds, result.Limits, result.RejectionReasons
 	out.DiscussionSources = len(result.DiscussionSources)
+	if !result.Cacheable() {
+		return out, store.Save(ctx, append(result.Facts, discussionUpdates...))
+	}
 	return out, store.SaveDiscovery(ctx, key, append(result.Facts, discussionUpdates...))
 }
 

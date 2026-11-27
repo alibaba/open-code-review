@@ -55,6 +55,7 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
 	Knowledge       knowledge.Snapshot
+	KnowledgeTree   *knowledge.Tree
 	KnowledgeUsage  *llm.UsageInfo
 	AnalysisEnabled bool
 	// RepoDir is the root of the git repository.
@@ -1094,7 +1095,7 @@ func (a *Agent) ruleConfigSHA256() string {
 	if identity := a.args.Knowledge.Identity(); identity != "" {
 		// A saved single-pass withdrawal has not received the independent
 		// reassessment required by the current review.
-		fields = append(fields, "review-knowledge-v10", identity)
+		fields = append(fields, "review-knowledge-v11", identity)
 	}
 	if cc, ok := a.args.SystemRule.(interface{ CanonicalConfig() []string }); ok {
 		fields = append(fields, cc.CanonicalConfig()...)

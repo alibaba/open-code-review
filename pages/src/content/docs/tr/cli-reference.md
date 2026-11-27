@@ -484,6 +484,8 @@ ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
 
 `sync` koddaki örüntüleri, yapılandırmayı, yakın testleri, önceki dosya sürümlerini ve commit mesajlarını inceler. Her aday kuralın kaynağını, kapsamını ve geçerlilik koşullarını saklar. `--memory-discussions` ile bir GitHub PR bağlantısı, GitLab MR bağlantısı veya dışa aktarılmış bir JSON dosyası ekleyebilirsiniz. Bağlantılar için ilgili depoda oturum açmış bir `gh` veya `glab` istemcisi gerekir. Geçmiş bir incelemeyi yeniden çalıştırırken `memory sync --as-of` ve `review --memory-as-of` için aynı RFC3339 zamanını kullanın.
 
+Squash ile birleştirilen bir istekte OCR, değişikliğin sağ tarafındaki satır yorumunu barındırma hizmetinden doğrular. Alıntılanan kodun hem birleştirme sürümünde hem de incelenen sürümde tek bir yerde bulunması gerekir. Kayıt, yorumun yazıldığı commit ve kaynak satırlarıyla birlikte birleştirme commit'ini ve zamanını saklar. Geçmiş incelemeler bu kaydı birleştirme anından itibaren kullanabilir.
+
 ### Açık kısıtlar ve inceleme kararları {#explicit-constraints-and-decisions}
 
 ```bash
@@ -505,6 +507,8 @@ Yinelenen bulgu bir ifadenin bu değişiklikle eklendiğini öne sürüyorsa de�
 Bir depo dosyasına bağlı tarihli tartışmanın metni, model ondan kural çıkaramadığında da korunur. Anlaşmada bir işlevin adı geçiyorsa OCR güncel tanımını bulabilir ve davranışı açıklayan birkaç ardışık satırı gösterebilir. Ayrıca giriş noktasının hangi yapılandırmayı yüklediğini denetleyebilir. Kanıt ilk yorumdaki belirsizliği giderdiğinde, bağımsız değerlendirme yorumun tamamını inceler ve geri çekilmesine veya doğrulanmış bir bulguyla değiştirilmesine karar verir. Olağan inceleme aynı satırlarda aynı hatayı zaten saptamışsa OCR iki bulguyu karşılaştırır ve ilkini korur.
 
 Çıkarılan bir bulgu değişen dosyadaki iki ayrı işleve dayanıyorsa OCR bildirilen girdi için döndürülen veya kaydedilen değeri denetler. Örneğin faturalama yüzdesi için son hesapta hangi tutarın payda olarak kullanıldığına bakar. İşlevlerin tam tanımları kesin olarak bulunamazsa OCR bir uyarı kaydeder ve olağan incelemenin sonucunu korur. Dışa aktarılan bir kararın bitiş tarihi RFC3339 biçiminde `expires_at` alanıyla verilebilir.
+
+Bir anlaşma giriş noktasını adlandırırken hesaplama başka bir dosyada yer alabilir. OCR değişen çağrının yerel içe aktarımını çözümleyebildiğinde aynı girdinin değişiklikten önceki ve sonraki sonucunu denetler. Bulgu hem anlaşmanın hem de uygulamanın kaynağını gösterir. Olağan bir bulgu geri çekilmeden önce özgün koşulu ve gözlemlenebilir sonucu ayrıca incelenir.
 
 Ajan önce normal kod incelemesini tamamlar. Ardından ilgili kuralları ve güncel kaynak satırlarını kullanarak eksik bir iş kuralı ihlalini arar ve mevcut bulguların dayanaklarını sınar. Bir bulgunun geri çekilmesi için aynı konumdaki iddianın güncel kanıtla çelişmesi gerekir. `--no-filter` mevcut bulguları korur. Bir istisnanın koşulu değişirse önceki incelemenin gerekçesi geçerliliğini yitirir.
 

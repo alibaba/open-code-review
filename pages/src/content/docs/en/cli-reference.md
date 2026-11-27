@@ -600,6 +600,8 @@ ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
 
 OCR samples committed code, configuration, nearby tests, commit messages and earlier file versions at the comparison base. Changed paths and hunk locations help it find relevant code. The proposed implementation is reviewed against that knowledge. Add `--memory-discussions <url-or-file>` to ingest review feedback. GitHub pull requests and GitLab merge requests use the signed-in `gh` or `glab` CLI for a repository remote. Other workflows can supply a JSON array of objects with a stable `id`, a `body`, and optional `path`, `revision`, `url`, `created_at`, `updated_at` and `expires_at`. Use RFC3339 timestamps.
 
+After a squash merge, OCR can recover a right-side inline comment when the hosting service confirms the merge and the quoted lines identify one location in both the landed file and the selected revision. The record keeps the original review revision, source lines, merge revision and merge time. Historical reviews use this evidence from the merge time onward.
+
 To curate a database separately, run discovery on a chosen commit and provide the resulting database read-only to review jobs:
 
 ```bash
@@ -653,6 +655,8 @@ When an imported review discussion identifies which behavior a deployment uses, 
 A dated discussion attached to a repository file remains available even when the extractor derives no rule from it. The reviewer can follow an implementation named by the agreement to its current definition and cite several consecutive lines when a single line omits part of the behavior. It can also check which setting the entry point loads from the current configuration. When that evidence answers a tentative comment, an independent assessment checks the entire original comment before withdrawing it or replacing it with a confirmed finding. If an ordinary finding already diagnoses the same failure on the same lines, OCR checks both findings and keeps the original.
 
 An inferred finding can connect two functions in the same edited file. OCR checks which value the code actually returns or stores for the reported input before adding the finding. For example, a change in an intermediate amount only affects a billing percentage if that amount participates in its calculation. If either function cannot be located unambiguously, OCR records a warning and keeps the ordinary review.
+
+A deployment agreement may name an entry point while a separate file implements the calculation. If a changed call resolves to a supported local import, OCR can trace the same input through the caller, the imported code and the patch. The report cites the agreement and the implementation record. Before withdrawing an ordinary finding, OCR checks its stated condition and observable outcome.
 
 Revocation applies to subsequent runs, including imports of the same
 assertion at another commit. Changed effective evidence invalidates review

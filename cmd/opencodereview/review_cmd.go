@@ -259,6 +259,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	planToolDefs = append(planToolDefs, mcpToolDefs...)
 	mainToolDefs = append(mainToolDefs, mcpToolDefs...)
 
+	var memoryTree *knowledge.Tree
+	if len(memories) != 0 {
+		tree := reviewMemoryTree(cc, opts, codeTools)
+		memoryTree = &tree
+	}
 	ag := agent.New(agent.Args{
 		AnalysisEnabled:       opts.analysis,
 		RepoDir:               cc.RepoDir,
@@ -269,6 +274,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Template:              *cc.Template,
 		SystemRule:            cc.Resolver,
 		Knowledge:             memories,
+		KnowledgeTree:         memoryTree,
 		KnowledgeUsage:        &discoveryBudget.usage,
 		FileFilter:            cc.FileFilter,
 		LLMClient:             rt.Client,

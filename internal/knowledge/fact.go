@@ -73,22 +73,25 @@ type Fact struct {
 	// A discussion notice changes eligibility without contributing evidence.
 	discussionNotice   discussionNoticeKind
 	editionScopeDigest string
+	// Existing mappings that authorized a schema refresh. Used only while saving.
+	schemaParents []string
 }
 
 type Citation struct {
-	Kind          string `json:"kind"`
-	Path          string `json:"path,omitempty"`
-	Revision      string `json:"revision,omitempty"`
-	Reference     string `json:"reference,omitempty"`
-	Symbol        string `json:"symbol,omitempty"`
-	URL           string `json:"url,omitempty"`
-	ObservedAt    string `json:"observed_at,omitempty"`
-	StartLine     int    `json:"start_line,omitempty"`
-	EndLine       int    `json:"end_line,omitempty"`
-	Anchor        string `json:"anchor,omitempty"`
-	Digest        string `json:"sha256,omitempty"`
-	ContextDigest string `json:"context_sha256,omitempty"`
-	Quote         string `json:"quote,omitempty"`
+	Kind          string             `json:"kind"`
+	Path          string             `json:"path,omitempty"`
+	Revision      string             `json:"revision,omitempty"`
+	Reference     string             `json:"reference,omitempty"`
+	Symbol        string             `json:"symbol,omitempty"`
+	URL           string             `json:"url,omitempty"`
+	ObservedAt    string             `json:"observed_at,omitempty"`
+	Landing       *DiscussionLanding `json:"landing,omitempty"`
+	StartLine     int                `json:"start_line,omitempty"`
+	EndLine       int                `json:"end_line,omitempty"`
+	Anchor        string             `json:"anchor,omitempty"`
+	Digest        string             `json:"sha256,omitempty"`
+	ContextDigest string             `json:"context_sha256,omitempty"`
+	Quote         string             `json:"quote,omitempty"`
 
 	CurrentPath      string `json:"current_path,omitempty"`
 	CurrentStartLine int    `json:"current_start_line,omitempty"`

@@ -436,6 +436,108 @@ func TestDiscussionEditionTieWithUnavailableCopy(t *testing.T) {
 	}
 }
 
+func TestPathlessEditAtExplicitFileRetiresEarlierDiscussion(t *testing.T) {
+	ctx := t.Context()
+	repo := newDiscoveryRepo(t)
+	const source = "queue/send.py"
+	repo.write(source, "def send(item):\n    return item.name\n")
+	repo.write("routes.py/handler.py", "def handle(item): return item.name\n")
+	tree := repo.commit("accept queue sender")
+	first := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)
+	late := first.Add(time.Hour)
+	old := Discussion{ID: "note-415", UpdatedAt: first.Format(time.RFC3339), Body: "Send each item after confirmation."}
+	for _, restricted := range []bool{false, true} {
+		db := testStore(t)
+		init := discoverWithoutRules(t, tree, DiscoverOptions{Scope: source, AsOf: first, Discussions: []Discussion{old}})
+		if len(init.DiscussionSources) != 1 {
+			t.Fatalf("the explicit file did not bind the original: %+v", init)
+		}
+		f := prepareFact(t, tree, Fact{Category: CategoryBusinessRule, Authority: AuthorityInferred, Origin: "discovery",
+			Scope: source, Source: source, Claim: old.Body, Citations: []Citation{{Kind: "code", Path: source, StartLine: 2, EndLine: 2}, init.DiscussionSources[0].Citations[0]}})
+		if err := db.Save(ctx, append(init.DiscussionObservations(), f)); err != nil {
+			t.Fatal(err)
+		}
+		edit := old
+		edit.UpdatedAt = late.Format(time.RFC3339)
+		edit.Body = "Use api_key = 'very-long-secret-test-value-123' during sending."
+		opts := DiscoverOptions{Scope: source, AsOf: late, Discussions: []Discussion{edit}}
+		editedTree := tree
+		if restricted {
+			edit.Body = "The sender now uses another mode."
+			opts.Discussions = []Discussion{edit}
+			editedTree.AllowPath = func(string) bool { return false }
+		}
+		result := discoverWithoutRules(t, editedTree, opts)
+		if len(result.DiscussionSources) != 0 || len(result.discussionNotices) != 1 ||
+			result.discussionNotices[0].editionScopeDigest != exactDiscussionScope(source) {
+			t.Fatalf("restricted=%v: expected only a file-scoped edit notice: %+v", restricted, result)
+		}
+		if err := db.Save(ctx, result.DiscussionObservations()); err != nil {
+			t.Fatal(err)
+		}
+		if !restricted {
+			opts.Scope = "routes.py"
+			if dir := discoverWithoutRules(t, tree, opts); len(dir.DiscussionObservations()) != 0 {
+				t.Fatal("a pathless input bound an unavailable edition to a directory")
+			}
+		}
+		for _, at := range []time.Time{first, late} {
+			tree.Now = at
+			got := ReviewSnapshot(checkedFacts(t, tree, storedFacts(t, db))).ForPaths([]string{source})
+			if strings.Contains(got, old.Body) != at.Equal(first) || strings.Contains(got, edit.Body) {
+				t.Fatalf("restricted=%v, at %v: wrong source visibility: %s", restricted, at, got)
+			}
+		}
+	}
+}
+
+func TestMovedDiscussionRemainsEligibleAtNewScope(t *testing.T) {
+	ctx := t.Context()
+	repo := newDiscoveryRepo(t)
+	const before, after = "left/send.py", "right/run.py"
+	repo.write(before, "def send(item): return item.key\n")
+	repo.write(after, "def run(item): return item.name\n")
+	tree := repo.commit("accept both integrations")
+	start := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)
+	move := start.Add(time.Hour)
+	old := Discussion{ID: "note-416", Path: before, UpdatedAt: start.Format(time.RFC3339), Body: "The old sender uses keys."}
+	next := Discussion{ID: old.ID, Path: after, UpdatedAt: move.Format(time.RFC3339), Body: "The new integration uses names."}
+	for _, reverse := range []bool{false, true} {
+		db := testStore(t)
+		initial := discoverWithoutRules(t, tree, DiscoverOptions{Scope: "left", AsOf: start, Discussions: []Discussion{old}})
+		atLeft := discoverWithoutRules(t, tree, DiscoverOptions{Scope: "left", AsOf: move, Discussions: []Discussion{next}})
+		atRight := discoverWithoutRules(t, tree, DiscoverOptions{Scope: "right", AsOf: move, Discussions: []Discussion{next}})
+		join := func(note Discussion, result DiscoveryResult) []Fact {
+			return append(result.DiscussionObservations(), prepareFact(t, tree, Fact{Category: CategoryBusinessRule,
+				Authority: AuthorityInferred, Origin: "discovery", Scope: note.Path, Source: note.Path, Claim: note.Body,
+				Citations: []Citation{{Kind: "code", Path: note.Path, StartLine: 1, EndLine: 1}, result.DiscussionSources[0].Citations[0]}}))
+		}
+		all := append(join(old, initial), atLeft.DiscussionObservations()...)
+		all = append(all, join(next, atRight)...)
+		if reverse {
+			slices.Reverse(all)
+		}
+		if err := db.Save(ctx, all); err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			at     time.Time
+			active Discussion
+		}{{start, old}, {move, next}} {
+			tree.Now = tc.at
+			active := map[string]int{}
+			for _, c := range checkedFacts(t, tree, storedFacts(t, db)) {
+				if c.Status == StatusCandidate || c.Status == StatusDiscussionSource {
+					active[c.Scope]++
+				}
+			}
+			if len(active) != 1 || active[tc.active.Path] != 2 {
+				t.Fatalf("reverse=%v, at %v: expected the source and rule for %s, got %v", reverse, tc.at, tc.active.Path, active)
+			}
+		}
+	}
+}
+
 func TestDiscussionExpiryForUnscopedDerivedRules(t *testing.T) {
 	ctx := t.Context()
 	repo := newDiscoveryRepo(t)

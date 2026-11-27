@@ -31,6 +31,7 @@ const (
 	BusinessRefutationTask TaskType = "business_refutation_task"
 	BusinessOverlapTask    TaskType = "business_overlap_task"
 	BusinessEffectTask     TaskType = "business_effect_task"
+	BusinessImportTask     TaskType = "business_import_task"
 	GroupingTask           TaskType = "grouping_task"
 )
 

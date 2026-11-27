@@ -6,6 +6,7 @@ package knowledge
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -18,8 +19,17 @@ import (
 	"time"
 	"unicode/utf8"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
+
+func init() {
+	// SQLite's built-in lower() folds ASCII alone. Search archived editions
+	// with the same Unicode mapping as the final displayed-edition filter.
+	sqlite.MustRegisterDeterministicScalarFunction("ocr_discussion_lower", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		text, _ := args[0].(string)
+		return strings.ToLower(text), nil
+	})
+}
 
 type Store struct {
 	db              *sql.DB
@@ -161,8 +171,21 @@ func (s *Store) save(ctx context.Context, key string, facts []Fact) error {
 			return err
 		}
 		var rowid int64
-		err = tx.QueryRowContext(ctx, `INSERT INTO facts(repo,id,review,body) VALUES(?,?,?,?)
-   ON CONFLICT(repo,id) DO NOTHING RETURNING rowid`, s.repo, f.ID, f.ReviewID, string(body)).Scan(&rowid)
+		var withdrawal sql.NullString
+		if len(f.schemaParents) != 0 {
+			// A historical replay can discover a changed value from a mapping
+			// that was withdrawn later. The new value inherits the last such
+			// withdrawal only when every authorizing mapping was withdrawn.
+			ids, _ := json.Marshal(f.schemaParents)
+			err = tx.QueryRowContext(ctx, `SELECT CASE WHEN COUNT(*) = COUNT(revoked_at)
+ THEN MAX(rtrim(replace(revoked_at,' ','T'),'Z')) || 'Z' END
+ FROM facts WHERE repo=? AND id IN (SELECT value FROM json_each(?))`, s.repo, string(ids)).Scan(&withdrawal)
+			if err != nil {
+				return err
+			}
+		}
+		err = tx.QueryRowContext(ctx, `INSERT INTO facts(repo,id,review,body,revoked_at) VALUES(?,?,?,?,?)
+   ON CONFLICT(repo,id) DO NOTHING RETURNING rowid`, s.repo, f.ID, f.ReviewID, string(body), withdrawal).Scan(&rowid)
 		if err == sql.ErrNoRows {
 			err = tx.QueryRowContext(ctx, "SELECT rowid FROM facts WHERE repo=? AND id=?", s.repo, f.ID).Scan(&rowid)
 		} else if err == nil {
@@ -342,8 +365,8 @@ func (s *Store) list(ctx context.Context, tx *sql.Tx, review, search, id string,
 		query += " AND (facts.rowid IN (SELECT rowid FROM fact_search WHERE fact_search MATCH ?)"
 		args = append(args, "\""+strings.ReplaceAll(search, "\"", "\"\"")+"\"")
 		if s.discussionEdits {
-			query += " OR EXISTS(SELECT 1 FROM discussion_edits AS de WHERE de.fact_row=facts.rowid AND instr(lower(json_extract(de.body,'$.discussion_body')),lower(?))>0)"
-			args = append(args, search)
+			query += " OR EXISTS(SELECT 1 FROM discussion_edits AS de WHERE de.fact_row=facts.rowid AND instr(ocr_discussion_lower(json_extract(de.body,'$.discussion_body')),?)>0)"
+			args = append(args, strings.ToLower(search))
 		}
 		query += ")"
 	}
@@ -365,6 +388,9 @@ func (s *Store) list(ctx context.Context, tx *sql.Tx, review, search, id string,
 		}
 		if err = json.Unmarshal([]byte(body), &f); err != nil {
 			return nil, fmt.Errorf("decode memory record: %w", err)
+		}
+		if f.hasFutureLanding(cutoff) {
+			continue
 		}
 		f.Revision = revision
 		if f.IsDecision() && f.ObservedAt == "" {
@@ -451,7 +477,13 @@ func (s *Store) withEditionNotices(ctx context.Context, tx *sql.Tx, facts []Fact
 			if scope == "" {
 				scope = f.Scope
 			}
-			include(discussionSourceID(c.Reference), scope)
+			ref := discussionSourceID(c.Reference)
+			include(ref, scope)
+			file := c.Path
+			if file == "" {
+				file = f.Source
+			}
+			referenced[ref][exactDiscussionScope(file)] = true
 			edition := discussionExpiryID(c)
 			include(edition, scope)
 			expiryIDs[edition] = true

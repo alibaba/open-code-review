@@ -307,7 +307,7 @@ func (r *rechecker) loadDiscussionDefinitionFile(p string) discussionDefinitionF
 	return out
 }
 
-func (r *rechecker) findDiscussionDefinition(paths []string, name string) (discussionNamedBinding, discussionDefinition, bool) {
+func (r *rechecker) findDiscussionDefinition(paths []string, name string, goPackage bool) (discussionNamedBinding, discussionDefinition, bool) {
 	var binding discussionNamedBinding
 	var found discussionDefinition
 	leaf := name[strings.LastIndexByte(name, '.')+1:]
@@ -316,11 +316,11 @@ func (r *rechecker) findDiscussionDefinition(paths []string, name string) (discu
 			return discussionNamedBinding{}, discussionDefinition{}, false
 		}
 		f := r.discussionDefinitionFile(p)
-		if !f.parsed && discoveryIdentifier(f.file.text, leaf) {
+		if !f.parsed && (goPackage || discoveryIdentifier(f.file.text, leaf)) {
 			return discussionNamedBinding{}, discussionDefinition{}, false
 		}
 		for _, d := range f.definitions {
-			if !d.matches(name) {
+			if goPackage && d.name != name || !goPackage && !d.matches(name) {
 				continue
 			}
 			if binding.Path != "" || d.unquotable || slices.ContainsFunc(f.definitions, func(peer discussionDefinition) bool {
@@ -342,37 +342,33 @@ func (r *rechecker) scopedDiscussionDefinition(paths []string, scope, name strin
 			return discussionNamedBinding{}, discussionDefinition{}, false
 		}
 		target := imports[0]
-		var admitted []string
-		for _, p := range target.paths {
-			if slices.Contains(paths, p) {
-				admitted = append(admitted, p)
-			}
-		}
-		if target.goPackage {
-			if len(admitted) == 0 || len(admitted) != len(target.paths) {
+		search := target.paths
+		if !target.goPackage {
+			search = slices.DeleteFunc(slices.Clone(search), func(p string) bool { return !slices.Contains(paths, p) })
+			if len(search) != 1 || r.alternativeImportPath(target.paths, search[0]) {
 				return discussionNamedBinding{}, discussionDefinition{}, false
 			}
-		} else if len(admitted) != 1 || r.alternativeImportPath(target.paths, admitted[0]) {
-			return discussionNamedBinding{}, discussionDefinition{}, false
 		}
 		if slices.ContainsFunc(r.discussionDefinitionFile(scope).definitions, func(d discussionDefinition) bool { return d.matchesIdentifier(name) }) {
 			return discussionNamedBinding{}, discussionDefinition{}, false
 		}
-		binding, d, ok := r.findDiscussionDefinition(admitted, target.symbol)
-		if !ok || d.name != target.symbol || target.namespace != "" && d.namespace != target.namespace {
+		// A Go import names a whole package. Unsampled siblings can establish
+		// uniqueness, but only a definition in the admitted corpus can be cited.
+		binding, d, ok := r.findDiscussionDefinition(search, target.symbol, target.goPackage)
+		if !ok || !slices.Contains(paths, binding.Path) || d.name != target.symbol || target.namespace != "" && d.namespace != target.namespace {
 			return discussionNamedBinding{}, discussionDefinition{}, false
 		}
 		binding.Mention, binding.Bound = name, true
 		return binding, d, true
 	}
 	if slices.Contains(paths, scope) {
-		binding, d, ok := r.findDiscussionDefinition([]string{scope}, name)
+		binding, d, ok := r.findDiscussionDefinition([]string{scope}, name, false)
 		if ok && d.matchesIdentifier(name) {
 			binding.Bound = true
 			return binding, d, true
 		}
 	}
-	return r.findDiscussionDefinition(paths, name)
+	return r.findDiscussionDefinition(paths, name, false)
 }
 
 type discussionImportTarget struct {
@@ -431,7 +427,8 @@ func (r *rechecker) discussionImportTargets(scope, name string) []discussionImpo
 			if imp.Name == nil {
 				target.namespace = alias
 			}
-			if mod, root := r.discussionGoModule(path.Dir(scope)); mod != "" && (p == mod || strings.HasPrefix(p, mod+"/")) {
+			if mod, root := r.discussionGoModule(path.Dir(scope)); ast.IsExported(symbol) && !strings.ContainsRune(symbol, '.') &&
+				mod != "" && (p == mod || strings.HasPrefix(p, mod+"/")) {
 				dir := path.Join(root, strings.TrimPrefix(strings.TrimPrefix(p, mod), "/"))
 				if dir == "." || validPath(dir) {
 					if other, otherRoot := r.discussionGoModule(dir); other == mod && otherRoot == root {
@@ -551,32 +548,25 @@ func (r *rechecker) discussionGoModule(dir string) (string, string) {
 }
 
 func (r *rechecker) discussionGoPackagePaths(dir string) []string {
-	allowed := func(p string) bool { return path.Dir(p) == dir && path.Ext(p) == ".go" && r.tree.permits(p) }
-	if !r.tree.Workspace {
-		scope := dir
-		if scope == "." {
-			scope = ""
-		}
-		index := r.indexDiscussionNames(DiscoverOptions{Scope: scope, allowPath: allowed}, false)
-		if index == nil || len(index.paths) > maxDiscussionMatchFiles {
-			return nil
-		}
-		return index.paths
-	}
 	tree := r.tree
 	tree.Git = tree.Git.LocalOnly()
-	args := []string{"--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}
+	args := []string{"--literal-pathspecs", "ls-tree", "--name-only", "-z", tree.Commit, "--"}
+	if tree.Workspace {
+		// Ignored Go files can still supply declarations in a working package.
+		args = []string{"--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--"}
+	}
 	if dir != "." {
-		args = append(args, dir)
+		args = append(args, dir+"/")
 	}
 	raw, clipped, err := tree.discoveryGit(r.ctx, 16<<10, args...)
 	if clipped || err != nil {
 		return nil
 	}
 	var paths []string
-	for _, p := range bytes.Split(raw, []byte{0}) {
-		if allowed(string(p)) && discoveryKind(string(p)) != "test" {
-			paths = append(paths, string(p))
+	for p := range strings.SplitSeq(string(raw), "\x00") {
+		base := path.Base(p)
+		if path.Dir(p) == dir && path.Ext(base) == ".go" && !strings.HasSuffix(base, "_test.go") && !strings.HasPrefix(base, "_") && !strings.HasPrefix(base, ".") {
+			paths = append(paths, p)
 		}
 	}
 	slices.Sort(paths)
@@ -624,6 +614,7 @@ func (t Tree) bindDiscussionDefinitions(ctx context.Context, opts DiscoverOption
 	}
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
+	t.AllowPath = func(p string) bool { return !opts.protected(p) }
 	r := newRechecker(ctx, t)
 	type indexKey struct {
 		revision string
@@ -674,13 +665,13 @@ func (t Tree) bindDiscussionDefinitions(ctx context.Context, opts DiscoverOption
 			} else {
 				index := indexAt(r, tests)
 				literal := !d.matchesIdentifier(name)
-				unique, _, ok := r.findDiscussionDefinition(index.matchingPaths(name, literal), name)
+				unique, _, ok := r.findDiscussionDefinition(index.matchingPaths(name, literal), name, false)
 				if !ok || unique != current {
 					continue
 				}
 				if origin != r {
 					priorIndex := indexAt(origin, tests)
-					prior, _, ok := origin.findDiscussionDefinition(priorIndex.matchingPaths(name, literal), name)
+					prior, _, ok := origin.findDiscussionDefinition(priorIndex.matchingPaths(name, literal), name, false)
 					if !ok || prior != current {
 						continue
 					}
@@ -845,8 +836,8 @@ func goDiscussionDefinitions(p string, data []byte) ([]discussionDefinition, boo
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			if kind, name, ok := strings.Cut(declarationName(d), " "); ok && d.Body != nil {
-				add(kind, name, "", d, false)
+			if kind, name, ok := strings.Cut(declarationName(d), " "); ok {
+				add(kind, name, "", d, d.Body == nil)
 			}
 		case *ast.GenDecl:
 			for _, spec := range d.Specs {
@@ -957,9 +948,12 @@ var javascriptDestructuring = regexp.MustCompile(`(?m)(?:^|[;}])[ \t]*(?:export[
 // intentionally handles only ordinary source, without evaluating modules.
 func maskJavaScript(text string) ([]byte, bool) {
 	code := []byte(text)
+	previous, afterControl := -1, false
+	var controlParens []bool
 	for i := 0; i < len(text); {
 		c := text[i]
 		var end int
+		literal := false
 		switch {
 		case strings.HasPrefix(text[i:], "//"):
 			end = i + strings.IndexByte(text[i:], '\n')
@@ -972,6 +966,12 @@ func maskJavaScript(text string) ([]byte, bool) {
 				return nil, false
 			}
 			end = i + n + 4
+		case c == '/' && (afterControl || javascriptStartsRegexp(code, previous)):
+			end = javascriptRegexpEnd(text, i)
+			if end == 0 {
+				return nil, false
+			}
+			literal = true
 		case c == '\'' || c == '"' || c == '\x60':
 			for j := i + 1; j < len(text); j++ {
 				if text[j] == '\\' {
@@ -989,7 +989,29 @@ func maskJavaScript(text string) ([]byte, bool) {
 			if end == 0 {
 				return nil, false
 			}
+			literal = true
 		default:
+			if c == '/' && previous >= 0 && code[previous] == '}' {
+				// A closing brace may end either a statement or an operand.
+				if next := strings.IndexAny(text[i+1:], "/\r\n"); next >= 0 && text[i+1+next] == '/' {
+					return nil, false
+				}
+			}
+			if !strings.ContainsRune(" \t\r\n\v\f", rune(c)) {
+				afterControl = false
+				switch c {
+				case '(':
+					word := unqualifiedJavaScriptWord(code, previous)
+					control := word == "if" || word == "for" || word == "while" || word == "with" || word == "switch" || word == "catch"
+					controlParens = append(controlParens, control)
+				case ')':
+					if n := len(controlParens); n > 0 {
+						afterControl = controlParens[n-1]
+						controlParens = controlParens[:n-1]
+					}
+				}
+				previous = i
+			}
 			i++
 			continue
 		}
@@ -998,12 +1020,84 @@ func maskJavaScript(text string) ([]byte, bool) {
 				code[j] = ' '
 			}
 		}
-		if c != '/' {
+		if literal {
 			code[i] = '_'
+			previous, afterControl = i, false
 		}
 		i = end
 	}
 	return code, true
+}
+
+func javascriptWordByte(c byte) bool {
+	return c >= utf8.RuneSelf || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '$' || c == '\\'
+}
+
+func unqualifiedJavaScriptWord(code []byte, end int) string {
+	start := end
+	for start >= 0 && javascriptWordByte(code[start]) {
+		start--
+	}
+	word := string(code[start+1 : end+1])
+	for start >= 0 && strings.ContainsRune(" \t\r\n\v\f", rune(code[start])) {
+		start--
+	}
+	if start >= 0 && (code[start] == '.' || code[start] == '#') {
+		return ""
+	}
+	return word
+}
+
+func javascriptStartsRegexp(code []byte, previous int) bool {
+	if previous < 0 || strings.ContainsRune("=([{,:;!?&|%^~*/<>", rune(code[previous])) {
+		return true
+	}
+	if c := code[previous]; c == '+' || c == '-' {
+		return previous == 0 || code[previous-1] != c
+	}
+	switch unqualifiedJavaScriptWord(code, previous) {
+	case "return", "throw", "case", "typeof", "void", "delete", "in", "instanceof", "else", "do", "default":
+		return true
+	}
+	return false
+}
+
+func javascriptRegexpEnd(text string, start int) int {
+	lineBreak := func(s string) bool {
+		return s[0] == '\n' || s[0] == '\r' || strings.HasPrefix(s, "\u2028") || strings.HasPrefix(s, "\u2029")
+	}
+	inClass, nestedClass := false, false
+	for i := start + 1; i < len(text); i++ {
+		if lineBreak(text[i:]) {
+			return 0
+		}
+		switch text[i] {
+		case '\\':
+			i++
+			if i >= len(text) || lineBreak(text[i:]) {
+				return 0
+			}
+		case '[':
+			nestedClass = nestedClass || inClass
+			inClass = true
+		case ']':
+			inClass = false
+		case '/':
+			if inClass {
+				continue
+			}
+			end := i + 1
+			for ; end < len(text) && javascriptWordByte(text[end]); end++ {
+				flag, seen := text[end], text[i+1:end]
+				if !strings.ContainsRune("dgimsuvy", rune(flag)) || strings.IndexByte(seen, flag) >= 0 ||
+					flag == 'v' && (nestedClass || strings.Contains(seen, "u")) || flag == 'u' && strings.Contains(seen, "v") {
+					return 0
+				}
+			}
+			return end
+		}
+	}
+	return 0
 }
 
 func javascriptNesting(code []byte) ([]int, map[int]int, bool) {

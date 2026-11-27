@@ -5,6 +5,7 @@ package knowledge
 
 import (
 	"errors"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,17 +16,17 @@ import (
 // A supplied comment is a source in its own right. Its body neither defines a
 // rule nor selects its file. Bind it only to an accepted, inspected file.
 func (t Tree) directDiscussionSources(r *rechecker, opts DiscoverOptions, notes []Discussion, result *DiscoveryResult) ([]Fact, error) {
-	seen := map[Discussion]bool{}
+	seen := map[discussionKey]bool{}
 	var out []Fact
 	for _, d := range notes {
-		d.exportPath = ""
-		if d.UpdatedAt == "" || seen[d] || discoveryCredential.MatchString(d.Body) {
+		key := d.editionKey()
+		if d.UpdatedAt == "" || seen[key] || discoveryCredential.MatchString(d.Body) {
 			continue
 		}
-		seen[d] = true
+		seen[key] = true
 		p := d.Path
 		if p == "" {
-			p = opts.Scope // An explicitly selected single file, never a directory.
+			p = opts.discussionFile
 		}
 		if !opts.allowed(p) || discoveryKind(p) == "documentation" {
 			continue
@@ -36,7 +37,7 @@ func (t Tree) directDiscussionSources(r *rechecker, opts DiscoverOptions, notes 
 		}
 		if file.err != nil || len(discoveryExcerpts(file.data, discoverySource{Kind: discoveryKind(p)}, 1000, result, nil)) == 0 {
 			result.limit("withheld discussion sources without an admissible implementation at the named file")
-			result.withholdEdition(t.Commit, d, "")
+			result.withholdFilteredEdition(t.Commit, d, opts.discussionFile)
 			continue
 		}
 		source := discoverySource{Kind: "discussion", Path: d.Path, Revision: d.Revision, Reference: d.ID, URL: d.URL, ObservedAt: d.UpdatedAt}
@@ -63,7 +64,7 @@ func (t Tree) directDiscussionSources(r *rechecker, opts DiscoverOptions, notes 
 			Source: p, Scope: p, SourceHash: file.digest, ObservedAt: d.UpdatedAt, ExpiresAt: d.ExpiresAt, DiscussionBody: d.Body}
 		for _, e := range excerpts {
 			c := Citation{Kind: "discussion", Path: d.Path, Revision: d.Revision, Reference: d.ID, URL: d.URL,
-				ObservedAt: d.UpdatedAt, Digest: e.digest, Quote: e.Text, StartLine: e.StartLine, EndLine: e.StartLine + strings.Count(e.Text, "\n")}
+				ObservedAt: d.UpdatedAt, Digest: e.digest, Quote: e.Text, StartLine: e.StartLine, EndLine: e.StartLine + strings.Count(e.Text, "\n"), Landing: d.landing}
 			if checkSupplemental(c) == nil {
 				f.Citations = append(f.Citations, c)
 			}
@@ -84,6 +85,10 @@ func (f Fact) discussionRef() string {
 
 func discussionSourceID(ref string) string {
 	return Digest([]byte(CategoryDiscussionSource + "\x00" + ref))
+}
+
+func exactDiscussionScope(file string) string {
+	return Digest([]byte("discussion-file\x00" + file))
 }
 
 type discussionNoticeKind uint8
@@ -264,13 +269,17 @@ type discussionEdition struct {
 	date                                 time.Time
 	digest, scope, expiry, revision, url string
 	ambiguous                            bool
-	unavailable                          bool
 	origins                              []string
+	landing                              DiscussionLanding
 }
-type discussionEditions map[string]discussionEdition
+type discussionEditions struct {
+	latest      map[string]discussionEdition
+	unavailable map[string]map[string]time.Time
+}
 
 func (r *rechecker) discussionEditions(facts []Fact) discussionEditions {
-	latest := discussionEditions{}
+	ed := discussionEditions{latest: map[string]discussionEdition{}, unavailable: map[string]map[string]time.Time{}}
+	latest := ed.latest
 	for _, f := range facts {
 		if f.discussionNotice != 0 {
 			when, err := time.Parse(time.RFC3339Nano, f.ObservedAt)
@@ -279,8 +288,15 @@ func (r *rechecker) discussionEditions(facts []Fact) discussionEditions {
 			}
 			if f.discussionNotice == noticeExpiry {
 				latest[f.ID] = discussionEdition{expiry: earlierExpiry(latest[f.ID].expiry, f.ObservedAt)}
-			} else if r.observedBy(f.ObservedAt) && !when.Before(latest[f.ID].date) {
-				latest[f.ID] = discussionEdition{date: when, unavailable: true}
+			} else if r.observedBy(f.ObservedAt) {
+				scopes := ed.unavailable[f.ID]
+				if scopes == nil {
+					scopes = map[string]time.Time{}
+					ed.unavailable[f.ID] = scopes
+				}
+				if when.After(scopes[f.editionScopeDigest]) {
+					scopes[f.editionScopeDigest] = when
+				}
 			}
 			continue
 		}
@@ -289,7 +305,7 @@ func (r *rechecker) discussionEditions(facts []Fact) discussionEditions {
 			continue
 		}
 		c := f.Citations[0]
-		if c.Revision != "" && !r.ancestor(c.Revision) {
+		if c.Revision != "" && !r.ancestor(c.Revision) || c.Landing != nil && !r.observedBy(c.Landing.MergedAt) {
 			continue
 		}
 		when, err := time.Parse(time.RFC3339Nano, f.ObservedAt)
@@ -300,10 +316,10 @@ func (r *rechecker) discussionEditions(facts []Fact) discussionEditions {
 		edition, ok := latest[id]
 		switch {
 		case !ok || when.After(edition.date):
-			edition = discussionEdition{date: when, digest: c.Digest, scope: f.Scope, expiry: f.ExpiresAt, revision: c.Revision, url: c.URL}
-		case when.Before(edition.date) || edition.unavailable:
+			edition = discussionEdition{date: when, digest: c.Digest, scope: f.Scope, expiry: f.ExpiresAt, revision: c.Revision, url: c.URL, landing: c.Landing.value()}
+		case when.Before(edition.date):
 			continue
-		case edition.digest != c.Digest || edition.scope != f.Scope || edition.expiry != f.ExpiresAt || c.Revision != edition.revision || c.URL != edition.url:
+		case edition.digest != c.Digest || edition.scope != f.Scope || edition.expiry != f.ExpiresAt || c.Revision != edition.revision || c.URL != edition.url || edition.landing != c.Landing.value():
 			edition.ambiguous = true
 		}
 		if c.Revision == "" && !edition.ambiguous {
@@ -319,33 +335,58 @@ func (r *rechecker) discussionEditions(facts []Fact) discussionEditions {
 		}
 		latest[id] = edition
 	}
-	return latest
+	return ed
+}
+
+func (ed discussionEditions) withheld(f Fact, c Citation, when time.Time) bool {
+	scopes := ed.unavailable[discussionSourceID(c.Reference)]
+	if len(scopes) == 0 {
+		return false
+	}
+	file, scope := c.Path, c.Path
+	if file == "" {
+		file, scope = f.Source, f.Scope
+	}
+	withdrawn := func(scope string) bool {
+		at, ok := scopes[scope]
+		return ok && !when.After(at)
+	}
+	if withdrawn("") || withdrawn(exactDiscussionScope(file)) {
+		return true
+	}
+	for validPath(scope) {
+		if withdrawn(Digest([]byte(scope))) {
+			return true
+		}
+		scope = path.Dir(scope)
+	}
+	return false
 }
 
 func (ed discussionEditions) withCitedExpiry(f Fact) Fact {
 	for _, c := range f.Citations {
 		if c.Kind == "discussion" && f.Category != CategoryDiscussionSource {
-			f.ExpiresAt = earlierExpiry(f.ExpiresAt, ed[discussionExpiryID(c)].expiry)
+			f.ExpiresAt = earlierExpiry(f.ExpiresAt, ed.latest[discussionExpiryID(c)].expiry)
 		}
 	}
 	return f
 }
 
 func (ed discussionEditions) admits(f Fact) bool {
-	v, ok := ed[discussionSourceID(f.discussionRef())]
+	v, ok := ed.latest[discussionSourceID(f.discussionRef())]
 	when, _ := time.Parse(time.RFC3339Nano, f.ObservedAt)
-	return ok && !v.ambiguous && !v.unavailable && when.Equal(v.date) && f.Citations[0].Digest == v.digest && f.Scope == v.scope && f.ExpiresAt == v.expiry &&
+	return ok && !v.ambiguous && !ed.withheld(f, f.Citations[0], when) && when.Equal(v.date) && f.Citations[0].Digest == v.digest && f.Scope == v.scope && f.ExpiresAt == v.expiry &&
 		(v.revision != "" || slices.Contains(v.origins, f.Revision))
 }
 
 func (ed discussionEditions) obsolete(f Fact) bool {
 	return slices.ContainsFunc(f.Citations, func(c Citation) bool {
-		v, ok := ed[discussionSourceID(c.Reference)]
-		when, _ := time.Parse(time.RFC3339Nano, c.ObservedAt)
-		if v.unavailable {
-			return c.Kind == "discussion" && !when.After(v.date)
+		if c.Kind != "discussion" {
+			return false
 		}
-		return c.Kind == "discussion" && ok && (v.ambiguous || !when.Equal(v.date) || c.Digest != v.digest || c.Path != "" && c.Path != v.scope)
+		v, ok := ed.latest[discussionSourceID(c.Reference)]
+		when, _ := time.Parse(time.RFC3339Nano, c.ObservedAt)
+		return ed.withheld(f, c, when) || ok && (v.ambiguous || !when.Equal(v.date) || c.Digest != v.digest || c.Path != "" && c.Path != v.scope)
 	})
 }
 

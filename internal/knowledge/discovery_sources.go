@@ -241,6 +241,17 @@ func (t Tree) discoveryTree(ctx context.Context, rev string, paths []string, opt
 }
 
 func (t Tree) discoverySources(ctx context.Context, opts DiscoverOptions, result *DiscoveryResult) ([]discoverySource, error) {
+	if validPath(opts.Scope) && slices.ContainsFunc(opts.Discussions, func(d Discussion) bool { return d.Path == "" }) {
+		entry, err := t.Git.Output(ctx, t.Repo, "--literal-pathspecs", "ls-tree", "-z", t.Commit, "--", opts.Scope)
+		if err != nil {
+			return nil, err
+		}
+		header, _, _ := bytes.Cut(entry, []byte{'\t'})
+		if !bytes.Contains(header, []byte(" tree ")) {
+			// An absent path may retire an earlier exact file binding.
+			opts.discussionFile = opts.Scope
+		}
+	}
 	reader := newRechecker(ctx, t)
 	discussions, cutoff, err := t.discoveryDiscussions(ctx, opts, result, reader)
 	if err != nil {
@@ -364,7 +375,7 @@ func (t Tree) discoverySources(ctx context.Context, opts DiscoverOptions, result
 			result.limit("sampled up to 12 discussion comments")
 			break
 		}
-		s := discoverySource{Kind: "discussion", Path: d.Path, Revision: d.Revision, Reference: d.ID, URL: d.URL, ObservedAt: d.UpdatedAt, ExpiresAt: d.ExpiresAt}
+		s := discoverySource{Kind: "discussion", Path: d.Path, Revision: d.Revision, Reference: d.ID, URL: d.URL, ObservedAt: d.UpdatedAt, ExpiresAt: d.ExpiresAt, Landing: d.landing}
 		excerpts := discoveryExcerpts([]byte(d.Body), s, 1600, result, nil)
 		if len(excerpts) > 0 {
 			comments++
@@ -604,6 +615,7 @@ func (t Tree) discoveryDiscussions(ctx context.Context, opts DiscoverOptions, re
 		}
 	}
 	var eligible []Discussion
+	originals := landingFiles{}
 	for _, d := range opts.Discussions {
 		if discoveryCredential.MatchString(d.ID) || discoveryCredential.MatchString(d.URL) {
 			result.limit("omitted sources containing credential-shaped text")
@@ -618,22 +630,28 @@ func (t Tree) discoveryDiscussions(ctx context.Context, opts DiscoverOptions, re
 			continue
 		}
 		if d.Revision != "" && !r.ancestor(d.Revision) {
-			result.limit("withheld discussions outside the accepted Git history")
-			continue
+			var landed bool
+			if d.remote != nil && opts.allowed(d.Path) && discoveryKind(d.Path) != "documentation" && !discoveryCredential.MatchString(d.Body) {
+				d, landed = r.landDiscussion(d, cutoff, originals, result)
+			}
+			if !landed {
+				result.limit("withheld discussions outside the accepted Git history")
+				continue
+			}
 		}
 		if d.Path != "" && !inDiscoveryScope(d.Path, opts.Scope) {
 			// An edit that moved out of the requested scope can still retire
 			// its earlier edition inside that scope.
-			result.withholdEdition(t.Commit, d, opts.Scope)
-			continue
-		}
-		if d.Path != "" && (!opts.allowed(d.Path) || discoveryKind(d.Path) == "documentation") || discoveryCredential.MatchString(d.Body) {
-			result.withholdEdition(t.Commit, d, "")
+			result.withholdEdition(t.Commit, d, Digest([]byte(opts.Scope)))
 			continue
 		}
 		p := d.Path
 		if p == "" {
-			p = opts.Scope
+			p = opts.discussionFile
+		}
+		if p != "" && (!opts.allowed(p) || discoveryKind(p) == "documentation") || discoveryCredential.MatchString(d.Body) {
+			result.withholdFilteredEdition(t.Commit, d, opts.discussionFile)
+			continue
 		}
 		if d.Revision != "" && d.Revision != t.Commit && opts.allowed(p) && discoveryKind(p) != "documentation" {
 			prior, current := r.atRevision(d.Revision).file(p), r.file(p)
@@ -644,7 +662,7 @@ func (t Tree) discoveryDiscussions(ctx context.Context, opts DiscoverOptions, re
 			}
 			if !sameDiscussionFile(p, prior, current) {
 				result.limit("withheld discussions whose original implementation could not be located")
-				result.withholdEdition(t.Commit, d, "")
+				result.withholdFilteredEdition(t.Commit, d, opts.discussionFile)
 				continue
 			}
 		}
@@ -665,7 +683,7 @@ func latestDiscussionInputs(eligible []Discussion, cutoff time.Time) []Discussio
 		if prior, ok := newest[d.ID]; ok {
 			// Withhold contradictory exports at the same edit time from rule
 			// inference. The independently recorded editions remain auditable.
-			if discussionTime(d).Equal(discussionTime(prior)) && (d.Body != prior.Body || d.Path != prior.Path || d.Revision != prior.Revision || d.URL != prior.URL || d.ExpiresAt != prior.ExpiresAt) {
+			if discussionTime(d).Equal(discussionTime(prior)) && (d.Body != prior.Body || d.Path != prior.Path || d.Revision != prior.Revision || d.URL != prior.URL || d.ExpiresAt != prior.ExpiresAt || d.landing.value() != prior.landing.value()) {
 				active = slices.DeleteFunc(active, func(note Discussion) bool { return note.ID == d.ID })
 			}
 			continue

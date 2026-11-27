@@ -235,6 +235,9 @@ func (t Tree) Check(ctx context.Context, facts []Fact) ([]Checked, error) {
 		if f.discussionNotice != 0 {
 			continue // An edit timestamp retires old evidence and has no claim to display.
 		}
+		if f.hasFutureLanding(r.now) {
+			continue
+		}
 		if !validOID(f.Revision) || !validPath(f.Source) || !validScope(f.Scope) ||
 			f.IsDecision() && !validPath(f.Scope) || f.schema() && !validSource(f.Source) {
 			return nil, fmt.Errorf("invalid stored evidence for %s", f.ID)
@@ -341,14 +344,20 @@ func (r *rechecker) observation(f Fact) Checked {
 			return checked
 		}
 	}
-	discussionVisible := true
+	var discussionFailure string
 	f.eachCitation(func(c Citation) {
-		if c.Kind == "discussion" && !r.observedBy(c.ObservedAt) {
-			discussionVisible = false
+		if c.Kind != "discussion" || discussionFailure != "" {
+			return
+		}
+		switch {
+		case !r.observedBy(c.ObservedAt):
+			discussionFailure = "discussion citation is outside the review time"
+		case !r.landingVisible(c):
+			discussionFailure = "original reviewed code no longer matches the landed and current file"
 		}
 	})
-	if !discussionVisible {
-		checked.Detail = "discussion citation is outside the review time"
+	if discussionFailure != "" {
+		checked.Detail = discussionFailure
 		return checked
 	}
 	for _, feedback := range f.Feedback {

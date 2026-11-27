@@ -208,6 +208,11 @@ func TestTwoNamedEntryPointsCanUseDifferentInputs(t *testing.T) {
 	if missing != 0 || len(results) != 1 {
 		t.Fatalf("separate signed entry points required the same input: %v %d", results, missing)
 	}
+	second.Input, second.Observable = first.Input, first.Observable
+	results, _, missing = g.business.assessedChecks(nil, []discussionAssessment{first, second}, reviewedLines(g.Diffs))
+	if missing != 0 || len(results) != 1 {
+		t.Fatal("matching input and output names merged two separately located operations")
+	}
 	second.ScopeQuote = first.ScopeQuote
 	results, _, _ = g.business.assessedChecks(nil, []discussionAssessment{first, second}, reviewedLines(g.Diffs))
 	if len(results) != 0 {
@@ -372,15 +377,19 @@ func TestApplicabilitySettlesOnlyTheLocatedTentativeFinding(t *testing.T) {
 		return string(raw)
 	}
 	for _, tc := range []struct {
-		name           string
-		cover, invalid bool
-		wrongTrigger   bool
-		differentCase  bool
+		name               string
+		cover, invalid     bool
+		wrongTrigger       bool
+		differentCase      bool
+		explicitNomination bool
+		differentOutput    bool
 	}{
 		{name: "disproven by an independently reproduced result"},
 		{name: "unsupported refutation", invalid: true},
 		{name: "same selection but another triggering input", invalid: true, wrongTrigger: true},
 		{name: "both fields agree on an unrelated passing input", invalid: true, differentCase: true},
+		{name: "explicit nomination followed by another passing input", invalid: true, explicitNomination: true, differentCase: true},
+		{name: "explicit nomination followed by a different observable", invalid: true, explicitNomination: true, differentOutput: true},
 		{name: "tentative finding answered by a published diagnosis", cover: true},
 		{name: "missing confirmed finding identity", cover: true, invalid: true},
 	} {
@@ -397,7 +406,7 @@ func TestApplicabilitySettlesOnlyTheLocatedTentativeFinding(t *testing.T) {
 				}
 			} else if tc.wrongTrigger {
 				v.Trigger = "one standard order"
-			} else if tc.invalid && !tc.differentCase {
+			} else if tc.invalid && !tc.differentCase && !tc.differentOutput {
 				v.SourceQuote = "invented behavior"
 			}
 			previous := r
@@ -407,8 +416,15 @@ func TestApplicabilitySettlesOnlyTheLocatedTentativeFinding(t *testing.T) {
 			}
 			rows := []discussionAssessment{previous, r}
 			first, second := response(rows), response(rows, v)
+			if tc.explicitNomination {
+				first = response(rows, check)
+			}
 			if tc.differentCase {
 				r.Input, previous.Input, v.Trigger = "one returned order", "one returned order", "one returned order"
+				second = response([]discussionAssessment{previous, r}, v)
+			}
+			if tc.differentOutput {
+				r.Observable, previous.Observable = "printed title", "printed title"
 				second = response([]discussionAssessment{previous, r}, v)
 			}
 			client := &fakeAgentClient{responses: []*llm.ChatResponse{

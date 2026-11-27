@@ -108,7 +108,7 @@ func (a *reviewArchives) citation(c Citation) (Citation, bool) {
 			c.ObservedAt = date
 		}
 	}
-	if c.ObservedAt == "" || !a.base.observedBy(c.ObservedAt) {
+	if c.ObservedAt == "" || !a.base.observedBy(c.ObservedAt) || !a.base.landingVisible(c) {
 		return Citation{}, false
 	}
 	c.CurrentPath, c.CurrentStartLine, c.CurrentEndLine = "", 0, 0
@@ -196,14 +196,19 @@ func (t Tree) RefreshSchemas(ctx context.Context, facts []Fact, scope string) ([
 		return nil, err
 	}
 	type binding struct{ source, scope, property string }
-	seen := map[binding]bool{}
-	var refreshed []Fact
+	parents := map[binding][]string{}
+	var ordered []binding
 	for _, item := range checked {
-		b := binding{item.Source, item.Scope, item.Property}
-		if item.Status != StatusChanged || seen[b] {
-			continue
+		if item.Status == StatusChanged {
+			b := binding{item.Source, item.Scope, item.Property}
+			if len(parents[b]) == 0 {
+				ordered = append(ordered, b)
+			}
+			parents[b] = append(parents[b], item.ID)
 		}
-		seen[b] = true
+	}
+	var refreshed []Fact
+	for _, b := range ordered {
 		data, err := t.read(ctx, b.source)
 		if err != nil {
 			return nil, err
@@ -214,7 +219,7 @@ func (t Tree) RefreshSchemas(ctx context.Context, facts []Fact, scope string) ([
 		}
 		for _, c := range constraints {
 			if c.Property == b.property {
-				refreshed = append(refreshed, Fact{Source: b.source, Scope: b.scope, Revision: t.Commit, Property: c.Property, Keyword: c.Keyword, Value: c.Value})
+				refreshed = append(refreshed, Fact{Source: b.source, Scope: b.scope, Revision: t.Commit, Property: c.Property, Keyword: c.Keyword, Value: c.Value, schemaParents: parents[b]})
 			}
 		}
 	}

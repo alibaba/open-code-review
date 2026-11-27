@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,9 @@ type Discussion struct {
 	UpdatedAt  string `json:"updated_at,omitempty"`
 	ExpiresAt  string `json:"expires_at,omitempty"`
 	exportPath string
+	position   discussionPosition
+	remote     *discussionMerge
+	landing    *DiscussionLanding
 }
 
 const maxDiscussionItems = 256
@@ -51,8 +55,7 @@ func validateDiscussions(items []Discussion) error {
 			return fmt.Errorf("discussion %d needs a text body of up to 64 KiB", i+1)
 		}
 		if d.UpdatedAt == "" {
-			d.exportPath = ""
-			if prior, exists := undated[d.ID]; exists && prior != d {
+			if prior, exists := undated[d.ID]; exists && prior.editionKey() != d.editionKey() {
 				return fmt.Errorf("discussion %d has contradictory editions without edit timestamps", i+1)
 			}
 			undated[d.ID] = d
@@ -297,7 +300,21 @@ func (p discussionPR) load(ctx context.Context, api discussionAPI) ([]Discussion
 			}
 		}
 	}
-	return items, validateDiscussions(items)
+	if err := validateDiscussions(items); err != nil {
+		return nil, err
+	}
+	if slices.ContainsFunc(items, func(d Discussion) bool { return d.position.valid() }) {
+		merge := p.loadMerge(ctx, api)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		for i := range items {
+			if items[i].position.valid() {
+				items[i].remote = merge
+			}
+		}
+	}
+	return items, nil
 }
 
 func (p discussionPR) comments(route string, record json.RawMessage) ([]Discussion, error) {
@@ -310,6 +327,12 @@ func (p discussionPR) comments(route string, record json.RawMessage) ([]Discussi
 			CreatedAt   string `json:"created_at"`
 			UpdatedAt   string `json:"updated_at"`
 			SubmittedAt string `json:"submitted_at"`
+			Original    string `json:"original_commit_id"`
+			Start       int    `json:"original_start_line"`
+			End         int    `json:"original_line"`
+			Side        string `json:"side"`
+			StartSide   string `json:"start_side"`
+			Hunk        string `json:"diff_hunk"`
 		}
 		if err := json.Unmarshal(record, &c); err != nil {
 			return nil, fmt.Errorf("read GitHub review comment: %w", err)
@@ -330,7 +353,14 @@ func (p discussionPR) comments(route string, record json.RawMessage) ([]Discussi
 			return nil, errors.New("GitHub comment lacks an immutable ID")
 		}
 		ref := fragment + strconv.FormatInt(c.ID, 10)
-		return []Discussion{{ID: "github:" + p.host + ":" + ref, URL: p.link + "#" + ref, Path: c.Path, Revision: c.Revision, Body: c.Body, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}}, nil
+		d := Discussion{ID: "github:" + p.host + ":" + ref, URL: p.link + "#" + ref, Path: c.Path, Revision: c.Revision, Body: c.Body, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}
+		if fragment == "discussion_r" && c.Side == "RIGHT" && (c.StartSide == "" || c.StartSide == "RIGHT") && c.UpdatedAt != "" {
+			d.position = githubDiscussionPosition(c.Original, c.Start, c.End, c.Hunk)
+			if d.Revision == "" && d.position.valid() {
+				d.Revision = d.position.revision
+			}
+		}
+		return []Discussion{d}, nil
 	}
 	var thread struct {
 		Notes []struct {
@@ -340,9 +370,12 @@ func (p discussionPR) comments(route string, record json.RawMessage) ([]Discussi
 			CreatedAt string `json:"created_at"`
 			UpdatedAt string `json:"updated_at"`
 			Position  struct {
-				Path     string `json:"new_path"`
-				OldPath  string `json:"old_path"`
-				Revision string `json:"head_sha"`
+				Path     string                 `json:"new_path"`
+				OldPath  string                 `json:"old_path"`
+				Revision string                 `json:"head_sha"`
+				NewLine  int                    `json:"new_line"`
+				Type     string                 `json:"position_type"`
+				Range    *gitlabDiscussionRange `json:"line_range"`
 			}
 		}
 	}
@@ -351,9 +384,14 @@ func (p discussionPR) comments(route string, record json.RawMessage) ([]Discussi
 	}
 	var items []Discussion
 	var threadPath, revision string
+	var position discussionPosition
 	for _, note := range thread.Notes {
 		if note.Position.Path != "" || note.Position.OldPath != "" {
 			threadPath, revision = note.Position.Path, note.Position.Revision
+			position = discussionPosition{}
+			if note.Position.Type == "text" && note.Position.Path != "" {
+				position = gitlabDiscussionPosition(revision, note.Position.NewLine, note.Position.Range)
+			}
 			if threadPath == "" {
 				threadPath = note.Position.OldPath
 			}
@@ -365,7 +403,7 @@ func (p discussionPR) comments(route string, record json.RawMessage) ([]Discussi
 			return nil, errors.New("GitLab note lacks an immutable ID")
 		}
 		ref := "note_" + strconv.FormatInt(note.ID, 10)
-		items = append(items, Discussion{ID: "gitlab:" + p.host + ":" + ref, URL: p.link + "#" + ref, Path: threadPath, Revision: revision, Body: note.Body, CreatedAt: note.CreatedAt, UpdatedAt: note.UpdatedAt})
+		items = append(items, Discussion{ID: "gitlab:" + p.host + ":" + ref, URL: p.link + "#" + ref, Path: threadPath, Revision: revision, position: position, Body: note.Body, CreatedAt: note.CreatedAt, UpdatedAt: note.UpdatedAt})
 	}
 	return items, nil
 }

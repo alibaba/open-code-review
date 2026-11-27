@@ -24,10 +24,11 @@ import (
 )
 
 type businessContext struct {
-	rules       knowledge.Snapshot
-	text        string
-	properties  []knowledge.PropertyCheck
-	discussions []discussionTarget
+	rules        knowledge.Snapshot
+	text         string
+	properties   []knowledge.PropertyCheck
+	discussions  []discussionTarget
+	verifyImport func(knowledge.Fact, businessCheck) bool
 }
 
 var businessIdentifier = regexp.MustCompile(`[\p{L}_][\p{L}\p{N}_]*`)
@@ -274,6 +275,9 @@ func (a *Agent) verifyBusinessFindings(ctx context.Context, g FileGroup, rule, p
 	if !ok {
 		return
 	}
+	if a.args.KnowledgeTree != nil && len(g.business.discussions) != 0 {
+		g.business.verifyImport = a.businessImportVerifier(ctx, group, g.Diffs)
+	}
 	grounded, proposed, err := groundBusinessChecks(response, g, drafts)
 	if err != nil {
 		a.recordWarning("business_check_unverified", group, err.Error())
@@ -403,6 +407,7 @@ func (b businessContext) currentPremise(rule knowledge.Fact, c businessCheck) (s
 		return "", false
 	}
 	authorityCites := selectedBusinessWitness(rule, c) || supportsBusinessCheck(rule, c)
+	var separate string
 	for _, other := range b.rules {
 		if c.SourceID != "" && other.ID != c.SourceID {
 			continue
@@ -412,7 +417,13 @@ func (b businessContext) currentPremise(rule knowledge.Fact, c businessCheck) (s
 			if selectedBusinessWitness(other, c) || supportsBusinessCheck(other, c) && (authorityCites || ownsBusinessSelection(other, c.Reference)) {
 				return other.ID, true
 			}
+			if separate == "" && supportsBusinessCheck(other, c) {
+				separate = other.ID
+			}
 		}
+	}
+	if separate != "" && c.SourcePath != c.Path && b.verifyImport != nil && b.verifyImport(rule, c) {
+		return separate, true
 	}
 	return "", false
 }
@@ -502,16 +513,23 @@ func revalidatedDecision(f knowledge.Fact, path string) bool {
 }
 
 func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rule, patch string, drafts []model.LlmComment, proposed map[int]businessCheck) map[int]bool {
+	type scenario struct {
+		Input      string `json:"input"`
+		Observable string `json:"observable,omitempty"`
+		Condition  string `json:"finding_quote,omitempty"`
+	}
 	type finding struct {
-		ID        string `json:"candidate"`
-		Path      string `json:"path"`
-		Line      int    `json:"line"`
-		Content   string `json:"finding"`
-		Code      string `json:"existing_code"`
-		Confirmed string `json:"verified_finding,omitempty"`
+		ID        string     `json:"candidate"`
+		Path      string     `json:"path"`
+		Line      int        `json:"line"`
+		Content   string     `json:"finding"`
+		Code      string     `json:"existing_code"`
+		Confirmed string     `json:"verified_finding,omitempty"`
+		Cases     []scenario `json:"cases_to_reproduce,omitempty"`
 	}
 	var pending []finding
 	explicit := false
+	hasCases := false
 	for i, cm := range drafts {
 		check, candidate := proposed[i]
 		decided := g.business.hasReviewDecision(cm.Path, "")
@@ -523,7 +541,14 @@ func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rul
 		if candidate {
 			line = check.Line
 		}
-		pending = append(pending, finding{fmt.Sprintf("c-%d", i), cm.Path, line, cm.Content, cm.ExistingCode, check.confirmation})
+		entry := finding{ID: fmt.Sprintf("c-%d", i), Path: cm.Path, Line: line, Content: cm.Content, Code: cm.ExistingCode, Confirmed: check.confirmation}
+		if check.Reference != "" {
+			for _, first := range check.scopeCases {
+				entry.Cases = append(entry.Cases, scenario{first.Input, first.Observable, first.FindingQuote})
+			}
+		}
+		hasCases = hasCases || len(entry.Cases) != 0
+		pending = append(pending, entry)
 	}
 	if len(pending) == 0 {
 		return nil
@@ -540,6 +565,9 @@ func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rul
 	}
 	if explicit {
 		instruction += " A previous decision on this review is available. Compare its recorded finding, reason and source with the current finding even if the wording differs. Check both sides of the patch: a criticized expression inherited unchanged is not an introduced defect unless the surrounding change makes it newly reachable or changes its effect. To show that an expression was inherited in a one-line replacement, supply inherited_expression (the complete disputed expression verbatim on both sides), use the reviewed path as source_path, and put the exact old diff line including its minus marker in source_quote. Explain why the surrounding change does not alter the trigger or effect. Treat decisions limited to some inputs as inconclusive for any other inputs."
+	}
+	if hasCases {
+		instruction += " For an original finding with cases_to_reproduce, independently trace its specified input and observable. Preserve those input and observable labels verbatim in your application, and the supplied finding_quote when provided. Keep the original if that scenario does not disprove the whole finding."
 	}
 	messages, fits := a.appendBusinessContext(messages, g, instruction)
 	if !fits {
@@ -590,16 +618,14 @@ func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rul
 			if !a.identifies(c.Candidate, drafts[i].Content) || strings.TrimSpace(a.Input) != strings.TrimSpace(c.Trigger) {
 				return false
 			}
-			if p.Reference == c.Reference && strings.TrimSpace(p.RefutedText) == strings.TrimSpace(drafts[i].Content) {
-				return true
-			}
 			return slices.ContainsFunc(p.scopeCases, func(first discussionAssessment) bool {
-				return first.Reference == c.Reference && first.FindingQuote == a.FindingQuote &&
+				return first.Reference == c.Reference && (first.FindingQuote == "" || first.FindingQuote == a.FindingQuote) &&
 					strings.EqualFold(first.Observable, a.Observable) && strings.TrimSpace(first.Input) == strings.TrimSpace(a.Input)
 			})
 		})
 		c.Line = line
 		if scoped {
+			c.scopeCases = p.scopeCases
 			if _, proven := g.business.scopedRefutation(c, p.ID, lines[c.Path]); proven {
 				remove[i] = true
 			}
@@ -722,7 +748,20 @@ func groundBusinessChecks(response string, g FileGroup, drafts []model.LlmCommen
 		}
 		if c.Outcome == "refuted" && c.Reference != "" {
 			var proven bool
-			if len(satisfied[scopedSource{c.Path, c.Reference}]) == 0 {
+			i, ok := refutedCandidate(c, line, drafts)
+			if !ok || strings.TrimSpace(c.RefutedText) != strings.TrimSpace(drafts[i].Content) {
+				continue
+			}
+			rows := satisfied[scopedSource{c.Path, c.Reference}]
+			for _, row := range rows {
+				// An explicit, verbatim nomination can select a single assessed
+				// case even when the row does not repeat the candidate ID.
+				if row.identifies(c.Candidate, drafts[i].Content) || row.Candidate == "" &&
+					(len(rows) == 1 && c.Trigger == "" || c.Trigger != "" && strings.TrimSpace(c.Trigger) == strings.TrimSpace(row.Input)) {
+					c.scopeCases = append(c.scopeCases, row)
+				}
+			}
+			if len(c.scopeCases) == 0 {
 				continue
 			}
 			if c, proven = g.business.scopedRefutation(c, "", current[c.Path]); !proven {
