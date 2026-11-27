@@ -958,8 +958,10 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 			}
 			check.Outcome, check.SourcePath, check.SourceQuote, check.Reason = "refuted", testFile, presence, "The width test still passes."
 			check.RefutedText, check.Candidate = realFinding, "c-0"
+			check.Trigger, check.Effect = "An export of twelve items", "returns 12, above the limit of eight"
 			fallback := check
 			fallback.RefutedText, fallback.Candidate = falseFinding, "c-1"
+			fallback.Trigger, fallback.Effect = "Exporting with no items supplied", "loses the fallback width of eight"
 			if len(decisions) != 0 {
 				if !snapshot[1].IsDecision() || snapshot[1].ContextStatus() != knowledge.StatusHistorical {
 					t.Fatal("explicit review decision lost its current implementation witness")
@@ -967,8 +969,6 @@ func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
 				fallback.ID, fallback.SourcePath, fallback.SourceQuote = snapshot[1].ID, callee, missing
 			}
 			first = businessReply(t, check, fallback)
-			check.Trigger, check.Effect = "Export twelve items.", "The finding reports a width above eight."
-			fallback.Trigger, fallback.Effect = "Export with items set to None.", "The finding reports that the fallback width is lost."
 			fallback.SourcePath, fallback.SourceQuote, fallback.Reason = callee, missing, "The unchanged branch returns the fallback limit."
 			if falseCounterproof != "" {
 				check.SourcePath, check.SourceQuote, check.Reason = callee, falseCounterproof, "The separately cited code still gives eight."

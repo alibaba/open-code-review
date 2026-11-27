@@ -96,7 +96,8 @@ func TestMixedRuleGroupRetainsDirectCalleeChecks(t *testing.T) {
 	const localTest = "    assert normalize(100) == 100"
 	const before = "from .pricing_policy import MAX_QUOTE_CENTS as policy_max, PREVIEW_MARKUP_CENTS as preview_markup\n\n" + limit + "\n\ndef normalize(raw):\n" +
 		"    minimum = 0\n    cents = max(raw, minimum)\n    return min(cents, INVOICE_LIMIT_CENTS, policy_max)\n\n" +
-		"def quote_amount(cents):\n" + previewBound + "\n    " + oldReturn + "\n\ndef test_normalization_contract():\n" + localTest + "\n"
+		"def quote_amount(cents, mode='normal'):\n" + previewBound + "\n" +
+		"    if mode == 'express':\n        bound = 200\n    " + oldReturn + "\n\ndef test_normalization_contract():\n" + localTest + "\n"
 	const use = "    return store(amount)"
 	const previewUse = "    return store(quote)"
 	const flow = "from .pricing import normalize, quote_amount\n\ndef invoice(raw):\n    amount = normalize(raw)\n" + use +
@@ -226,14 +227,23 @@ func TestMixedRuleGroupRetainsDirectCalleeChecks(t *testing.T) {
 	if _, ok := head.WithDirectCalleeEvidence(ctx, unknown, after); ok {
 		t.Error("an absent callee was admitted for direct review")
 	}
-	const falseFinding = "A raw amount of 100 now returns 101 cents, exceeding the invoice limit."
+	const falseFinding = "A normal quote for a raw amount of 100 now returns 101 cents, exceeding the invoice limit."
+	const expressFinding = "An express quote for a raw amount of 100 now returns 101 cents. A normal quote of 100 remains capped."
 	const missed = "A raw amount of 10 now returns 11 cents, so it is one cent higher than the accepted amount."
 	line := 1 + strings.Count(after[:strings.Index(after, newReturn)], "\n")
 	direct := businessCheck{ID: ids[mixed], Outcome: "violation", Path: callee, Quote: newReturn, Reason: missed,
 		SourcePath: tests, SourceQuote: "assert direct_quote(10) == 10", Severity: "medium"}
 	refute := businessCheck{ID: ids[external], Outcome: "refuted", Path: callee, Quote: newReturn, Line: line, Candidate: "c-0", RefutedText: falseFinding,
 		SourcePath: policy, SourceQuote: policyLimit, Reason: "The upper bound still caps the result at 100 cents.",
-		Trigger: "A raw amount of 100.", Effect: "The reported amount exceeds 100 cents."}
+		Trigger: "A normal quote for a raw amount of 100", Effect: "returns 101 cents"}
+	express := refute
+	express.RefutedText, express.Trigger = expressFinding, "An express quote for a raw amount of 100"
+	normalOnly := express
+	normalOnly.Trigger = "A normal quote of 100"
+	differentEffect := refute
+	differentEffect.Effect = "exceeding the invoice limit"
+	missingTrigger := express
+	missingTrigger.Trigger = ""
 	unresolved := refute
 	unresolved.counterproof = true
 	if selectBusinessContext(snapshot, []model.Diff{change}).proves(byID[refute.ID], unresolved, nil) {
@@ -247,14 +257,20 @@ func TestMixedRuleGroupRetainsDirectCalleeChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mixedRules := []string{mixed, local, external, pure, downstream, other}
 	for _, tc := range []struct {
-		name  string
-		rules []string
+		name               string
+		rules              []string
+		first, independent *businessCheck
+		keepDraft          bool
 	}{
-		{"mixed group", []string{mixed, local, external, pure, downstream, other}},
-		{"all rules have a caller", []string{mixed, local, external, pure, downstream}},
-		{"sole linked rule with a direct test", []string{mixed}},
-		{"sole linked rule with a caller test", []string{downstream}},
+		{"mixed group", mixedRules, &refute, &refute, false},
+		{"normal cannot refute express", mixedRules, &express, &normalOnly, true},
+		{"the two reviews must identify the same claimed effect", mixedRules, &refute, &differentEffect, true},
+		{"missing first trigger cannot nominate", mixedRules, &missingTrigger, nil, true},
+		{"all rules have a caller", []string{mixed, local, external, pure, downstream}, &refute, &refute, false},
+		{"sole linked rule with a direct test", []string{mixed}, nil, nil, false},
+		{"sole linked rule with a caller test", []string{downstream}, nil, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			keep := func(claim string) bool { return slices.Contains(tc.rules, claim) }
@@ -271,8 +287,11 @@ func TestMixedRuleGroupRetainsDirectCalleeChecks(t *testing.T) {
 			}
 			const noChecks = `{"checks":[]}`
 			var replies []string
-			if keep(external) {
-				replies = append(replies, businessReply(t, direct, refute), string(effect), businessReply(t, refute))
+			if tc.first != nil {
+				replies = append(replies, businessReply(t, direct, *tc.first), string(effect))
+				if tc.independent != nil {
+					replies = append(replies, businessReply(t, *tc.independent))
+				}
 			} else if keep(mixed) {
 				replies = append(replies, businessReply(t, direct), string(effect))
 			}
@@ -282,8 +301,8 @@ func TestMixedRuleGroupRetainsDirectCalleeChecks(t *testing.T) {
 			}
 			a := New(Args{RepoDir: dir, LLMClient: client, KnowledgeTree: &head, Template: template.Template{MaxTokens: 16000}})
 			a.inputResolution.ResolvedBase = base.Commit
-			if keep(external) {
-				a.args.CommentCollector.Add(model.LlmComment{Path: callee, StartLine: line, EndLine: line, ExistingCode: newReturn, Content: falseFinding})
+			if tc.first != nil {
+				a.args.CommentCollector.Add(model.LlmComment{Path: callee, StartLine: line, EndLine: line, ExistingCode: newReturn, Content: tc.first.RefutedText})
 			}
 			a.verifyBusinessFindings(ctx, g, "", change.Diff)
 			records := a.session.GetOrCreateFileSession(fileGroupKey(g.Diffs)).TaskRecords
@@ -299,6 +318,15 @@ func TestMixedRuleGroupRetainsDirectCalleeChecks(t *testing.T) {
 			}
 			first, second := reviews[0].RequestMessages, reviews[1].RequestMessages
 			standard, supplemental := first[len(first)-1].ExtractText(), second[len(second)-1].ExtractText()
+			if strings.Contains(first[0].ExtractText(), callerRefutationScenarioPrompt) != (tc.first != nil) ||
+				strings.Contains(second[0].ExtractText(), callerRefutationScenarioPrompt) {
+				t.Error("scenario instructions should only accompany ordinary findings to recheck")
+			}
+			refutations := records[session.BusinessRefutationTask]
+			if tc.independent != nil && (len(refutations) != 1 || !strings.Contains(refutations[0].RequestMessages[0].ExtractText(), callerRefutationScenarioPrompt) ||
+				strings.Contains(refutations[0].RequestMessages[1].ExtractText(), "cases_to_reproduce")) {
+				t.Error("the independent reviewer should quote its own scenario from the original finding")
+			}
 			if strings.Contains(first[0].ExtractText(), callerLookupPrompt) || !strings.Contains(second[0].ExtractText(), callerLookupPrompt) {
 				t.Error("the caller assessment ran before the direct assessment")
 			}
@@ -313,8 +341,14 @@ func TestMixedRuleGroupRetainsDirectCalleeChecks(t *testing.T) {
 				}
 			}
 			final := a.args.CommentCollector.CommentsForPath(callee)
-			if len(final) != 1 || !strings.Contains(final[0].Content, missed) || (len(records[session.BusinessRefutationTask]) == 1) != keep(external) {
-				t.Errorf("direct finding or independent refutation lost: %+v, %d refutations", final, len(records[session.BusinessRefutationTask]))
+			wantFinal := 1
+			if tc.keepDraft {
+				wantFinal++
+			}
+			if len(final) != wantFinal || !slices.ContainsFunc(final, func(c model.LlmComment) bool { return strings.Contains(c.Content, missed) }) ||
+				tc.keepDraft && !slices.ContainsFunc(final, func(c model.LlmComment) bool { return c.Content == tc.first.RefutedText }) ||
+				(len(records[session.BusinessRefutationTask]) == 1) != (tc.independent != nil) {
+				t.Errorf("unexpected final findings: %+v, %d refutations", final, len(records[session.BusinessRefutationTask]))
 			}
 		})
 	}
