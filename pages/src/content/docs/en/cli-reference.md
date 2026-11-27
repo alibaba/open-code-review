@@ -520,6 +520,15 @@ numbers, so a finding that only moved down the file still counts as
 persisting. When the after session's manifest records a file rename, the old
 path is mapped to the new path before matching.
 
+When the selected snippet's range grows or shrinks, findings still match if the
+shorter snippet is a contiguous run of whole lines inside the longer one and is
+at least 24 characters long. The fallback also requires the finding text to
+match exactly, so a line shared by a different finding is not merged. Category
+changes and reworded findings without a snippet are not matched by this
+fallback and may appear as resolved + new.
+Persisting means the finding was reported again, not that the issue was
+confirmed fixed.
+
 ```bash
 ocr session compare <before-session-id> <after-session-id>
 ocr session diff <before-session-id> <after-session-id>

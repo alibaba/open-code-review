@@ -6,6 +6,7 @@ package session
 import (
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/model"
 )
@@ -23,10 +24,17 @@ type CompareResult struct {
 }
 
 // Compare buckets the findings of an earlier run (before) against a later one
-// (after). Matching is a multiset match on findingKey, so N identical findings
-// before and M after yield min(N,M) persisting plus the remainder on whichever
-// side is longer. Persisting carries the after copy, which has the current line
-// numbers.
+// (after). It first matches findings with the exact findingKey identity used by
+// earlier versions. For findings that do not match exactly, it then tries a
+// conservative snippet containment rule: same path and category, one snippet
+// is a contiguous run of whole lines inside the other, the shorter snippet is
+// at least minContainedSnippetChars long, and the finding text is identical.
+// Snippet containment handles a finding whose selected range grew or shrank
+// without treating arbitrary substring overlap as the same issue.
+//
+// Matching is a multiset match: N identical findings before and M after yield
+// min(N,M) persisting plus the remainder on whichever side is longer.
+// Persisting carries the after copy, which has the current line numbers.
 //
 // afterManifest supplies both the paths the after run actually reviewed and
 // any old-to-new path pairs recorded for renamed files. When it is nil - a
@@ -36,10 +44,14 @@ func Compare(before, after []model.LlmComment, afterManifest *RunManifest) Compa
 	reviewed := ReviewedPaths(afterManifest)
 	renamed := renamedPaths(afterManifest)
 
-	pool := make(map[findingIdentity][]model.LlmComment, len(after))
-	for _, c := range after {
-		k := findingKey(c, c.Path)
-		pool[k] = append(pool[k], c)
+	used := make([]bool, len(after))
+	exact := make(map[findingIdentity][]int, len(after))
+	groups := make(map[findingGroupKey][]int, len(after))
+	for i, c := range after {
+		key := findingKey(c, c.Path)
+		exact[key] = append(exact[key], i)
+		group := findingGroupKey{path: key.path, category: key.category}
+		groups[group] = append(groups[group], i)
 	}
 
 	var res CompareResult
@@ -48,24 +60,32 @@ func Compare(before, after []model.LlmComment, afterManifest *RunManifest) Compa
 		if newPath, ok := renamed[path]; ok {
 			path = newPath
 		}
-		k := findingKey(c, path)
-		if matches := pool[k]; len(matches) > 0 {
-			res.Persisting = append(res.Persisting, matches[0])
-			pool[k] = matches[1:]
+		key := findingKey(c, path)
+		group := findingGroupKey{path: key.path, category: key.category}
+
+		matched := firstUnused(exact[key], used)
+		if matched < 0 {
+			matched = matchContainedSnippet(c, after, groups[group], used)
+		}
+		if matched >= 0 {
+			used[matched] = true
+			res.Persisting = append(res.Persisting, after[matched])
 			continue
 		}
 		// A path-less finding cannot be attributed to any reviewed file, so it
 		// falls out here as not-reviewed rather than being claimed as fixed.
-		if reviewed != nil && !reviewed[path] {
+		if reviewed != nil && !reviewed[key.path] {
 			res.NotReviewed = append(res.NotReviewed, c)
 			continue
 		}
 		res.Resolved = append(res.Resolved, c)
 	}
-	// Whatever the before side never claimed is new. Map iteration order is
-	// random; sortFindings below makes that unobservable.
-	for _, rest := range pool {
-		res.New = append(res.New, rest...)
+
+	// Whatever the before side never claimed is new.
+	for i, c := range after {
+		if !used[i] {
+			res.New = append(res.New, c)
+		}
 	}
 
 	res.New = sortFindings(res.New)
@@ -73,6 +93,103 @@ func Compare(before, after []model.LlmComment, afterManifest *RunManifest) Compa
 	res.Resolved = sortFindings(res.Resolved)
 	res.NotReviewed = sortFindings(res.NotReviewed)
 	return res
+}
+
+func firstUnused(indices []int, used []bool) int {
+	for _, idx := range indices {
+		if !used[idx] {
+			return idx
+		}
+	}
+	return -1
+}
+
+// matchContainedSnippet chooses the most similar unchecked candidate in the
+// same path/category group. Length difference is the primary tie-break and
+// line distance is only a secondary one; line numbers are still not identity,
+// so pure line drift does not prevent a match.
+func matchContainedSnippet(before model.LlmComment, after []model.LlmComment, indices []int, used []bool) int {
+	beforeText := normalizeSnippet(before.Content)
+	if beforeText == "" {
+		return -1
+	}
+	best := -1
+	bestLengthDelta := 0
+	bestLineDelta := 0
+	for _, idx := range indices {
+		if used[idx] {
+			continue
+		}
+		candidate := after[idx]
+		if normalizeSnippet(candidate.Content) != beforeText {
+			continue
+		}
+		if !lineBlockContains(candidate.ExistingCode, before.ExistingCode) &&
+			!lineBlockContains(before.ExistingCode, candidate.ExistingCode) {
+			continue
+		}
+		lengthDelta := absInt(len(normalizeSnippet(candidate.ExistingCode)) - len(normalizeSnippet(before.ExistingCode)))
+		lineDelta := absInt(candidate.StartLine - before.StartLine)
+		if best < 0 || lengthDelta < bestLengthDelta ||
+			(lengthDelta == bestLengthDelta && lineDelta < bestLineDelta) {
+			best = idx
+			bestLengthDelta = lengthDelta
+			bestLineDelta = lineDelta
+		}
+	}
+	return best
+}
+
+// minContainedSnippetChars avoids treating a short, generic line such as
+// "return nil" as the identity of a larger block. The issue's motivating
+// example (a Query call followed by its error check) is comfortably above it.
+const minContainedSnippetChars = 24
+
+// lineBlockContains reports whether inner is a contiguous run of complete
+// normalized lines in outer. Partial-line overlap is deliberately excluded:
+// it is too easy for a common expression to appear inside unrelated code.
+func lineBlockContains(outer, inner string) bool {
+	if utf8.RuneCountInString(normalizeSnippet(inner)) < minContainedSnippetChars {
+		return false
+	}
+	outerLines := normalizedLines(outer)
+	innerLines := normalizedLines(inner)
+	if len(innerLines) == 0 || len(innerLines) >= len(outerLines) {
+		return false
+	}
+	for start := 0; start+len(innerLines) <= len(outerLines); start++ {
+		matches := true
+		for offset := range innerLines {
+			if outerLines[start+offset] != innerLines[offset] {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedLines(s string) []string {
+	raw := strings.Split(s, "\n")
+	lines := make([]string, 0, len(raw))
+	for _, line := range raw {
+		line = normalizeSnippet(line)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 // findingKey identifies a finding across runs by what it is about, not where it
@@ -85,6 +202,14 @@ func Compare(before, after []model.LlmComment, afterManifest *RunManifest) Compa
 // normalizes would re-open every alert downstream - so the two stay apart even
 // though they read the same fields.
 func findingKey(c model.LlmComment, path string) findingIdentity {
+	return findingIdentity{
+		path:     normalizePath(path),
+		category: normalizeCategory(c.Category),
+		body:     findingBody(c),
+	}
+}
+
+func findingBody(c model.LlmComment) string {
 	body := normalizeSnippet(c.ExistingCode)
 	if body == "" {
 		// ponytail: no snippet recorded, so the prose is all the identity there
@@ -93,13 +218,22 @@ func findingKey(c model.LlmComment, path string) findingIdentity {
 		// to survive.
 		body = normalizeSnippet(c.Content)
 	}
-	return findingIdentity{normalizePath(path), strings.ToLower(strings.TrimSpace(c.Category)), body}
+	return body
+}
+
+func normalizeCategory(category string) string {
+	return strings.ToLower(strings.TrimSpace(category))
 }
 
 type findingIdentity struct {
 	path     string
 	category string
 	body     string
+}
+
+type findingGroupKey struct {
+	path     string
+	category string
 }
 
 // normalizeSnippet collapses every whitespace run to a single space so that
