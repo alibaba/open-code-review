@@ -463,6 +463,12 @@ ocr session comments --severity critical,high --category bug,security <session-i
 的问题仍然算作 persisting。如果 after 会话的运行清单记录了文件重命名，匹配前
 会先将旧路径映射到新路径。
 
+当问题代码片段的选择范围扩大或缩小时，如果较短片段是较长片段中连续的一整段行、
+且长度至少 24 个字符，仍会视为 persisting。该回退规则还要求问题描述文本完全一致，
+避免不同问题因共享一行代码而被误合并。类别变化或无片段的改写问题不会用此
+回退规则匹配，可能显示为 resolved + new。persisting 只表示该问题再次被报告，
+不等于已确认修复。
+
 ```bash
 ocr session compare <before-session-id> <after-session-id>
 ocr session diff <before-session-id> <after-session-id>

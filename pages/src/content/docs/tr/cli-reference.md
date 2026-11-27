@@ -422,6 +422,8 @@ ocr session comments --severity critical,high --category bug,security <session-i
 
 Eşleştirme satır numarasıyla değil yol, kategori ve sorunlu kod parçasıyla yapılır. Dosyada aşağı taşınan bulgu sürüyor sayılır. Sonraki bildirim yeniden adlandırma kaydetmişse eşleştirmeden önce eski yol yeniye dönüştürülür.
 
+Seçilen kod parçasının aralığı genişler veya daralırsa, kısa parça uzun parçanın içinde ardışık tam satırlardan oluşuyorsa ve en az 24 karakter uzunluğundaysa bulgular yine eşleşir. Bu geri dönüş, bulgu metninin tam olarak aynı olmasını da gerektirir; farklı bir bulguyla paylaşılan bir satır birleştirilmez. Kategori değişiklikleri ve kod parçası olmadan yeniden ifade edilen bulgular bu geri dönüşle eşleşmez ve resolved + new olarak görünebilir. Persisting, sorunun yeniden bildirildiğini gösterir; düzeltildiğinin kanıtı değildir.
+
 ```bash
 ocr session compare <before-session-id> <after-session-id>
 ocr session diff <before-session-id> <after-session-id>

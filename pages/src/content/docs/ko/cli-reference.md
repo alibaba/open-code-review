@@ -485,6 +485,13 @@ ocr session comments --severity critical,high --category bug,security <session-i
 파일 안에서 위치만 밀린 지적은 여전히 남아 있는 것으로 잡힙니다. after 세션의 실행
 매니페스트에 파일 이름 변경이 기록되어 있으면 대조 전에 이전 경로를 새 경로로 바꿉니다.
 
+선택한 코드 조각의 범위가 넓어지거나 좁아진 경우, 짧은 조각이 긴 조각 안의 연속된
+전체 줄 묶음이고 길이가 24자 이상이면 계속 남아 있는 것으로 봅니다. 이 폴백은
+지적 설명 문구가 정확히 일치할 때만 적용되므로, 서로 다른 지적이 같은 줄을 공유해도
+병합되지 않습니다. 분류 변경이나 코드 조각이 없는 문구 변경은 이 폴백으로 대조되지
+않으며 resolved + new로 표시될 수 있습니다. 남아 있음은 문제가 다시 보고되었다는 뜻이며, 수정이 확인되었다는 뜻은
+아닙니다.
+
 ```bash
 ocr session compare <before-session-id> <after-session-id>
 ocr session diff <before-session-id> <after-session-id>

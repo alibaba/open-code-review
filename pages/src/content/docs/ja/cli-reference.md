@@ -468,6 +468,13 @@ ocr session comments --severity critical,high --category bug,security <session-i
 ずれただけの指摘は persisting のままになります。after セッションのランマニフェストに
 ファイル名変更が記録されている場合、照合前に旧パスを新パスへ対応付けます。
 
+選択したコード片の範囲が広がった、または狭まった場合、短い方のコード片が長い方の
+連続した完全な行の並びで、24 文字以上であれば persisting とみなします。また、この
+フォールバックでは指摘の説明文が完全に一致することも必要です。別の指摘が同じ行を
+共有していても統合されません。カテゴリの変更や、コード片のない言い換えはこの
+フォールバックでは一致せず、resolved + new と表示されることがあります。persisting は問題が再び報告されたことを示すもので、
+修正済みであることを保証するものではありません。
+
 ```bash
 ocr session compare <before-session-id> <after-session-id>
 ocr session diff <before-session-id> <after-session-id>
