@@ -65,7 +65,7 @@ func (p *FileReadDiffProvider) Tool() Tool { return FileReadDiff }
 func (p *FileReadDiffProvider) Execute(_ context.Context, args map[string]any) (string, error) {
 	pathArray, _ := args["path_array"].([]any)
 	if len(pathArray) == 0 {
-		return "Error: no files found", nil
+		return "", DiagnosticError("Error: no files found")
 	}
 
 	var sb strings.Builder
@@ -87,17 +87,17 @@ func (p *FileReadDiffProvider) Execute(_ context.Context, args map[string]any) (
 	}
 
 	if len(missing) > 0 {
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
+		message := p.notFoundMessage(missing)
+		if sb.Len() == 0 {
+			return "", DiagnosticError(message)
 		}
-		sb.WriteString(p.notFoundMessage(missing))
+		sb.WriteString("\n")
+		sb.WriteString(message)
 	}
-
-	result := sb.String()
-	if result == "" {
-		return "Error: diff not found for the requested paths", nil
+	if sb.Len() == 0 {
+		return "", DiagnosticError("Error: diff not found for the requested paths")
 	}
-	return result, nil
+	return sb.String(), nil
 }
 
 // notFoundMessage names the paths that had no diff and, when the snapshot

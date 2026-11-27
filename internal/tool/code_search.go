@@ -48,7 +48,7 @@ func (p *CodeSearchProvider) execute(ctx context.Context, args map[string]any) (
 	for _, item := range filePatternsIface {
 		if s, ok := item.(string); ok && s != "" {
 			if hasTraversalPathComponent(s) {
-				return "Error: file_patterns must not contain ..", nil
+				return "", DiagnosticError("Error: file_patterns must not contain ..")
 			}
 			// Treat backslashes as separators so Windows pathspecs match.
 			patterns = append(patterns, strings.ReplaceAll(s, "\\", "/"))
@@ -56,7 +56,7 @@ func (p *CodeSearchProvider) execute(ctx context.Context, args map[string]any) (
 	}
 
 	if strings.TrimSpace(searchText) == "" {
-		return "Error: search_text is blank", nil
+		return "", DiagnosticError("Error: search_text is blank")
 	}
 
 	result, err := p.gitGrep(ctx, searchText, caseSensitive, usePerlRegexp, patterns)
@@ -155,7 +155,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
 	if cmdArgs == nil {
-		return "Error: ref must not start with '-'", nil
+		return "", DiagnosticError("Error: ref must not start with '-'")
 	}
 
 	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)

@@ -56,11 +56,6 @@ func TestFileReadDiffProvider_Execute(t *testing.T) {
 			wantSub: "==== FILE: b.go ====",
 		},
 		{
-			name:    "missing path",
-			args:    map[string]any{"path_array": []any{"missing.go"}},
-			wantErr: "Error: diff not found",
-		},
-		{
 			name:    "empty path_array",
 			args:    map[string]any{"path_array": []any{}},
 			wantErr: "Error: no files found",
@@ -70,19 +65,22 @@ func TestFileReadDiffProvider_Execute(t *testing.T) {
 			args:    map[string]any{},
 			wantErr: "Error: no files found",
 		},
+		{
+			name:    "no string paths",
+			args:    map[string]any{"path_array": []any{1, nil}},
+			wantErr: "Error: diff not found for the requested paths",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := p.Execute(context.Background(), tt.args)
+			if tt.wantErr != "" {
+				assertDiagnosticError(t, got, err, tt.wantErr)
+				return
+			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
-			}
-			if tt.wantErr != "" {
-				if !strings.Contains(got, tt.wantErr) {
-					t.Errorf("got %q, want containing %q", got, tt.wantErr)
-				}
-				return
 			}
 			if !strings.Contains(got, tt.wantSub) {
 				t.Errorf("got %q, want containing %q", got, tt.wantSub)

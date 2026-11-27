@@ -256,11 +256,27 @@ func TestObservationFailuresPublishOnlyReference(test *testing.T) {
 	if len(failures) != 1 || failures[0].Error != "obs-000001: unavailable" || failures[0].Arguments != "" || !strings.Contains(outcome.Content, "missing.go") {
 		test.Fatalf("unexpected failure diagnostics: %+v", failures)
 	}
+	call = response("file_read_diff", `{"path_array":["missing.go"]}`).ToolCalls()[0]
+	outcome = runner.executeTool(test.Context(), "fixture", call, nil, "")
+	var observation Observation
+	if err := json.Unmarshal([]byte(outcome.Content), &observation); err != nil {
+		test.Fatalf("decode diff observation: %v", err)
+	}
+	if observation.ID != "obs-000002" || observation.ErrorClass != "tool_error" || len(observation.Locations) != 0 ||
+		!strings.HasPrefix(observation.ReturnedContent, "Error: diff not found for: missing.go\nDiffs exist for: ") ||
+		!strings.Contains(observation.ReturnedContent, "main.go") {
+		test.Errorf("missing diff observation: %+v", observation)
+	}
+	failures = runner.loop.ToolFailures()
+	if len(failures) != 2 || failures[1].Error != "obs-000002: tool_error" || failures[1].Arguments != "" {
+		test.Fatalf("missing diff failure record: %+v", failures)
+	}
 	call = response("file_read_diff", `{"path_array":["main.go","missing.go"]}`).ToolCalls()[0]
 	outcome = runner.executeTool(test.Context(), "fixture", call, nil, "")
 	failures = runner.loop.ToolFailures()
-	if len(failures) != 2 || failures[1].Error != "obs-000002: tool_error" || failures[1].Arguments != "" || !strings.Contains(outcome.Content, "+new value") {
-		test.Fatalf("mixed diff diagnostics: %+v", failures)
+	if len(failures) != 3 || failures[2].Error != "obs-000003: tool_error" || failures[2].Arguments != "" ||
+		!strings.Contains(outcome.Content, "+new value") || !strings.Contains(outcome.Content, "Error: diff not found for: missing.go") {
+		test.Fatalf("mixed diff diagnostics: %s, failures: %+v", outcome.Content, failures)
 	}
 }
 

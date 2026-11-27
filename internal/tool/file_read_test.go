@@ -341,17 +341,37 @@ func TestFileReadProvider_Tool(t *testing.T) {
 	}
 }
 
-func TestExecute_EmptyFilePath(t *testing.T) {
-	fr := &FileReader{RepoDir: t.TempDir(), Mode: ModeWorkspace}
-	p := NewFileRead(fr)
+func TestExecute_RejectsMissingOrInvalidFilePath(t *testing.T) {
+	p := NewFileRead(&FileReader{Mode: ModeWorkspace})
+	for _, test := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "missing", args: map[string]any{}},
+		{name: "empty", args: map[string]any{"file_path": ""}},
+		{name: "non-string", args: map[string]any{"file_path": true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := p.Execute(t.Context(), test.args)
+			assertDiagnosticError(t, got, err, "Error: file_path is required")
+		})
+	}
+}
 
-	got, err := p.Execute(context.Background(), map[string]any{"file_path": ""})
-	if err != nil {
-		t.Fatal(err)
+func assertDiagnosticError(t *testing.T, result string, err error, want string) {
+	t.Helper()
+	if got := requireDiagnosticError(t, result, err); got != want {
+		t.Errorf("diagnostic = %q, want %q", got, want)
 	}
-	if got != "Error: file_path is required" {
-		t.Errorf("Execute() = %q, want file_path required error", got)
+}
+
+func requireDiagnosticError(t *testing.T, result string, err error) string {
+	t.Helper()
+	var diagnostic DiagnosticError
+	if result != "" || !errors.As(err, &diagnostic) {
+		t.Fatalf("Execute() = %q, %v (%T), want empty result and DiagnosticError", result, err, err)
 	}
+	return diagnostic.Error()
 }
 
 func TestExecute_InvalidLineRange(t *testing.T) {

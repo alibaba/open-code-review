@@ -6,14 +6,16 @@ package reviewtask
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
+
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
-	"time"
 )
 
 // executeToolCall dispatches a single tool call from the LLM response and
@@ -210,10 +212,15 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 	telemetry.RecordToolCall(ctx, toolName, dur, ok)
 
 	if err != nil {
-		r.RecordToolFailure(toolCallNumber, toolName, taskKey, err.Error(),
+		diagnostic := err.Error()
+		r.RecordToolFailure(toolCallNumber, toolName, taskKey, diagnostic,
 			rec, call.Function.Arguments, dur)
 		telemetry.PrintToolCallError(toolName, err)
-		return r.toolFailureResult(taskKey, toolName, fmt.Sprintf("Error executing tool %s: %v", toolName, err))
+		var direct tool.DiagnosticError
+		if !errors.As(err, &direct) {
+			diagnostic = fmt.Sprintf("Error executing tool %s: %v", toolName, err)
+		}
+		return r.toolFailureResult(taskKey, toolName, diagnostic)
 	}
 	telemetry.PrintToolCallFinished(toolName, dur)
 	if rec != nil {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -205,6 +206,122 @@ func TestExecuteToolCall_CodeCommentValidationErrorPrintsTerminalFailure(t *test
 	}
 	if !strings.Contains(errOut, "[ocr]   ✘ code_comment failed: Error: 'comments' array is required") {
 		t.Errorf("stderr = %q, want terminal validation failure", errOut)
+	}
+}
+
+func TestExecuteToolCall_BuiltInRejections(t *testing.T) {
+	reader := &tool.FileReader{Mode: tool.ModeWorkspace}
+	for _, test := range []struct {
+		provider tool.Provider
+		args     string
+		want     string
+	}{
+		{tool.NewFileRead(reader), `{}`, "Error: file_path is required"},
+		{tool.NewCodeSearch(reader), `{"search_text":"  "}`, "Error: search_text is blank"},
+		{tool.NewFileReadDiff(tool.NewDiffMap(map[string]string{"reviewed.go": "+new"})), `{"path_array":["missing.go"]}`,
+			"Error: diff not found for: missing.go\nDiffs exist for: reviewed.go\nUse one of those paths, or file_read for a file outside the reviewed set.\n"},
+	} {
+		name := test.provider.Tool().Name()
+		t.Run(name, func(t *testing.T) {
+			reg := tool.NewRegistry()
+			reg.Register(test.provider)
+			reg.Freeze()
+			r := NewRunner(Deps{Tools: reg})
+			rec := &session.TaskRecord{}
+			const task = "reviewed.go"
+			call := llm.ToolCall{Function: llm.FunctionCall{Name: name, Arguments: test.args}}
+
+			var results [4]tool.TaskCheckpoint
+			progress, errOut := captureToolTerminal(t, func() {
+				for i := range results {
+					results[i] = r.executeToolCall(t.Context(), task, call, rec, "")
+				}
+			})
+			if got := strings.Count(errOut, "[ocr]   ✘ "+name+" failed: "+test.want); got != 4 || strings.Contains(progress, "[ocr]   ✔ "+name) {
+				t.Errorf("terminal output: stdout = %q, stderr = %q", progress, errOut)
+			}
+			if results[0].Data != test.want || !strings.HasPrefix(results[1].Data, test.want) ||
+				!strings.Contains(results[1].Data, "second consecutive failure calling "+name) {
+				t.Errorf("retry feedback = %q, %q", results[0].Data, results[1].Data)
+			}
+			if !strings.Contains(results[2].Data, "has been skipped") || results[3].Data != results[2].Data {
+				t.Errorf("skip feedback = %q, %q", results[2].Data, results[3].Data)
+			}
+			failures := r.ToolFailures()
+			if r.ToolCalls()[name] != 4 || len(failures) != 4 || len(rec.ToolResults) != 4 {
+				t.Fatalf("calls = %v, failures = %+v, session = %+v", r.ToolCalls(), failures, rec.ToolResults)
+			}
+			for i, result := range results {
+				if result.Failed || result.Completed {
+					t.Errorf("call %d ended the task: %+v", i+1, result)
+				}
+				failure := failures[i]
+				if failure.ToolCallNumber != int64(i+1) || failure.ToolName != name || failure.FilePath != task ||
+					failure.Arguments != test.args || failure.Error != test.want {
+					t.Errorf("failure %d = %+v", i+1, failure)
+				}
+				saved := rec.ToolResults[i]
+				if saved.OK || saved.Result != test.want {
+					t.Errorf("session result %d = %+v", i+1, saved)
+				}
+			}
+		})
+	}
+}
+
+func TestExecuteToolCall_BuiltInSuccessResetsFailureStreak(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "reviewed.go"), []byte("package reviewed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reader := tool.FileReader{RepoDir: dir, Mode: tool.ModeWorkspace}
+	access, err := tool.NewWorkspaceCodeAccess(reader, tool.FileReader{Mode: tool.ModeCommit, Ref: "base-revision"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		provider     tool.Provider
+		rejectedArgs string
+		diagnostic   string
+		validArgs    string
+		validResult  string
+	}{
+		{&tool.FileReadProvider{Access: access}, `{"side":"old"}`, "SIDE: old\nREVISION: base-revision\nError: file_path is required",
+			`{"file_path":"reviewed.go"}`, "1|package reviewed"},
+		{tool.NewCodeSearch(&reader), `{"search_text":" "}`, "Error: search_text is blank",
+			`{"search_text":"absent-needle"}`, "No matches found"},
+		{tool.NewFileReadDiff(tool.NewDiffMap(map[string]string{"reviewed.go": "+new"})), `{"path_array":[]}`, "Error: no files found",
+			`{"path_array":["reviewed.go","missing.go"]}`, "+new\n\nError: diff not found for: missing.go"},
+	} {
+		name := test.provider.Tool().Name()
+		t.Run(name, func(t *testing.T) {
+			reg := tool.NewRegistry()
+			reg.Register(test.provider)
+			reg.Freeze()
+			r := NewRunner(Deps{Tools: reg})
+			rec := &session.TaskRecord{}
+			call := func(args string) string {
+				return r.executeToolCall(t.Context(), "reviewed.go", llm.ToolCall{
+					Function: llm.FunctionCall{Name: name, Arguments: args},
+				}, rec, "").Data
+			}
+			if got := call(test.rejectedArgs); got != test.diagnostic {
+				t.Errorf("first failure = %q, want %q", got, test.diagnostic)
+			}
+			if got := call(test.rejectedArgs); !strings.Contains(got, "second consecutive failure") {
+				t.Errorf("second failure = %q", got)
+			}
+			if got := call(test.validArgs); !strings.Contains(got, test.validResult) {
+				t.Errorf("corrected result = %q, want %q", got, test.validResult)
+			}
+			if got := call(test.rejectedArgs); got != test.diagnostic {
+				t.Errorf("first failure after success = %q, want %q", got, test.diagnostic)
+			}
+			if len(r.ToolFailures()) != 3 || len(rec.ToolResults) != 4 || !rec.ToolResults[2].OK {
+				t.Errorf("failures = %+v, session = %+v", r.ToolFailures(), rec.ToolResults)
+			}
+		})
 	}
 }
 

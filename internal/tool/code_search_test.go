@@ -50,15 +50,10 @@ func TestBuildGrepArgs_RejectsOptionLikeRef(t *testing.T) {
 	}
 }
 
-func TestGitGrep_RejectsOptionLikeRef(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "-O./pwn.sh"})
-	result, err := p.gitGrep(context.Background(), "myFunc", false, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result != "Error: ref must not start with '-'" {
-		t.Fatalf("unexpected result: %s", result)
-	}
+func TestCodeSearchProvider_Execute_RejectsOptionLikeRef(t *testing.T) {
+	p := NewCodeSearch(&FileReader{Mode: ModeCommit, Ref: "-invalid"})
+	result, err := p.Execute(t.Context(), map[string]any{"search_text": "myFunc"})
+	assertDiagnosticError(t, result, err, "Error: ref must not start with '-'")
 }
 
 func TestBuildGrepArgs_PatternStartingWithDash(t *testing.T) {
@@ -311,12 +306,7 @@ func TestGitGrep_OptionLikeRefDoesNotLaunchPager(t *testing.T) {
 
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "-O./pwn.sh", Mode: ModeCommit})
 	result, err := p.gitGrep(context.Background(), "Hello", false, false, []string{"hello.go"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(result, "Error:") {
-		t.Fatalf("expected git error for invalid ref, got: %s", result)
-	}
+	assertDiagnosticError(t, result, err, "Error: ref must not start with '-'")
 	if _, err := os.Stat(proofPath); err == nil {
 		t.Fatal("option-like ref launched pager and created proof file")
 	} else if !os.IsNotExist(err) {
@@ -607,12 +597,7 @@ func TestCodeSearchProvider_Tool(t *testing.T) {
 func TestCodeSearchProvider_Execute_BlankSearchText(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp"})
 	got, err := p.Execute(context.Background(), map[string]any{"search_text": "  "})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "Error: search_text is blank" {
-		t.Errorf("Execute() = %q, want blank error", got)
-	}
+	assertDiagnosticError(t, got, err, "Error: search_text is blank")
 }
 
 func TestCodeSearchProvider_Execute_Found(t *testing.T) {
@@ -682,14 +667,13 @@ func TestCodeSearchProvider_Execute_RejectsTraversalPattern(t *testing.T) {
 	tests := []struct {
 		name    string
 		pattern string
-		want    string
 	}{
-		{name: "leading parent", pattern: "../pkg", want: "Error: file_patterns must not contain .."},
-		{name: "middle parent", pattern: "pkg/../internal", want: "Error: file_patterns must not contain .."},
-		{name: "trailing parent", pattern: "pkg/..", want: "Error: file_patterns must not contain .."},
-		{name: "leading parent backslash", pattern: `..\pkg`, want: "Error: file_patterns must not contain .."},
-		{name: "middle parent backslash", pattern: `pkg\..\internal`, want: "Error: file_patterns must not contain .."},
-		{name: "trailing parent backslash", pattern: `pkg\..`, want: "Error: file_patterns must not contain .."},
+		{name: "leading parent", pattern: "../pkg"},
+		{name: "middle parent", pattern: "pkg/../internal"},
+		{name: "trailing parent", pattern: "pkg/.."},
+		{name: "leading parent backslash", pattern: `..\pkg`},
+		{name: "middle parent backslash", pattern: `pkg\..\internal`},
+		{name: "trailing parent backslash", pattern: `pkg\..`},
 	}
 
 	for _, test := range tests {
@@ -698,12 +682,7 @@ func TestCodeSearchProvider_Execute_RejectsTraversalPattern(t *testing.T) {
 				"search_text":   "Hello",
 				"file_patterns": []any{test.pattern},
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != test.want {
-				t.Errorf("Execute() = %q, want %q", got, test.want)
-			}
+			assertDiagnosticError(t, got, err, "Error: file_patterns must not contain ..")
 		})
 	}
 }
@@ -738,8 +717,8 @@ func TestCodeSearchProvider_Execute_CaseSensitive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(got, "Hello") {
-		t.Errorf("case-sensitive search for 'hello' should not match 'Hello', got: %s", got)
+	if got != "No matches found" {
+		t.Errorf("case-sensitive search for 'hello' = %q, want No matches found", got)
 	}
 }
 

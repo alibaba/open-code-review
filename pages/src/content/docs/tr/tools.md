@@ -317,6 +317,9 @@ Eşleşme yoksa aynen `No matches found` döndürülür.
 
 Ağ hatası, geçersiz argüman veya bulunamayan dosya gibi hatalar modele normal araç sonucu olarak iletilir; örneğin `"Error: file not found: src/missing.go"`. Model tekrar denemeye, başka dosya istemeye veya `task_done` çağırmaya karar verir.
 
+Kod incelemesinde `file_read` ve `code_search` tarafından reddedilen çağrılar ile istenen farkların hiçbirini döndürmeyen `file_read_diff` çağrıları başarısız olarak kaydedilir.
+İstenen farklardan en az biri döndürüldüğünde çağrı başarılı sayılır ve farkı bulunamayan yollar bildirilir. Geçerli bir arama, eşleşme bulunmasa da başarılı sayılır.
+
 Araç adı kayıtlı değilse OCR çökmek yerine `tool.NotAvailableMsg` sabitini döndürür; bilinmeyen çağrı modele kullanılamayan araç olarak bildirilir.
 
 ## Araç özelleştirme sınırları ve geçiş {#customizing-tools}
