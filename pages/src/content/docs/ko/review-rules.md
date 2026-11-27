@@ -212,6 +212,9 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/tests.rs`
 - `**/tests/**/*.rs`
 - `**/benches/**/*.rs`
+- `**/*_{test,tests,unittest,benchmark}.{c,cc,cpp,cxx}`
+- `**/{test,tests,unittests}/**/*.{c,h,cc,cpp,cxx,hpp,hxx}`
+- `**/{bench,benchmarks}/**/*.{c,h,cc,cpp,cxx,hpp,hxx}`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`

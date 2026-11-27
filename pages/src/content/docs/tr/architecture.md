@@ -13,7 +13,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>başlatma</b><br/><span style='font-size:0.85em'>LLM uç noktasını çözümle (ayar → ortam → rc dosyaları)<br/>Şablonu, araç kaydını ve sistem kurallarını yükle</span>"]
     C["<b>fark sağlayıcısı</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — []model.Diff üret<br/>Kipler: Çalışma alanı · Commit · Aralık</span>"]
-    D["<b>filtre ve kurallar</b><br/><span style='font-size:0.85em'>5 aşamalı filtre (selection.go) — ikili dosyaları,<br/>dışlanan yolları ve desteklenmeyen uzantıları ele. Dosya kuralını seç.</span>"]
+    D["<b>filtre ve kurallar</b><br/><span style='font-size:0.85em'>6 aşamalı filtre (selection.go) — ikili dosyaları, gizli dosya yollarını,<br/>dışlanan yolları ve desteklenmeyen uzantıları ele. Dosya kuralını seç.</span>"]
     D2["<b>anlamsal gruplama</b><br/><span style='font-size:0.85em'>Dosya üst verileriyle tek LLM çağrısı — ilişkili<br/>dosyaları grupla (grup başına en fazla 10)</span>"]
     E["<b>alt görev dağıtımı</b><br/><span style='font-size:0.85em'>Grupları paralel çalıştır (concurrency=N):<br/>Plan (isteğe bağlı) → Ana döngü × turlar → Yorumlar</span>"]
     F["<b>çıktı yazıcısı</b><br/><span style='font-size:0.85em'>Senkron satır belirleme ve yorum filtresi;<br/>--format / --audience seçimine göre metin veya JSON.</span>"]
@@ -37,12 +37,13 @@ Her fark; eski/yeni yol, eski/yeni değişiklik parçaları, ekleme/silme sayıl
 
 İzlenmeyen dosyalar diskten okunur ve tamamı yeni eklenmiş kabul edilir; böylece commit öncesinde incelenirler.
 
-## Beş aşamalı dosya filtresi {#the-five-gate-file-filter}
+## Altı aşamalı dosya filtresi {#the-six-gate-file-filter}
 
 Farklar yüklendikten sonra her dosya [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go) işlevinden geçer. İşlev aşağıdaki değerlerden birini döndürür:
 
 ```
 binary          — file is binary
+secret_exclude  — path matches a built-in secret pattern (.env, id_rsa, …)
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in exclude pattern
@@ -51,10 +52,11 @@ default_path    — matched a built-in exclude pattern
 Dosya tutulursa boş değer döndürür. `deleted` ve `too_large`, **`whyExcluded` tarafından döndürülmez**; `selectFiles` bunları aşamalardan sonra uygular. Tutulan dosyanın farkı `IsDeleted` bildiriyorsa `deleted`, yalnızca ham farkı `max_tokens` değerinin %80'ini aşıyorsa `too_large` kullanılır. Aşamaların sırası:
 
 1. `binary` — Önce ikili dosyalar dışlanır.
-2. `user_exclude` — Projenizin `exclude` kalıpları önceliklidir.
-3. `user_include` — Filtrede include kalıpları varsa **ve** dosya bunlardan biriyle eşleşiyorsa hemen tutulur (boş değer döndürülür); sonraki `unsupported_ext` ve `default_path` aşamaları atlanır.
-4. `unsupported_ext` — Uzantı izin listesine göre filtreler.
-5. `default_path` — Son aşama, yerleşik dışlama kalıplarını uygular. Bunlar test dosyalarını (`**/*_test.go`, `**/__tests__/**`, `**/*_spec.rb` vb.) ve bağımlılık/derleme çıktısı dizinlerini (`**/node_modules/**`, `**/vendor/**`, `**/target/**`, `**/__pycache__/**` vb.) kapsar. Kalıplar `**/` önekiyle köklendirilir.
+2. `secret_exclude` — Eski veya yeni yol, kimlik bilgisi dosyaları için yerleşik bir kalıpla eşleşirse dosya dışlanır (örneğin `.env`, `id_rsa` veya `.netrc`). `provider_directory` için olduğu gibi, `include` bu dışlamayı geçersiz kılamaz.
+3. `user_exclude` — Projenizin `exclude` kalıpları `include` kalıplarından önce uygulanır.
+4. `user_include` — Filtrede include kalıpları varsa **ve** dosya bunlardan biriyle eşleşiyorsa hemen tutulur (boş değer döndürülür); sonraki `unsupported_ext` ve `default_path` aşamaları atlanır.
+5. `unsupported_ext` — Uzantı izin listesine göre filtreler.
+6. `default_path` — Son aşama, yerleşik dışlama kalıplarını uygular. Bunlar test dosyalarını (`**/*_test.go`, `**/__tests__/**`, `**/*_spec.rb` vb.) ve bağımlılık/derleme çıktısı dizinlerini (`**/node_modules/**`, `**/vendor/**`, `**/target/**`, `**/__pycache__/**` vb.) kapsar. Kalıplar `**/` önekiyle köklendirilir.
 
 Aynı dizinler daha erken bir aşamada, fark sağlayıcısında `internal/diff/git.go` içindeki `providerDirIgnoreDirs` listesiyle de filtrelenir. Liste yol önekiyle eşleştiği için yalnızca **depo kökündeki** dizinleri yakalar. `vendor/pkg/x.go` dosya filtresine ulaşmaz; `api/vendor/pkg/x.go` ise ulaşır ve `default_path` tarafından dışlanır.
 
