@@ -340,7 +340,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		// iteration's meta replaces the previous one instead of nesting.
 		reqCtx := r.RequestContext(ctx, taskKey, session.MainTask, rec.RequestNo)
 
-		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+		reqCtx, llmSpan := telemetry.StartLLMSpan(reqCtx, r.deps.Model)
 		request := llm.ChatRequest{
 			Model:     r.deps.Model,
 			Messages:  messages,
@@ -510,7 +510,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	startTime := time.Now()
 	reqCtx := r.RequestContext(ctx, taskKey, session.MainTask, rec.RequestNo)
 
-	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+	reqCtx, llmSpan := telemetry.StartLLMSpan(reqCtx, r.deps.Model)
 	request := llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  messages,

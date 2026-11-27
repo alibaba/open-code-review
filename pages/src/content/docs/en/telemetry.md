@@ -136,6 +136,8 @@ aggregate counts and latency are also recorded as metrics (see below).
 Decision-point events fire as short-lived `event.<name>` spans attached
 to the current context.
 
+Each SDK HTTP attempt emits an `llm.http_attempt` child of the current `llm.request`. Its duration ends when response headers arrive, excluding SDK backoff and response-body decoding. Attempts are numbered within one logical call, including Chat Completions EOF recovery. Failures carry bounded error classifications rather than response bodies or raw transport error text. The existing retry report and SDK retry policy are unchanged.
+
 Each span carries useful attributes:
 
 | Span | Key attributes |
@@ -144,6 +146,7 @@ Each span carries useful attributes:
 | `diff.parse` | `files.changed`, `lines.inserted`, `lines.deleted` |
 | `subtask.execute.group.<group-key>` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file` |
 | `main.loop` | `group.label`, `round` |
+| `llm.http_attempt` | `llm.attempt` (1-based), `http.response.status_code` (when received), `llm.duration_ms`, `error.type` and `llm.failure_phase` (on failure) |
 | `llm.request` | `llm.model`, `llm.duration_ms`, `llm.total_tokens`, `llm.status` |
 | `tool.execute.<tool-name>` | `tool.name`, `tool.duration_ms`, `tool.status` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |

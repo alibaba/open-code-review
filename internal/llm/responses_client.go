@@ -70,9 +70,7 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if cfg.rawHolder != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
+	opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 
 	client := &OpenAIResponsesClient{
 		cfg: cfg,
@@ -116,6 +114,7 @@ func ensureResponsesEndpoint(cfg *ClientConfig) {
 // see the OpenAI Chat Completions counterpart for why it is deferred and why the
 // results are named.
 func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	ctx = withHTTPAttemptCounter(ctx)
 	defer func() {
 		if r := recover(); r != nil {
 			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
