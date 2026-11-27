@@ -44,6 +44,13 @@ type Provider struct {
 // and commit both generated catalogs. See the root AGENTS.md for paths and verification.
 var registry = []Provider{
 	{
+		Name:        "anthropic-oauth",
+		DisplayName: "Anthropic Claude (Subscription OAuth)",
+		Protocol:    ProtocolAnthropicOAuth,
+		AmbientAuth: true,
+		Models:      []string{"sonnet", "opus", "claude-opus-5-5", "claude-sonnet-5-5"},
+	},
+	{
 		Name:        "anthropic",
 		DisplayName: "Anthropic Claude API",
 		Protocol:    ProtocolAnthropic,
