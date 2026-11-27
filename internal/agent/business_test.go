@@ -288,6 +288,71 @@ func TestLandedRetrievalUsesParsedChangeLocations(t *testing.T) {
 	}
 }
 
+func TestLandedRetrievalAttributesDeletedPythonValues(t *testing.T) {
+	const policy, worker = "policy.py", "worker.py"
+	const reference = "review:accepted-route"
+	const source = "from .worker import Worker\n" +
+		"class Local(Worker):\n" +
+		"    routes: tuple = (\n" +
+		"        'priority',\n" +
+		"        # temporary review note\n" +
+		"        'standard',\n" +
+		"    )\n" +
+		"    display_width = 18\n\n" +
+		"    def previous(self):\n        if not self.enabled:\n            return None\n        return self.last_route\n\n" +
+		"class Other:\n" +
+		"    routes = (\n" +
+		"        'other-priority',\n" +
+		"        'other-standard',\n" +
+		"    )\n"
+	const accepted = "class Worker:\n    def route(self, code):\n        available = True\n        self.last_route = code\n        return available\n"
+	headWorker := strings.Replace(accepted, "available = True", "available = code in self.routes", 1)
+	for _, tc := range []struct {
+		name, deleted string
+		want          bool
+	}{
+		{"active list element", "        'priority',\n", true},
+		{"only a comment", "        # temporary review note\n", false},
+		{"an entire adjacent assignment", "    display_width = 18\n", false},
+		{"same field on unrelated class", "        'other-priority',\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := initPreviewRepo(t)
+			commitIn(t, dir, policy, source, "introduce two route policies")
+			commitIn(t, dir, worker, accepted, "introduce the shared worker")
+			git := gitcmd.New(1)
+			output := func(args ...string) string {
+				t.Helper()
+				s, err := git.Output(t.Context(), dir, args...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return strings.TrimSpace(string(s))
+			}
+			base := output("rev-parse", "HEAD")
+			policyHead := strings.Replace(source, tc.deleted, "", 1)
+			commitIn(t, dir, policy, policyHead, "remove one line")
+			commitIn(t, dir, worker, headWorker, "consult the configured routes")
+			facts := competingLandedDiscussions(policy, reference, "        return self.last_route")
+			baseChange := model.Diff{NewPath: worker, NewFileContent: headWorker, Diff: output("diff", base, "HEAD", "--", worker)}
+			for _, context := range []string{"--unified=0", "--unified=3"} {
+				patch := output("diff", context, base, "HEAD", "--", policy)
+				hunks := diff.ParseHunks(patch)
+				if strings.Contains(patch, "self.last_route") {
+					t.Fatal("the scope file itself must not expose the landed member in its diff")
+				}
+				if len(hunks) != 1 || hunks[0].OldCount != hunks[0].NewCount+1 || slices.ContainsFunc(hunks[0].Lines, func(l diff.HunkLine) bool { return l.Type == diff.HunkAdded }) {
+					t.Fatalf("expected a pure deletion: %s", patch)
+				}
+				changes := []model.Diff{{NewPath: policy, NewFileContent: policyHead, Diff: patch}, baseChange}
+				if got := strings.Contains(selectBusinessContext(facts, changes).text, reference); got != tc.want {
+					t.Errorf("%s ranked=%t, want %t", context, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 func TestReviewRetrievesTheEditedEnclosingDeclaration(t *testing.T) {
 	const ref = "review:billing-limit"
 	for _, tc := range []struct{ file, decl, other, name, statement string }{
@@ -779,4 +844,155 @@ func TestBusinessClaimNeedsItsCurrentPremise(t *testing.T) {
 	if supportsBusinessCheck(disputed, check) {
 		t.Fatal("a conflicting rule cannot authorize a verdict")
 	}
+}
+
+func TestDirectCalleeFindingUsesItsOwnPremise(t *testing.T) {
+	const callee, caller, testFile = "sizing.py", "queue.py", "test_sizing.py"
+	const limit = "LIMIT = 8"
+	const missing = "if items is None:\n        return LIMIT"
+	const presence = "assert width(range(12)) is not None"
+	const reviewed = "return len(items)"
+	const before = limit + "\nfrom .defaults import MAX_ITEMS\ndef width(items):\n    " + missing + "\n    return min(len(items), LIMIT, MAX_ITEMS)\n\n" +
+		"def export_width(items):\n    if items is None:\n        return width(items)\n    count = len(items)\n" +
+		"    if count < LIMIT:\n        return count\n    return min(count, LIMIT)\n"
+	after := strings.Replace(before, "return min(count, LIMIT)", reviewed, 1)
+	const changedLine = 14
+	const realFinding = "An export of twelve items now returns 12, above the limit of eight."
+	const falseFinding = "Exporting with no items supplied now loses the fallback width of eight."
+	dir := initPreviewRepo(t)
+	commitIn(t, dir, "defaults.py", "MAX_ITEMS = 8\n", "declare the permitted batch size")
+	commitIn(t, dir, callee, before, "apply the common limit to exports")
+	commitIn(t, dir, caller, "from .sizing import width\n\ndef enqueue(items):\n    return width(items)\n", "queue batches using the accepted width")
+	commitIn(t, dir, testFile, "from .sizing import width\n\ndef test_present():\n    "+presence+"\n", "check that width returns a result")
+	ctx, git := t.Context(), gitcmd.New(1)
+	output := func(args ...string) string {
+		t.Helper()
+		b, err := git.Output(ctx, dir, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	base := knowledge.Tree{Repo: dir, Git: git, Commit: strings.TrimSpace(output("rev-parse", "HEAD"))}
+	commitIn(t, dir, callee, after, "return raw export count")
+	head := knowledge.Tree{Repo: dir, Git: git, Commit: strings.TrimSpace(output("rev-parse", "HEAD"))}
+	change := model.Diff{OldPath: callee, NewPath: callee, NewFileContent: after, Diff: output("diff", base.Commit, head.Commit, "--", callee)}
+	run := func(t *testing.T, includeLimit, constantFirst, separateRoutine bool) {
+		t.Helper()
+		citations := []knowledge.Citation{{Kind: "code", Path: callee, StartLine: 4, EndLine: 6},
+			{Kind: "code", Path: caller, StartLine: 4, EndLine: 4}, {Kind: "test", Path: testFile, StartLine: 3, EndLine: 4},
+			{Kind: "test", Path: testFile, StartLine: 1, EndLine: 1}}
+		defaultLimit := knowledge.Citation{Kind: "code", Path: "defaults.py", StartLine: 1, EndLine: 1}
+		citations = append(citations, defaultLimit)
+		if constantFirst {
+			citations[2], citations[4] = citations[4], citations[2]
+		}
+		if includeLimit {
+			citations = append(citations, knowledge.Citation{Kind: "code", Path: callee, StartLine: 1, EndLine: 1},
+				knowledge.Citation{Kind: "code", Path: callee, StartLine: 11, EndLine: 11})
+		}
+		f, err := base.Prepare(ctx, knowledge.Fact{Origin: "discovery", Category: knowledge.CategoryBusinessRule, Authority: knowledge.AuthorityInferred,
+			Source: callee, Scope: callee, Claim: "Batch widths are capped at eight.", Citations: citations})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Citations[1].Symbol = "enqueue"
+		checked, err := head.CheckReview(ctx, base.Commit, []knowledge.Fact{f})
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot := knowledge.ReviewSnapshot(checked)
+		if err := snapshot.DescribeReviewChanges(ctx, base, head, checked); err != nil || len(snapshot) != 1 {
+			t.Fatalf("snapshot = %+v, err = %v", snapshot, err)
+		}
+		direct, ok := head.WithDirectCalleeEvidence(ctx, snapshot[0], after)
+		if !ok || (direct.DirectAssertion() == nil) != constantFirst {
+			t.Fatalf("unexpected primary witness: %+v", direct.Citations)
+		}
+		defaultCheck := businessCheck{Path: callee, SourcePath: "defaults.py", SourceQuote: "MAX_ITEMS = 8"}
+		if assertion, bound := defaultCheck.directCalleePremise(ctx, head, direct, after); !bound || assertion != nil {
+			t.Fatal("an imported literal used by the reviewed callee lost its independent binding")
+		}
+		check := businessCheck{ID: snapshot[0].ID, Path: callee, Line: changedLine, Quote: reviewed, Reason: realFinding,
+			Outcome: "violation", SourcePath: callee, SourceQuote: limit, Severity: "medium"}
+		var drafts []string
+		var first, second string
+		if includeLimit {
+			if separateRoutine {
+				check.SourceQuote = "return min(len(items), LIMIT, MAX_ITEMS)"
+			}
+			importOnly := check
+			importOnly.SourcePath, importOnly.SourceQuote = testFile, "from .sizing import width"
+			importOnly.Reason = "Queued batches now drop items beyond the eighth."
+			weak := importOnly
+			weak.SourceQuote, weak.Reason = presence, "The queue now rejects a twelve-item batch."
+			testHeader := importOnly
+			testHeader.SourceQuote, testHeader.Reason = "def test_present():", "All queued batches now lack a result."
+			sameRoutine := check
+			sameRoutine.SourceQuote, sameRoutine.Reason = "count = len(items)", "The changed width causes the queue to retry indefinitely."
+			first = businessReply(t, check, importOnly, weak, testHeader, sameRoutine)
+			second = `{"checks":[{"id":"e-0","verdict":"confirmed","input":"12 items","expected":"8","before":"8","after":"12","reason":"The export now returns the length of the batch.","output_path":"sizing.py","output_line":14,"output_quote":"return len(items)"}]}`
+		} else {
+			if snapshot[0].ContextStatus() != knowledge.StatusCandidate {
+				t.Fatalf("expected a current inferred rule, got %s", snapshot[0].ContextStatus())
+			}
+			drafts = []string{realFinding, falseFinding}
+			check.Outcome, check.SourcePath, check.SourceQuote, check.Reason = "refuted", testFile, presence, "The width test still passes."
+			check.RefutedText, check.Candidate = realFinding, "c-0"
+			fallback := check
+			fallback.RefutedText, fallback.Candidate = falseFinding, "c-1"
+			first = businessReply(t, check, fallback)
+			check.Trigger, check.Effect = "Export twelve items.", "The finding reports a width above eight."
+			fallback.Trigger, fallback.Effect = "Export with items set to None.", "The finding reports that the fallback width is lost."
+			fallback.SourcePath, fallback.SourceQuote, fallback.Reason = callee, missing, "The unchanged branch returns the fallback limit."
+			second = businessReply(t, check, fallback)
+		}
+		client := &fakeAgentClient{}
+		for _, reply := range []string{first, second, `{"checks":[]}`} {
+			client.responses = append(client.responses, &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &reply}}}})
+		}
+		a := New(Args{RepoDir: dir, LLMClient: client, KnowledgeTree: &head, Template: template.Template{MaxTokens: 16000}})
+		for _, draft := range drafts {
+			a.args.CommentCollector.Add(model.LlmComment{Path: callee, StartLine: changedLine, EndLine: changedLine, ExistingCode: reviewed, Content: draft})
+		}
+		a.inputResolution.ResolvedBase = base.Commit
+		g := FileGroup{Diffs: []model.Diff{change}}
+		g.business = selectBusinessContext(snapshot, g.Diffs)
+		a.verifyBusinessFindings(ctx, g, "", change.Diff)
+		comments := a.args.CommentCollector.CommentsForPath(callee)
+		tasks := a.session.GetOrCreateFileSession(fileGroupKey(g.Diffs)).TaskRecords
+		if includeLimit {
+			effects := tasks[session.BusinessEffectTask]
+			if len(effects) != 1 {
+				t.Fatalf("declaration effect checks = %d", len(effects))
+			}
+			payload := effects[0].RequestMessages[1].ExtractText()
+			var request struct {
+				Proposals    []effectInput        `json:"proposals"`
+				Declarations []knowledge.Citation `json:"declarations"`
+			}
+			if err := json.Unmarshal([]byte(payload), &request); err != nil || len(request.Proposals) != 2 ||
+				request.Proposals[0].Assertion != nil || request.Proposals[0].Premise != check.SourceQuote ||
+				request.Proposals[1].Premise != presence || request.Proposals[1].Assertion == nil {
+				t.Fatalf("the selected premises did not reach their own outcome checks: %s", payload)
+			}
+			if separateRoutine {
+				if len(request.Proposals[0].Routines) != 2 {
+					t.Fatalf("expected both current functions: %s", payload)
+				}
+			} else if len(request.Declarations) != 1 || request.Declarations[0].Quote != limit || request.Proposals[0].Declaration == nil {
+				t.Fatalf("missing independently cited declaration: %s", payload)
+			}
+		} else if len(tasks[session.BusinessRefutationTask]) != 1 {
+			t.Fatal("ordinary findings did not reach independent reassessment")
+		}
+		if len(comments) != 1 || !strings.Contains(comments[0].Content, realFinding) {
+			t.Fatalf("expected just the verified 12-item regression; published %+v", comments)
+		}
+	}
+	t.Run("a declaration after the test verifies the export", func(t *testing.T) { run(t, true, false, false) })
+	t.Run("a test after a declaration still needs its own outcome", func(t *testing.T) { run(t, true, true, false) })
+	t.Run("a different producing function still gets an outcome check", func(t *testing.T) { run(t, true, false, true) })
+	t.Run("only independent counterevidence withdraws a finding", func(t *testing.T) { run(t, false, false, false) })
+	t.Run("a secondary weak test cannot withdraw an ordinary finding", func(t *testing.T) { run(t, false, true, false) })
 }

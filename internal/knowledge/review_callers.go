@@ -25,6 +25,59 @@ type AcceptedCall struct {
 	baseWitness Citation
 }
 
+// DirectCalleeAssertion is a checked test predicate that needs an outcome check
+// before a finding can rely on it to establish the rule.
+type DirectCalleeAssertion struct {
+	Source     Citation                `json:"source"`
+	Callee     string                  `json:"callee"`
+	Rule       string                  `json:"rule"`
+	Conditions []string                `json:"conditions,omitempty"`
+	Predicates []DirectCalleePredicate `json:"predicates"`
+}
+
+type noneComparison string
+
+const (
+	isNone    noneComparison = "is None"
+	isNotNone noneComparison = "is not None"
+)
+
+// DirectCalleePredicate names one complete assertion in the cited source.
+type DirectCalleePredicate struct {
+	StartLine      int            `json:"start_line"`
+	EndLine        int            `json:"end_line"`
+	Quote          string         `json:"quote"`
+	NoneComparison noneComparison `json:"none_comparison,omitempty"`
+}
+
+func (a DirectCalleeAssertion) MatchedPredicate(quote string) (DirectCalleePredicate, bool) {
+	quote = strings.TrimSpace(strings.ReplaceAll(quote, "\r\n", "\n"))
+	if countCallerQuotes(a.Source.Quote, quote, 0) == 1 {
+		for _, p := range a.Predicates {
+			if strings.TrimSpace(p.Quote) == quote {
+				return p, true
+			}
+		}
+	}
+	return DirectCalleePredicate{}, false
+}
+
+// Distinguishes rejects an inconsistent result for a direct None comparison.
+// Other predicates depend on the independent evaluation of their expression.
+func (p DirectCalleePredicate) Distinguishes(before, after string) bool {
+	beforeNone, afterNone := strings.TrimSpace(before) == "None", strings.TrimSpace(after) == "None"
+	switch p.NoneComparison {
+	case isNone:
+		return beforeNone && !afterNone
+	case isNotNone:
+		return !beforeNone && afterNone
+	default:
+		return p.NoneComparison == ""
+	}
+}
+
+func (f Fact) DirectAssertion() *DirectCalleeAssertion { return f.directAssertion }
+
 // WithDirectCalleeEvidence leads with a current witness that bears on the
 // callee without going through the recorded caller.
 func (t Tree) WithDirectCalleeEvidence(ctx context.Context, f Fact, content string) (Fact, bool) {
@@ -38,6 +91,7 @@ func (t Tree) WithDirectCalleeEvidence(ctx context.Context, f Fact, content stri
 		return Fact{}, false
 	}
 	var witness Citation
+	var assertion *DirectCalleeAssertion
 	f.eachCitation(func(c Citation) {
 		if witness.CurrentPath != "" || !c.live() || c.Quote == "" || c.CurrentPath == "" || c.CurrentStartLine < 1 ||
 			c.CurrentEndLine < c.CurrentStartLine || c.Path == link.CallerPath || c.CurrentPath == link.CallerPath {
@@ -47,8 +101,9 @@ func (t Tree) WithDirectCalleeEvidence(ctx context.Context, f Fact, content stri
 			c.Path == implementation.path && c.CurrentPath != implementation.path {
 			return
 		}
-		if r.independentPythonWitness(c, implementation) {
+		if test, ok := r.independentPythonWitness(c, implementation); ok {
 			witness = c
+			assertion = test
 		}
 	})
 	if witness.CurrentPath == "" {
@@ -56,48 +111,60 @@ func (t Tree) WithDirectCalleeEvidence(ctx context.Context, f Fact, content stri
 	}
 	// The bounded prompt displays only two live citations per fact.
 	f.Citations = append([]Citation{witness}, slices.DeleteFunc(slices.Clone(f.Citations), func(c Citation) bool { return c == witness })...)
+	if assertion != nil {
+		assertion.Rule = f.Claim
+		for _, condition := range f.Conditions {
+			assertion.Conditions = append(assertion.Conditions, condition.Description)
+		}
+		if f.contextStatus == StatusTransition {
+			assertion.Rule, assertion.Conditions = f.baseClaim, f.baseConditions
+		}
+	}
+	f.directAssertion = assertion
 	return f, true
 }
 
-func (r *rechecker) independentPythonWitness(c Citation, implementation focusedFunction) bool {
+func (r *rechecker) independentPythonWitness(c Citation, implementation focusedFunction) (*DirectCalleeAssertion, bool) {
 	if (c.Kind != "test" && c.Kind != "code") || path.Ext(c.CurrentPath) != ".py" {
-		return false
+		return nil, false
 	}
 	source := r.discussionDefinitionFile(c.CurrentPath)
 	lines := strings.Split(source.file.text, "\n")
 	if !source.parsed || c.CurrentEndLine > len(lines) || strings.Join(lines[c.CurrentStartLine-1:c.CurrentEndLine], "\n") != c.Quote {
-		return false
+		return nil, false
 	}
 	module, err := parser2.ParseFile(c.CurrentPath, source.file.text)
 	if err != nil || pythonWildcardImport(module) {
-		return false
+		return nil, false
 	}
 	root := symbols2.Build(module).Root
-	if r.assertsCallee(c, implementation, source.definitions, lines, root) {
-		return true
+	if predicates := r.calleePredicates(c, implementation, source.definitions, lines, root); len(predicates) != 0 {
+		return &DirectCalleeAssertion{Source: Citation{Kind: c.Kind, Path: c.CurrentPath, StartLine: c.CurrentStartLine,
+			EndLine: c.CurrentEndLine, Quote: c.Quote}, Callee: implementation.name, Predicates: predicates}, true
 	}
 	if c.Kind != "code" {
-		return false
+		return nil, false
 	}
 	name := pythonCitedLiteral(c, module.Body, root)
 	if name == "" || !slices.ContainsFunc(source.definitions, func(d discussionDefinition) bool {
 		return !d.unquotable && d.kind == "assign" && d.name == name && d.start == c.CurrentStartLine && d.end >= c.CurrentEndLine
 	}) {
-		return false
+		return nil, false
 	}
 	if c.CurrentPath == implementation.path {
 		binding := pythonBindingInCallee(root, name, implementation)
-		return binding != nil && binding.BindSites[0].Line == c.CurrentStartLine
+		return nil, binding != nil && binding.BindSites[0].Line == c.CurrentStartLine
 	}
-	return r.calleeUsesImportedLiteral(c, name, implementation)
+	return nil, r.calleeUsesImportedLiteral(c, name, implementation)
 }
 
-func (r *rechecker) assertsCallee(c Citation, implementation focusedFunction, definitions []discussionDefinition, lines []string, root *symbols2.Scope) bool {
+func (r *rechecker) calleePredicates(c Citation, implementation focusedFunction, definitions []discussionDefinition, lines []string, root *symbols2.Scope) []DirectCalleePredicate {
+	var predicates []DirectCalleePredicate
 	for _, d := range definitions {
 		if d.unquotable || d.kind != "def" && d.kind != "async def" || d.end < c.CurrentStartLine || d.start > c.CurrentEndLine {
 			continue
 		}
-		if walkPythonReviewStatements(strings.Join(lines[d.start-1:d.end], "\n"), func(stmt parser2.Stmt, line int) bool {
+		walkPythonReviewStatements(strings.Join(lines[d.start-1:d.end], "\n"), func(stmt parser2.Stmt, line int) bool {
 			assertion, ok := stmt.(*parser2.Assert)
 			start := d.start + line - 1
 			if !ok || start < c.CurrentStartLine || start > c.CurrentEndLine {
@@ -107,8 +174,17 @@ func (r *rechecker) assertsCallee(c Citation, implementation focusedFunction, de
 			if compare, ok := assertion.Test.(*parser2.Compare); ok {
 				operands = append([]parser2.Expr{compare.Left}, compare.Comparators...)
 			}
-			for _, operand := range operands {
-				name, id := pythonInvokedName(operand)
+			for len(operands) != 0 {
+				call := pythonAssertionCall(operands[0])
+				operands = operands[1:]
+				if call == nil {
+					continue
+				}
+				operands = append(operands, call.Args...)
+				for _, arg := range call.Keywords {
+					operands = append(operands, arg.Value)
+				}
+				name, id := pythonInvokedName(call)
 				if id == nil {
 					continue
 				}
@@ -120,26 +196,77 @@ func (r *rechecker) assertsCallee(c Citation, implementation focusedFunction, de
 				if binding == nil {
 					continue
 				}
+				var matches bool
 				if c.CurrentPath == implementation.path {
-					if name == implementation.name && binding.BindSites[0].Line >= implementation.first && binding.BindSites[0].Line <= implementation.last {
-						return true
+					matches = name == implementation.name && binding.BindSites[0].Line >= implementation.first && binding.BindSites[0].Line <= implementation.last
+				} else if binding.Has(symbols2.FlagImport) {
+					target, def, ok := r.scopedDiscussionDefinition([]string{implementation.path}, c.CurrentPath, name)
+					matches = ok && target.Bound && target.Path == implementation.path && def.name == implementation.name && def.start == implementation.first
+				}
+				if matches {
+					if quote, end := pythonAssertionSpan(assertion, lines, start, min(d.end, c.CurrentEndLine)); end != 0 {
+						predicates = append(predicates, DirectCalleePredicate{StartLine: start, EndLine: end, Quote: quote,
+							NoneComparison: pythonNoneComparison(assertion.Test, call)})
 					}
-					continue
-				}
-				if !binding.Has(symbols2.FlagImport) {
-					continue
-				}
-				target, def, ok := r.scopedDiscussionDefinition([]string{implementation.path}, c.CurrentPath, name)
-				if ok && target.Bound && target.Path == implementation.path && def.name == implementation.name && def.start == implementation.first {
-					return true
+					break
 				}
 			}
 			return false
-		}) {
-			return true
+		})
+	}
+	return predicates
+}
+
+func pythonAssertionSpan(assertion *parser2.Assert, lines []string, start, last int) (string, int) {
+	expected := parser2.DumpModule(&parser2.Module{Body: []parser2.Stmt{assertion}})
+	indented := strings.HasPrefix(lines[start-1], " ") || strings.HasPrefix(lines[start-1], "\t")
+	for end := start; end <= last; end++ {
+		quote := strings.Join(lines[start-1:end], "\n")
+		text := quote + "\n"
+		if indented {
+			text = "async def predicate():\n" + text
+		}
+		fragment, err := parser2.ParseFile("assertion.py", text)
+		if err != nil || len(fragment.Body) != 1 {
+			continue
+		}
+		if indented {
+			wrapper, ok := fragment.Body[0].(*parser2.AsyncFunctionDef)
+			if !ok || len(wrapper.Body) != 1 {
+				continue
+			}
+			fragment = &parser2.Module{Body: wrapper.Body}
+		}
+		if _, ok := fragment.Body[0].(*parser2.Assert); ok && parser2.DumpModule(fragment) == expected {
+			return quote, end
 		}
 	}
-	return false
+	return "", 0
+}
+
+func pythonAssertionCall(expr parser2.Expr) *parser2.Call {
+	if await, ok := expr.(*parser2.Await); ok {
+		expr = await.Value
+	}
+	call, _ := expr.(*parser2.Call)
+	return call
+}
+
+func pythonNoneComparison(test parser2.Expr, call *parser2.Call) noneComparison {
+	compare, ok := test.(*parser2.Compare)
+	if !ok || len(compare.Ops) != 1 || compare.Ops[0] != "Is" && compare.Ops[0] != "IsNot" {
+		return ""
+	}
+	left, leftConstant := compare.Left.(*parser2.Constant)
+	right, rightConstant := compare.Comparators[0].(*parser2.Constant)
+	if leftConstant && left.Kind == "None" && pythonAssertionCall(compare.Comparators[0]) == call ||
+		rightConstant && right.Kind == "None" && pythonAssertionCall(compare.Left) == call {
+		if compare.Ops[0] == "Is" {
+			return isNone
+		}
+		return isNotNone
+	}
+	return ""
 }
 
 func pythonCitedLiteral(c Citation, stmts []parser2.Stmt, root *symbols2.Scope) string {

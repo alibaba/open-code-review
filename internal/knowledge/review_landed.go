@@ -79,11 +79,19 @@ func reviewLandedIdentifiers(changes []model.Diff, landings map[string]bool) map
 			}
 		}
 		edited := map[int]bool{}
+		removed := map[int][]string{}
 		for _, h := range diff.ParseHunks(change.Diff) {
 			var current, deleted []string
 			for _, line := range h.Lines {
 				if line.Type == diff.HunkDeleted {
 					deleted = append(deleted, line.Content)
+					if wantLocal && module != nil {
+						next := h.NewStart + len(current)
+						if h.NewCount == 0 {
+							next++
+						}
+						removed[next] = append(removed[next], line.Content)
+					}
 					continue
 				}
 				if len(current) >= h.NewCount {
@@ -126,7 +134,8 @@ func reviewLandedIdentifiers(changes []model.Diff, landings map[string]bool) map
 			}
 		}
 		if wantLocal && module != nil {
-			reviewClassOverrides(p, module, definitions, edited, overrides)
+			edits := overrideEdits{lines: strings.Split(change.NewFileContent, "\n"), added: edited, removed: removed}
+			reviewClassOverrides(p, module, definitions, edits, overrides)
 		}
 	}
 	for _, h := range uses {
@@ -230,7 +239,7 @@ func reviewHunkFieldUses(file string, first int, lines []string, scopes []*discu
 	return out
 }
 
-func reviewClassOverrides(p string, module *parser2.Module, definitions []discussionDefinition, edited map[int]bool, overrides map[reviewField][]string) {
+func reviewClassOverrides(p string, module *parser2.Module, definitions []discussionDefinition, edits overrideEdits, overrides map[reviewField][]string) {
 	imports := map[string]reviewField{}
 	for _, stmt := range module.Body {
 		imp, ok := stmt.(*parser2.ImportFrom)
@@ -272,15 +281,68 @@ func reviewClassOverrides(p string, module *parser2.Module, definitions []discus
 		if d.kind != "assign" || d.unquotable || !ok || strings.Contains(field, ".") || len(bases[owner]) == 0 {
 			continue
 		}
-		for n := d.start; n <= d.end; n++ {
-			if !edited[n] {
-				continue
-			}
+		if edits.changesValue(d) {
 			for _, key := range bases[owner] {
 				key.name = field
 				overrides[key] = append(overrides[key], p)
 			}
-			break
 		}
 	}
+}
+
+type overrideEdits struct {
+	lines   []string
+	added   map[int]bool
+	removed map[int][]string
+}
+
+func (e overrideEdits) changesValue(d discussionDefinition) bool {
+	hasRemoval := false
+	for n := d.start; n <= d.end; n++ {
+		if e.added[n] {
+			return true
+		}
+		hasRemoval = hasRemoval || n > d.start && len(e.removed[n]) > 0
+	}
+	if !hasRemoval {
+		return false
+	}
+
+	// A gap at the edge of an assignment can also be a deleted sibling or
+	// comment. Compare the value of the surviving assignment on both sides.
+	var prior []string
+	for n := d.start; n <= d.end; n++ {
+		if n > d.start {
+			prior = append(prior, e.removed[n]...)
+		}
+		prior = append(prior, e.lines[n-1])
+	}
+	field := shortDeclarationName(d.name)
+	oldValue := parsedReviewValue(field, strings.Join(prior, "\n"))
+	newValue := parsedReviewValue(field, strings.Join(e.lines[d.start-1:d.end], "\n"))
+	return oldValue != "" && newValue != "" && newValue != oldValue
+}
+
+func parsedReviewValue(field, source string) string {
+	module, err := parser2.ParseFile("evidence.py", "class Reviewed:\n"+source+"\n")
+	if err != nil || len(module.Body) == 0 {
+		return ""
+	}
+	class, ok := module.Body[0].(*parser2.ClassDef)
+	if !ok || len(class.Body) == 0 {
+		return ""
+	}
+	var target, value parser2.Expr
+	switch node := class.Body[0].(type) {
+	case *parser2.Assign:
+		if len(node.Targets) == 1 {
+			target, value = node.Targets[0], node.Value
+		}
+	case *parser2.AnnAssign:
+		target, value = node.Target, node.Value
+	}
+	if name, ok := target.(*parser2.Name); ok && name.Id == field && value != nil {
+		return parser2.Dump(value)
+	}
+	return ""
 }

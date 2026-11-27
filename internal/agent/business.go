@@ -31,6 +31,7 @@ type businessContext struct {
 	lookupEvidence []knowledge.Citation
 	resolveCaller  func(knowledge.Fact, businessCheck) *knowledge.ReviewedCall
 	verifyImport   func(knowledge.Fact, businessCheck) bool
+	directPremises map[string]func(businessCheck) (*knowledge.DirectCalleeAssertion, bool)
 }
 
 var businessIdentifier = regexp.MustCompile(`[\p{L}_][\p{L}\p{N}_]*`)
@@ -194,6 +195,8 @@ type businessCheck struct {
 	scenario     businessScenario
 	confirmation string
 	caller       *knowledge.ReviewedCall
+	assertion    *knowledge.DirectCalleeAssertion
+	counterproof bool
 }
 
 type businessAddition struct {
@@ -211,6 +214,42 @@ func supportsBusinessCheck(f knowledge.Fact, c businessCheck) bool {
 		return false
 	}
 	return citedBusinessLine(f.Citations, f.Conditions, c)
+}
+
+// Match the proposed premise, even when a different witness first admitted
+// this caller rule. The knowledge tree checks external calls and imports.
+func (c businessCheck) directCalleePremise(ctx context.Context, tree knowledge.Tree, f knowledge.Fact, content string) (*knowledge.DirectCalleeAssertion, bool) {
+	cites := func(v knowledge.Citation) bool { return citedBusinessLine([]knowledge.Citation{v}, nil, c) }
+	if !cites(f.Citations[0]) {
+		f.Citations = slices.DeleteFunc(slices.Clone(f.Citations), func(v knowledge.Citation) bool { return !cites(v) })
+		f.Conditions = slices.Clone(f.Conditions)
+		for i, condition := range f.Conditions {
+			if condition.Citation != nil && !cites(*condition.Citation) {
+				f.Conditions[i].Citation = nil
+			}
+		}
+		var ok bool
+		f, ok = tree.WithDirectCalleeEvidence(ctx, f, content)
+		if !ok {
+			if c.SourcePath != c.Path || c.counterproof {
+				return nil, c.SourcePath == c.Path
+			}
+			// A second line in the changed routine adds no independent
+			// evidence. Only a separate premise reaches the outcome verifier.
+			line := uniqueBusinessQuoteLine(content, c.SourceQuote)
+			if line == 0 {
+				return nil, false
+			}
+			end := line + strings.Count(strings.TrimSpace(c.SourceQuote), "\n")
+			changed, premise, _ := knowledge.ReviewEffectEvidence(c.Path, content, c.Line, line, end)
+			return nil, changed.Quote != "" && premise.Quote != "" && changed.StartLine != premise.StartLine
+		}
+	}
+	if assertion := f.DirectAssertion(); assertion != nil {
+		_, ok := assertion.MatchedPredicate(c.SourceQuote)
+		return assertion, ok
+	}
+	return nil, true
 }
 
 func citedBusinessLine(citations []knowledge.Citation, conditions []knowledge.Condition, c businessCheck) bool {
@@ -271,6 +310,7 @@ func (a *Agent) verifyBusinessFindings(ctx context.Context, g FileGroup, rule, p
 		targets[f.ID] = f.AcceptedCall.CalleePath
 	}
 	var records knowledge.Snapshot
+	directPremises := map[string]func(businessCheck) (*knowledge.DirectCalleeAssertion, bool){}
 	for _, f := range g.business.rules {
 		callee, linked := targets[f.ID]
 		if !linked {
@@ -279,7 +319,11 @@ func (a *Agent) verifyBusinessFindings(ctx context.Context, g FileGroup, rule, p
 		}
 		i := slices.IndexFunc(g.Diffs, func(d model.Diff) bool { return !d.IsDeleted && d.NewPath == callee })
 		if i >= 0 {
-			if direct, ok := a.args.KnowledgeTree.WithDirectCalleeEvidence(ctx, f, g.Diffs[i].NewFileContent); ok {
+			content := g.Diffs[i].NewFileContent
+			if direct, ok := a.args.KnowledgeTree.WithDirectCalleeEvidence(ctx, f, content); ok {
+				directPremises[f.ID] = func(c businessCheck) (*knowledge.DirectCalleeAssertion, bool) {
+					return c.directCalleePremise(ctx, *a.args.KnowledgeTree, direct, content)
+				}
 				records = append(records, direct)
 				continue
 			}
@@ -294,6 +338,7 @@ func (a *Agent) verifyBusinessFindings(ctx context.Context, g FileGroup, rule, p
 	if len(records) != 0 {
 		independent := g
 		independent.business = selectBusinessContext(records, g.Diffs)
+		independent.business.directPremises = directPremises
 		a.applyBusinessReview(ctx, independent, rule, patch, standardBusinessReview)
 	}
 	lookupEvidence := g.business.lookupEvidence
@@ -509,8 +554,16 @@ func (b businessContext) proves(rule knowledge.Fact, c businessCheck, lines []ch
 	if rule.ContextStatus() == knowledge.StatusConflict || rule.ContextStatus() == knowledge.StatusChanged {
 		return false
 	}
-	if _, ok := b.currentPremise(rule, c); !ok || c.SourcePath == c.Path && strings.TrimSpace(c.SourceQuote) == strings.TrimSpace(c.Quote) {
+	source, ok := b.currentPremise(rule, c)
+	if !ok || c.SourcePath == c.Path && strings.TrimSpace(c.SourceQuote) == strings.TrimSpace(c.Quote) {
 		return false
+	}
+	if resolve := b.directPremises[source]; c.counterproof && resolve != nil {
+		// A passing test can nominate a recheck. Its continued success alone
+		// does not disprove the original finding's specific consequence.
+		if assertion, independent := resolve(c); assertion != nil || !independent {
+			return false
+		}
 	}
 	inScope := rule.Scope == "." || c.Path == rule.Scope || strings.HasPrefix(c.Path, rule.Scope+"/")
 	if c.Outcome == "violation" {
@@ -698,7 +751,7 @@ func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rul
 				}
 			}
 		}
-		c.Line = line
+		c.Line, c.counterproof = line, true
 		if len(c.scopeCases) != 0 {
 			if _, proven := g.business.scopedRefutation(c, p.ID, lines[c.Path]); proven {
 				remove[i] = true
@@ -880,6 +933,12 @@ func groundBusinessChecks(response string, g FileGroup, drafts []model.LlmCommen
 					}
 				}
 				comment := model.LlmComment{Path: c.Path, StartLine: line, EndLine: line, ExistingCode: c.Quote, Content: c.Reason + " (" + source + ", rule " + rule.ID + ")", Severity: c.Severity, Category: "bug"}
+				if resolve := g.business.directPremises[rule.ID]; resolve != nil && c.discussion == "" && c.caller == nil && c.Path == rule.AcceptedCall.CalleePath {
+					var ok bool
+					if c.assertion, ok = resolve(c); !ok {
+						continue
+					}
+				}
 				add = append(add, businessAddition{LlmComment: comment, check: c})
 				if i, ok := refutedCandidate(c, line, drafts); ok && c.discussion != "" && strings.TrimSpace(c.RefutedText) == strings.TrimSpace(drafts[i].Content) {
 					proposal := c

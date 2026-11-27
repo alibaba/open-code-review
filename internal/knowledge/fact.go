@@ -71,6 +71,7 @@ type Fact struct {
 	baseClaim        string
 	baseCommit       string
 	baseConditions   []string
+	directAssertion  *DirectCalleeAssertion
 	// A discussion notice changes eligibility without contributing evidence.
 	discussionNotice   discussionNoticeKind
 	editionScopeDigest string

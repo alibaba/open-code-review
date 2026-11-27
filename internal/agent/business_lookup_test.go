@@ -234,6 +234,14 @@ func TestMixedRuleGroupRetainsDirectCalleeChecks(t *testing.T) {
 	refute := businessCheck{ID: ids[external], Outcome: "refuted", Path: callee, Quote: newReturn, Line: line, Candidate: "c-0", RefutedText: falseFinding,
 		SourcePath: policy, SourceQuote: policyLimit, Reason: "The upper bound still caps the result at 100 cents.",
 		Trigger: "A raw amount of 100.", Effect: "The reported amount exceeds 100 cents."}
+	effect, err := json.Marshal(map[string]any{"checks": []map[string]any{{
+		"id": "e-0", "verdict": "confirmed", "input": "ten cents", "expected": "10", "before": "10", "after": "11",
+		"reason": "The changed expression adds one cent before the cap.", "output_path": callee, "output_line": line, "output_quote": newReturn,
+		"assertion_quote": direct.SourceQuote, "assertion_before_passes": true, "assertion_after_passes": false,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name  string
 		rules []string
@@ -259,9 +267,9 @@ func TestMixedRuleGroupRetainsDirectCalleeChecks(t *testing.T) {
 			const noChecks = `{"checks":[]}`
 			var replies []string
 			if keep(external) {
-				replies = append(replies, businessReply(t, direct, refute), businessReply(t, refute))
+				replies = append(replies, businessReply(t, direct, refute), string(effect), businessReply(t, refute))
 			} else if keep(mixed) {
-				replies = append(replies, businessReply(t, direct))
+				replies = append(replies, businessReply(t, direct), string(effect))
 			}
 			client := &fakeAgentClient{}
 			for _, answer := range append(replies, noChecks) {
