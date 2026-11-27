@@ -35,6 +35,36 @@ type Hunk struct {
 
 var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 
+func hunkHeader(line string) (Hunk, bool) {
+	if !strings.HasPrefix(line, "@@ ") {
+		return Hunk{}, false
+	}
+	match := hunkHeaderRe.FindStringSubmatch(line)
+	if match == nil {
+		return Hunk{}, false
+	}
+	count := func(value string) int {
+		if value == "" {
+			return 1
+		}
+		parsed, _ := strconv.Atoi(value)
+		return parsed
+	}
+	oldStart, _ := strconv.Atoi(match[1])
+	newStart, _ := strconv.Atoi(match[3])
+	return Hunk{OldStart: oldStart, OldCount: count(match[2]), NewStart: newStart, NewCount: count(match[4])}, true
+}
+
+func HunkRanges(patch string) []Hunk {
+	var ranges []Hunk
+	for line := range strings.SplitSeq(patch, "\n") {
+		if header, ok := hunkHeader(line); ok {
+			ranges = append(ranges, header)
+		}
+	}
+	return ranges
+}
+
 // ParseHunks parses raw unified diff text for a single file into a slice of Hunks.
 // Lines before the first @@ header (file-level headers like "diff --git", "---", "+++") are ignored.
 func ParseHunks(rawDiffText string) []Hunk {
@@ -43,27 +73,12 @@ func ParseHunks(rawDiffText string) []Hunk {
 	var current *Hunk
 
 	for _, line := range lines {
-		if m := hunkHeaderRe.FindStringSubmatch(line); m != nil {
+		if header, ok := hunkHeader(line); ok {
 			// Flush previous hunk
 			if current != nil {
 				hunks = append(hunks, *current)
 			}
-			oldStart, _ := strconv.Atoi(m[1])
-			oldCount := 1
-			if m[2] != "" {
-				oldCount, _ = strconv.Atoi(m[2])
-			}
-			newStart, _ := strconv.Atoi(m[3])
-			newCount := 1
-			if m[4] != "" {
-				newCount, _ = strconv.Atoi(m[4])
-			}
-			current = &Hunk{
-				OldStart: oldStart,
-				OldCount: oldCount,
-				NewStart: newStart,
-				NewCount: newCount,
-			}
+			current = &header
 			continue
 		}
 

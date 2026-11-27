@@ -51,7 +51,7 @@ func runManualReview(t *testing.T, srv *fakeLLM) manualResult {
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
-	rt, err := loadLLMRuntime(cc.Template, "", llm.ResolveOptions{})
+	rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{})
 	if err != nil {
 		t.Fatalf("loadLLMRuntime: %v", err)
 	}
@@ -62,6 +62,14 @@ func runManualReview(t *testing.T, srv *fakeLLM) manualResult {
 	mode := tool.ParseReviewMode("HEAD~1", "HEAD", "")
 	fileReader := &tool.FileReader{RepoDir: cc.RepoDir, Mode: mode, Ref: "HEAD", Runner: cc.GitRunner}
 	tools := buildToolRegistry(rt.Collector, fileReader)
+	mainToolDefs, err := loadToolDefs(cc.Template.MainTask.Tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planToolDefs, err := loadToolDefs(cc.Template.PlanTask.ToolReferences)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
@@ -73,8 +81,8 @@ func runManualReview(t *testing.T, srv *fakeLLM) manualResult {
 		FileFilter:            cc.FileFilter,
 		LLMClient:             rt.Client,
 		Tools:                 tools,
-		PlanToolDefs:          rt.PlanToolDefs,
-		MainToolDefs:          rt.MainToolDefs,
+		PlanToolDefs:          planToolDefs,
+		MainToolDefs:          mainToolDefs,
 		CommentCollector:      rt.Collector,
 		CommentWorkerPool:     agent.NewCommentWorkerPool(2),
 		MaxConcurrency:        2,

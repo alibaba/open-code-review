@@ -25,7 +25,7 @@ func parseNLCases(t *testing.T, content string) []nlCase {
 	t.Helper()
 	var cases []nlCase
 	var cur *nlCase
-	for _, raw := range strings.Split(content, "\n") {
+	for raw := range strings.SplitSeq(content, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue

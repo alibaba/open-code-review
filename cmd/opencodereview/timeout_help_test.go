@@ -31,3 +31,23 @@ func TestTaskTimeoutHelp(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewHelpMentionsFlagConstraints(t *testing.T) {
+	cmd := &cobra.Command{Use: "review"}
+	opts := &reviewOptions{}
+	registerReviewFlags(cmd, opts)
+	for _, flag := range []string{"from", "to", "commit"} {
+		if !strings.Contains(cmd.Flags().Lookup(flag).Usage, "mutually exclusive") {
+			t.Errorf("--%s help does not mention that review modes are mutually exclusive", flag)
+		}
+	}
+	if !strings.Contains(cmd.Flags().Lookup("format").Usage, "sarif is not supported with --preview") {
+		t.Error("--format help does not mention the preview SARIF restriction")
+	}
+	if !strings.Contains(cmd.Flags().Lookup("background-file").Usage, "relative paths resolve from the repository root") {
+		t.Error("--background-file help does not explain relative path resolution")
+	}
+	if !strings.Contains(taskTimeoutHelp, "effort's review rounds") {
+		t.Error("--timeout help does not explain review effort scaling")
+	}
+}

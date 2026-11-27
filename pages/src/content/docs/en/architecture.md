@@ -16,7 +16,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (selection.go) — drop binaries, secret paths,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -25,12 +25,12 @@ flowchart TD
 ```
 
 The orchestration lives in the
-[`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
+[`internal/agent/`](https://github.com/alibaba/open-code-review/tree/main/internal/agent/)
 package, whose main files are `agent.go` (dispatch & per-group
 orchestration), `grouping.go` (semantic file grouping), `selection.go`
 (the file filter), `preview.go` (the `--preview` report), and `util.go`
 (helpers); the tool-use loop and memory compression live alongside it in
-[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/tree/main/internal/llmloop/).
 Two entry points matter: `Agent.Run` (top of pipeline) and
 `Agent.dispatchSubtasks` (per-group fan-out).
 
@@ -53,7 +53,7 @@ the same default Git uses.
 Untracked files are read from disk and treated as full-file additions so
 they're reviewed pre-commit.
 
-## The five-gate file filter
+## The six-gate file filter
 
 Once diffs are loaded, every file passes through
 [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
@@ -61,6 +61,7 @@ The function returns one of:
 
 ```
 binary          — file is binary
+secret_exclude  — path matches a built-in secret pattern (.env, id_rsa, …)
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in exclude pattern
@@ -73,12 +74,15 @@ its raw diff alone exceeds 80% of `max_tokens`. The gates run in this
 order:
 
 1. `binary` — binary files are dropped first.
-2. `user_exclude` — your project's `exclude` always wins.
-3. `user_include` — if the filter has include patterns **and** the file
+2. `secret_exclude` — either path matches a built-in secret-path
+   protection (`.env`, `id_rsa`, `.netrc`, …). Like `provider_directory`,
+   no `include` rule can bring it back.
+3. `user_exclude` — your project's `exclude` always wins.
+4. `user_include` — if the filter has include patterns **and** the file
    matches one, it's kept immediately (returns empty), bypassing the
    `unsupported_ext` and `default_path` gates below.
-4. `unsupported_ext` filters by extension allowlist.
-5. `default_path` is the last gate: it matches built-in exclude patterns,
+5. `unsupported_ext` filters by extension allowlist.
+6. `default_path` is the last gate: it matches built-in exclude patterns,
    both test files (`**/*_test.go`, `**/__tests__/**`, `**/*_spec.rb`, …)
    and dependency or build-output directories (`**/node_modules/**`,
    `**/vendor/**`, `**/target/**`, `**/__pycache__/**`, …). Every pattern
@@ -152,8 +156,8 @@ For small changes the plan adds latency without value, so it's skipped
 silently and the main loop runs straight away. Otherwise OCR
 makes a **single** `PLAN_TASK` LLM call — no `Tools` field is sent, so
 the model cannot call tools during planning. The read-only tool subset
-(`code_search`, `file_read_diff`, `file_find` — the three tools whose
-`plan_task` flag is `true` in `tools.json`) is embedded as plain text
+(`code_search`, `file_read`, `file_read_diff`, `file_find` — selected by
+`PLAN_TASK.tool_references` in `task_template.json`) is embedded as plain text
 via the `{{plan_tools}}` placeholder (rendered by
 `formatToolDefs`) so the model knows what's available later. The model
 returns a checklist that becomes `{{plan_guidance}}`
@@ -162,8 +166,8 @@ in the main prompt.
 ### Phase 2 — Main loop
 
 The main loop assembles the `MAIN_TASK` prompt and runs a tool-use
-conversation with the model. The full tool set adds **`task_done`**,
-**`code_comment`**, and **`file_read`** to the plan-phase tools — see
+conversation with the model. The full tool set adds **`task_done`**
+and **`code_comment`** to the plan-phase tool references — see
 [Tools](../tools/) for the full catalogue.
 
 ```
@@ -223,12 +227,21 @@ on the prompt budget defined by `MAX_TOKENS = 200000`:
 > **`MAX_TOKENS` is an *input* ceiling.** It bounds the prompt — the
 > context-window budget the message buffer is compressed against — and
 > nothing else. The model's *output* cap is a separate knob,
-> `MAX_COMPLETION_TOKENS = 16384`, sent as `max_completion_tokens` on
-> every request (`Template.CompletionTokenLimit()`). Keeping them apart
+> `MAX_COMPLETION_TOKENS = 16384` (`Template.CompletionTokenLimit()`). Keeping them apart
 > means raising the prompt ceiling with `--max-tokens` for a
 > large-context model never silently inflates the output budget. When
 > `MAX_COMPLETION_TOKENS` is unset, `MAX_TOKENS` is used as the output
 > cap for backwards compatibility.
+
+Before selecting active rounds, OCR reserves space for the **visible summary**:
+at most the configured completion limit, the 20% context margin, and the room
+beside the fixed prompt and summary wrapper. Some providers count reasoning
+tokens as output too. When the compression request itself has room below the
+80% warning threshold, OCR can request a larger generation budget (up to the
+configured completion limit) and asks the model to keep its final summary within
+the reservation. The rebuilt history must still fit. These limits are independent of the
+aggregate `--max-tokens-budget`; setting that budget to zero does not
+disable context compression.
 
 ### The three zones
 
@@ -245,29 +258,28 @@ flowchart LR
 
 A "round" is one assistant message plus the tool result messages that
 followed it. `partitionMessages` walks rounds from the end, keeping as
-many as fit within `(0.80 × MAX_TOKENS) - reservedTokens`. Everything
-older becomes the **compress zone**.
+many as fit strictly below `(0.80 × MAX_TOKENS) - reservedTokens`.
+The reservation includes the first two messages (including earlier
+summaries), the visible summary reservation, and its wrapper. Everything
+older becomes the **compress zone**. An empty compress zone leaves the
+conversation unchanged. The budget includes retry instructions between
+rounds, not just assistant messages and tool results. A background pass
+does not summarize the entire live tail below the warning limit. At or
+above that limit, even the latest round may be summarized if it cannot
+fit alongside the reserved summary.
 
 The compress zone is rendered as XML and fed to the model with the
 `MEMORY_COMPRESSION_TASK` prompt; the returned summary is appended to
 the original user message inside `<previous_review_summary>` tags.
 
-After compression: `messages = frozen[2] + compressed_user_msg + active`.
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … call MEMORY_COMPRESSION_TASK …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+After compression: `messages = system + (original_user + summary) + active`.
+The rebuilt conversation is checked against the same local token estimate
+and must be smaller than the original. A missing compression template,
+empty summary, or non-shrinking result leaves the original history intact.
+Only a visible summary is used; reasoning alone never replaces history.
+A response cut off by its output limit, an unusable summary template, or
+an oversized rebuilt result returns an error without dropping any original
+messages.
 
 ### Async vs sync
 
@@ -275,8 +287,12 @@ The async path lets the main loop keep emitting tool calls while
 compression runs in the background; when the next token check happens, a
 ready summary is swapped in via `tryApplyPendingCompression`. If the
 ratio crosses the warning threshold before the async job finishes, the
-loop stalls and runs `runCompression` synchronously — guaranteeing the
-next request always fits.
+loop stalls and runs `runCompression` synchronously. Messages appended
+after a background snapshot are retained when its summary is applied.
+If the conversation still cannot fit strictly below the local warning
+limit, the loop stops with `StopCompression`; it does not silently discard
+uncompressed history. This estimate is not a guarantee of the provider's
+actual context-window capacity.
 
 ## Comment processing pipeline
 
@@ -366,9 +382,9 @@ The placeholder substitution lives in
 [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go).
 The template itself isn't a CLI override — to change prompts you edit
 [`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json)
-and rebuild. The `--tools` flag is a *tool-registry* override (it
-swaps the JSON consumed by `internal/config/toolsconfig`), not a
-template override — see [Tools](../tools/#customizing-tools).
+and rebuild. Built-in tool definitions are also embedded and cannot be
+overridden at runtime. Use review rules and background for project guidance,
+or MCP for external business context — see [Tools](../tools/#customizing-tools).
 
 > **Placeholder syntax caveat.** All the placeholders above use
 > double-brace `{{…}}` syntax *except* `RE_LOCATION_TASK`, which

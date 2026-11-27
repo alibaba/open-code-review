@@ -28,7 +28,7 @@ You don't have to write Go to be useful:
 
 ### Prerequisites
 
-- [Go ≥ 1.26.9](https://go.dev/dl/)
+- [Go ≥ 1.26.10](https://go.dev/dl/)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/)
 
@@ -106,7 +106,7 @@ git checkout -b feat/anthropic-streaming
 Examples:
 
 ```
-feat(agent): add support for custom tool definitions
+feat(viewer): add session search
 fix(llm): handle timeout errors in Anthropic API calls
 docs(readme): clarify endpoint resolution priority
 refactor(viewer): extract task-card rendering into helper
@@ -208,6 +208,10 @@ CI runs the same set on every push; nothing surprising.
 
 ## Adding new tools
 
+This section covers source-level changes to the built-in agent, not runtime
+configuration. Validate core tool changes with tests and benchmarks. For
+external business context, use [MCP servers](../mcp/) instead.
+
 A tool has two parts:
 
 1. **JSON definition** in
@@ -218,6 +222,19 @@ A tool has two parts:
 
 Both have to be present for a new tool name to work. See [Tools](../tools/)
 for the existing six and treat them as templates.
+
+Select the tool in each applicable template's `MAIN_TASK.tools` array. Review
+and scan own separate lists; keep their order stable because it affects the
+model request. To describe a tool during review planning without enabling
+calls, add it to `PLAN_TASK.tool_references` instead. Tool definitions must
+not contain task membership flags, and a definition's name must match its
+catalog entry name.
+
+These lists select definitions for model requests, not an execution sandbox.
+MCP discovery and review-specific completion/filter protocols remain owned by
+their existing task adapters. Other helper tasks do not consume these catalog
+bindings; unsupported `tools` or `tool_references` fields are rejected rather
+than silently ignored.
 
 ## Adding new rule patterns
 

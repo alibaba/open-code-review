@@ -82,8 +82,8 @@ func TestResolveBinaryRejectsDirectoryAndNonExecutable(t *testing.T) {
 }
 
 func TestProbeVersionRejectsOutputLimitAndTimeout(t *testing.T) {
-	large := testutil.Install(t, t.TempDir(), "large", &testutil.Config{VersionBytes: 2048})
-	if _, err := probeVersion(large, time.Second); err == nil || !strings.Contains(err.Error(), "exceeded") {
+	large := testutil.Install(t, t.TempDir(), "large", &testutil.Config{VersionBytes: maxVersionOutputBytes + 1})
+	if _, err := probeVersion(large, time.Second); err == nil || !strings.Contains(err.Error(), "exceeded 1024 bytes") {
 		t.Fatalf("large version error = %v", err)
 	}
 	slow := testutil.Install(t, t.TempDir(), "slow", &testutil.Config{SleepMS: 10000})
@@ -109,9 +109,9 @@ func TestVersionCaptureBoundsChildOutput(t *testing.T) {
 }
 
 func TestProbeVersionAcceptsExactLimit(t *testing.T) {
-	binary := testutil.Install(t, t.TempDir(), "exact", &testutil.Config{VersionBytes: 1024})
+	binary := testutil.Install(t, t.TempDir(), "exact", &testutil.Config{VersionBytes: maxVersionOutputBytes})
 	version, err := probeVersion(binary, 5*time.Second)
-	if err != nil || len(version) != 1024 {
+	if err != nil || len(version) != maxVersionOutputBytes {
 		t.Fatalf("version length=%d err=%v", len(version), err)
 	}
 }

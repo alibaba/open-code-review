@@ -35,6 +35,122 @@ func TestHandleRepos_Success(t *testing.T) {
 	}
 }
 
+func TestReportTabsShareHeader(t *testing.T) {
+	root := sessionFixture(t, `{"type":"session_start","reviewMode":"range","model":"example","analysis":{"enabled":true}}`, fixtureEnd)
+	mux := newMux(root)
+	parts := func(tab string) (string, string) {
+		t.Helper()
+		out := httptest.NewRecorder()
+		mux.ServeHTTP(out, httptest.NewRequest("GET", "/r/repo/sess1?tab="+tab, nil))
+		header, panel, ok := strings.Cut(out.Body.String(), "</header>")
+		active := `href="?tab=` + tab + `" aria-current="page"`
+		if out.Code != http.StatusOK || !ok || !strings.Contains(header, active) || strings.Count(header, `aria-current="page"`) != 1 {
+			t.Fatalf("%s: missing report header or incorrect current link", tab)
+		}
+		return strings.Replace(header, ` aria-current="page"`, "", 1), panel
+	}
+	reviewHeader, review := parts("review")
+	analysisHeader, analysis := parts("analysis")
+	if reviewHeader != analysisHeader {
+		t.Error("the breadcrumb, report context and navigation must match across tabs")
+	}
+	for _, label := range []string{"Status:", "Files:", "Duration:"} {
+		if strings.Contains(reviewHeader, label) || !strings.Contains(review, label) || strings.Contains(analysis, label) {
+			t.Errorf("%q should only appear in the review panel", label)
+		}
+	}
+}
+
+func TestCombinedReportViews(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	directory := filepath.Join(repo, "review-id", "analysis")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(repo, "review-id.jsonl"),
+		`{"type":"session_start","timestamp":"2026-01-01T00:00:00Z","cwd":"/repo","reviewMode":"range","analysis":{"enabled":true}}`,
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":1}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","content":"review-only turn"}`)
+	writeJSONL(t, filepath.Join(repo, "plain.jsonl"), `{"type":"session_start","cwd":"/repo"}`)
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	get := func(path string, status int, want, absent string) string {
+		t.Helper()
+		out := httptest.NewRecorder()
+		newMux(root).ServeHTTP(out, httptest.NewRequest("GET", path, nil))
+		if out.Code != status || !strings.Contains(out.Body.String(), want) || (absent != "" && strings.Contains(out.Body.String(), absent)) {
+			t.Fatalf("%s: status=%d want=%q absent=%q body=%s", path, out.Code, want, absent, out.Body.String())
+		}
+		return out.Body.String()
+	}
+	const page = "/r/repo/review-id"
+	const tab = page + "?tab=analysis"
+	get("/r/repo", 200, `<td class="col-mode">range</td>`, "Review + Analysis")
+	get("/r/repo", 200, page, "trace.jsonl")
+	get("/r/repo/plain?tab=analysis", 404, "", "analysis-prose")
+	get(tab, 200, "missing or unreadable", "legacy")
+	write("result.json", `{"execution_status":"started","session_id":"review-id"}`)
+	get(tab, 200, "No final Analysis status", `id="analysis-conversations"`)
+	writeJSONL(t, filepath.Join(directory, "trace.jsonl"),
+		`{"type":"llm_request","filePath":"comparison","taskType":"main_task","request_no":1}`,
+		`{"type":"llm_response","filePath":"comparison","taskType":"main_task","content":"first analysis turn","tool_calls":[{"name":"file_read","arguments":"read arguments"}]}`,
+		`{"type":"tool_call","filePath":"comparison","taskType":"main_task","tool_name":"file_read","result":"private tool result"}`,
+		`{"type":"llm_request","filePath":"comparison","taskType":"memory_compression_task","request_no":2}`,
+		`{"type":"llm_response","filePath":"comparison","taskType":"memory_compression_task","content":"compressed history"}`,
+		`{"type":"llm_request","filePath":"comparison","taskType":"main_task","request_no":3}`,
+		`{"type":"llm_error","filePath":"comparison","taskType":"main_task","error":"analysis request failed"}`,
+		`{"type":`)
+	body := get(tab, 200, `<details class="file-accordion section-accordion" id="analysis-conversations">`, "review-only turn")
+	for _, want := range []string{"3 requests", "Request #1", "first analysis turn", "file_read", "read arguments", "private tool result", "Request #2", "Memory compression", "compressed history", "Request #3", "analysis request failed", "Open execution log"} {
+		var found bool
+		_, body, found = strings.Cut(body, want)
+		if !found {
+			t.Fatalf("missing or out-of-order analysis detail %q", want)
+		}
+	}
+	write("result.json", `{"execution_status":"skipped","errors":["Unsupported comparison"],"session_id":"review-id"}`)
+	get(tab, 200, "Unsupported comparison", `id="evidence-index"`)
+	write("result.json", `{"comparison":{"id":"comparison"},"session_id":"review-id","execution_status":"completed","submission_status":"accepted","scope":[{}, {}, {"excluded_reason":"binary"}],"usage":{"total_tokens":100},"observation_ids":["obs-000001","obs-000002","obs-000003"],"cited_observation_ids":["obs-000003","obs-000001"]}`)
+	get(tab, 200, "accepted report file is missing", "panic")
+	write("report.md", "## Report body\n\nSee [[obs-000003]] and [[obs-000001]].\n\n![external image](https://assets.example.org/unrequested.png)")
+	write("observations.jsonl", `{"observation_id":"obs-000001","tool_name":"file_read","locations":[{"side":"head","path":"main.go","start_line":2,"end_line":8}],"truncated":true,"returned_content":"evidence text"}`)
+	get(page, 200, "review-only turn", "first analysis turn")
+	get(page, 200, "?tab=analysis", "Report body")
+	get(tab, 200, "Report body", `"type":"llm_request"`)
+	get(tab, 200, "<h2>Report body</h2>", "unrequested.png")
+	get(tab, 200, "Changed files in scope</dt><dd>2", "evidence text")
+	index := get(tab, 200, `<details class="file-accordion section-accordion" id="evidence-index">`, "evidence text")
+	for _, id := range []string{"obs-000001", "obs-000002", "obs-000003"} {
+		if strings.Count(index, `data-observation-id="`+id+`"`) != 1 {
+			t.Fatalf("expected exactly one evidence index link for %s", id)
+		}
+	}
+	for _, want := range []string{"2 cited &middot; 3 total", "Cited in the report", `data-observation-id="obs-000003"`, `data-observation-id="obs-000001"`, "Not cited in the report", `data-observation-id="obs-000002"`} {
+		var found bool
+		_, index, found = strings.Cut(index, want)
+		if !found {
+			t.Fatalf("missing or misplaced evidence index entry: %s", want)
+		}
+	}
+	detail := get(tab+"&evidence=obs-000001", 200, "evidence text", "review-only turn")
+	for _, want := range []string{`#evidence" aria-current="true">obs-000001`, "main.go:2–8", "Truncated result."} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("missing selected evidence detail: %s", want)
+		}
+	}
+	get(tab+"&evidence=no-such-id", 404, "", "evidence text")
+	get(tab+"&log=trace", 200, "private tool result", "Report body")
+	var exported strings.Builder
+	if err := ExportSession(&exported, root, "repo", "review-id"); err != nil || !strings.Contains(exported.String(), "Report body") || strings.Contains(exported.String(), "private tool result") || strings.Contains(exported.String(), "evidence text") {
+		t.Fatalf("unexpected report export: %v", err)
+	}
+}
+
 func TestHandleRepos_EmptyRoot(t *testing.T) {
 	root := t.TempDir()
 	req := httptest.NewRequest("GET", "/", nil)
@@ -374,6 +490,45 @@ func TestMux_HasNoWriteRoutes(t *testing.T) {
 			mux.ServeHTTP(rr, req)
 			if rr.Code != tt.want {
 				t.Errorf("%s %s = %d, want %d", tt.method, tt.path, rr.Code, tt.want)
+			}
+		})
+	}
+}
+
+// TestStaticAssetRefs_OnReposAndSessionsPages holds the two listing pages to the
+// same a11y script reference the session detail page already asserts. Both
+// repos.html and sessions.html hand their scrollable table regions to
+// window.ocrArrowScroll, so dropping the tag kills arrow-key scrolling with
+// nothing failing: the page still renders, only the keyboard path is dead.
+func TestStaticAssetRefs_OnReposAndSessionsPages(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(repoDir, "s1.jsonl"),
+		`{"type":"session_start","timestamp":"2025-06-01T10:00:00Z","cwd":"/my/proj","model":"claude"}`,
+		`{"type":"session_end","duration_seconds":30,"files_reviewed":["main.go"]}`)
+
+	tests := []struct {
+		name string
+		call func(w http.ResponseWriter, r *http.Request)
+	}{
+		{"repos", func(w http.ResponseWriter, r *http.Request) { handleRepos(w, r, root) }},
+		{"sessions", func(w http.ResponseWriter, r *http.Request) { handleSessions(w, r, root, "repo") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			rr := httptest.NewRecorder()
+			tt.call(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			if !strings.Contains(rr.Body.String(), `src="/static/a11y.js"`) {
+				t.Errorf("%s page is missing src=\"/static/a11y.js\": "+
+					"the scrollable table regions lose arrow-key scrolling", tt.name)
 			}
 		})
 	}

@@ -69,6 +69,7 @@ func TestRun_PromptOverflowRecordsFailure(t *testing.T) {
 				}
 			}
 			a := NewAgent(Args{
+				MainToolDefs:   []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "task_done"}}},
 				RepoDir:        repo,
 				Template:       tpl,
 				LLMClient:      client,
@@ -135,7 +136,7 @@ func TestRun_PromptOverflowRecordsFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			var foundFailure bool
-			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 				var record struct {
 					Type     string `json:"type"`
 					FilePath string `json:"filePath"`

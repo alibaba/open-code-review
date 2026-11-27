@@ -11,6 +11,13 @@ mkdir -p .github/workflows
 cp ocr-review.yml .github/workflows/ocr-review.yml
 ```
 
+Starting [December 2, 2026](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/), GitHub will block `pull_request_target` by default in public repositories it hosts unless an applicable Actions event policy explicitly allows it. If you need OCR to keep running automatically when a PR is opened, updated, or reopened, go to **Settings → Actions → Policies** in your repository and [create or update a policy for the workflow](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution#creating-a-workflow-execution-policy).
+
+- For a new policy, click **Add target** under **Target workflows** and specify `.github/workflows/ocr-review.yml`.
+- Under **Restrict events**, allow `pull_request_target` for automatic reviews and `issue_comment` for comment-triggered re-reviews.
+- Set **Enforcement status** to **Active** and save the policy.
+- Note: Before updating an existing policy, check that it applies only to `.github/workflows/ocr-review.yml`.
+
 The core of the demo is a single action step:
 
 ```yaml
@@ -44,9 +51,9 @@ Take the commit SHA from the [releases page](https://github.com/alibaba/open-cod
 
 The demo above runs on GitHub-hosted runners (`runs-on: ubuntu-latest`) and pulls the action from `alibaba/open-code-review@main`. If you prefer to run OCR on your own self-hosted runner — to reach private network resources, keep LLM traffic on-prem, or avoid runner-minute costs — the OCR project itself does exactly this in its own CI.
 
-See [`.github/workflows/ocr-review.yml`](../../.github/workflows/ocr-review.yml) for that workflow. It runs on `runs-on: self-hosted` inside a `node:24` container. One important caveat: it invokes the action with `uses: ./` only because `action.yml` lives in that same repository — that is an internal shortcut and will not resolve in your repo. As an external user, keep `uses: alibaba/open-code-review@main` (the runner fetches the action automatically); only the runner environment needs to change. What is worth borrowing from it:
+See [`.github/workflows/ocr-review.yml`](../../.github/workflows/ocr-review.yml) for that workflow. It runs on `runs-on: self-hosted` inside a `node:24.22.1` container. One important caveat: it invokes the action with `uses: ./` only because `action.yml` lives in that same repository — that is an internal shortcut and will not resolve in your repo. As an external user, keep `uses: alibaba/open-code-review@main` (the runner fetches the action automatically); only the runner environment needs to change. What is worth borrowing from it:
 
-- `runs-on: self-hosted`, optionally with a `container:` image such as `node:24` (the action needs Node.js; git is installed automatically if missing).
+- `runs-on: self-hosted`, optionally with a `container:` image such as `node:24.22.1` (the action needs Node.js; git is installed automatically if missing).
 - Marking the workspace as a trusted git `safe.directory` when running inside a container (e.g. `git config --global --replace-all safe.directory '*'`) to avoid "dubious ownership" errors. Use `--replace-all` (not `--add`) so repeated runs across multiple self-hosted actions replace rather than accumulate entries in the global git config.
 - Pinning action inputs explicitly (`sticky_summary`, `incremental`, `upload_artifacts`, `llm_extra_body`, etc.).
 
@@ -60,7 +67,7 @@ PR Created/Updated → GitHub Actions Triggered → OCR Reviews Diff → Comment
 Comment with trigger keyword ↗
 ```
 
-1. When a PR is opened, the workflow triggers (uses `pull_request_target` for fork secret access).
+1. When a PR is opened, updated, or reopened, the workflow runs using [`pull_request_target`](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target) so it can access secrets for PRs from forks.
 2. Alternatively, when a comment containing `/open-code-review` or `@open-code-review` is posted on a PR, the workflow triggers.
 3. The reusable action installs OCR, fetches the PR head blobs, computes `git merge-base`, and runs `ocr review --from <merge-base> --to <head> --format json`.
 4. It parses the JSON output and posts inline review comments on the PR via the Pull Request Review API, plus a summary comment (an issue comment on the PR).

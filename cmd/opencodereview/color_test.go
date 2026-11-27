@@ -4,11 +4,24 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
+
+func TestResolveColorForNonTerminalWriter(test *testing.T) {
+	for _, fixture := range []struct {
+		mode string
+		want bool
+	}{{colorModeAuto, false}, {colorModeNever, false}, {colorModeAlways, true}} {
+		setColorFlags(test, fixture.mode)
+		if got := resolveColorFor(io.Discard); got != fixture.want {
+			test.Errorf("mode %s: got %v, want %v", fixture.mode, got, fixture.want)
+		}
+	}
+}
 
 // setColor pins the resolved color decision for one test and restores the
 // previous state afterwards. Tests capture stdout through a pipe, which is not a

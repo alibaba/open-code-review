@@ -64,7 +64,7 @@ jobs:
     container:
       # Pinned to an exact 24.x for reproducible builds, matching the pin used
       # by translation-sync.yml (avoids the mutable node:24 tag).
-      image: node:24.18.0
+      image: node:24.22.1
     steps:
       # The checks read the working tree only — no git history needed.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
