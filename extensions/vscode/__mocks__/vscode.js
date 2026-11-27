@@ -3,8 +3,8 @@
 
 module.exports = {
   env: { language: 'en' },
-  Uri: { file: (p) => ({ fsPath: p, scheme: 'file' }), joinPath: (...args) => args.join('/') },
-  workspace: { workspaceFolders: [{ uri: { fsPath: '/mock' } }], openTextDocument: () => Promise.resolve({ lineCount: 10, lineAt: () => ({ text: '' }) }) },
+  Uri: { file: (p) => ({ fsPath: p, scheme: 'file' }), joinPath: (...args) => args.join('/'), from: (c) => ({ ...c, fsPath: c.path, toString: () => `${c.scheme}:${c.path}` }) },
+  workspace: { workspaceFolders: [{ uri: { fsPath: '/mock' } }], openTextDocument: () => Promise.resolve({ lineCount: 10, lineAt: () => ({ text: '' }) }), registerTextDocumentContentProvider: () => ({ dispose: () => {} }) },
   window: { showErrorMessage: () => {}, showWarningMessage: () => Promise.resolve(undefined), createOutputChannel: () => ({ appendLine: () => {}, dispose: () => {} }), createWebviewPanel: () => ({ webview: { html: '', onDidReceiveMessage: () => ({ dispose: () => {} }), asWebviewUri: (u) => u }, onDidDispose: () => ({ dispose: () => {} }), reveal: () => {}, dispose: () => {} }) },
   commands: { registerCommand: () => ({ dispose: () => {} }), executeCommand: () => Promise.resolve() },
   extensions: { getExtension: () => null },
