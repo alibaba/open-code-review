@@ -5,6 +5,7 @@ package behaviortask
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -200,10 +201,15 @@ func (code *codeTools) execute(ctx context.Context, name string, args map[string
 	} else {
 		content, err = provider.Execute(ctx, args)
 	}
-	observation.ReturnedContent = content
 	if err != nil {
-		return observation, err
+		var diagnostic tool.DiagnosticError
+		if !errors.As(err, &diagnostic) {
+			return observation, err
+		}
+		content = err.Error()
+		observation.ErrorClass = "tool_error"
 	}
+	observation.ReturnedContent = content
 	if !utf8.ValidString(content) {
 		observation.ErrorClass = "unsupported_encoding"
 		return observation, fmt.Errorf("non-UTF-8 code output is unavailable")

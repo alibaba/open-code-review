@@ -461,6 +461,11 @@ the result is delivered to the model as a regular tool result with text
 like `"Error: file not found: src/missing.go"`. The model then decides
 whether to retry, ask for a different file, or call `task_done`.
 
+In code review, rejected `file_read` and `code_search` calls and `file_read_diff`
+calls that return no requested diffs are recorded as failures. If at least one
+requested diff is returned, the call counts as a success and includes a notice
+for any missing paths. A valid search with no matches also counts as a success.
+
 If a tool name isn't in the registry, OCR returns the constant
 `tool.NotAvailableMsg` rather than crashing, so an unknown tool call is
 reported back to the model as an unavailable tool.

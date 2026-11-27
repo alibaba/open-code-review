@@ -47,7 +47,7 @@ func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (st
 func (p *FileReadProvider) execute(ctx context.Context, args map[string]any) (string, error) {
 	filePath, _ := args["file_path"].(string)
 	if filePath == "" {
-		return "Error: file_path is required", nil
+		return "", DiagnosticError("Error: file_path is required")
 	}
 
 	startLine, hasStart := args["start_line"].(float64)

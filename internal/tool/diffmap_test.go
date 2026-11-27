@@ -35,12 +35,8 @@ func TestDiffMapReplacementDropsEarlierPaths(t *testing.T) {
 
 	// And the tool output agrees with the snapshot.
 	got, err := p.Execute(context.Background(), map[string]any{"path_array": []any{"NOTES.md"}})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(got, "not reviewable") {
-		t.Fatalf("a dropped path must not be served from the old snapshot: %q", got)
-	}
+	assertDiagnosticError(t, got, err, "Error: diff not found for: NOTES.md\n"+
+		"Diffs exist for: main.go\nUse one of those paths, or file_read for a file outside the reviewed set.\n")
 }
 
 // Paths are reported sorted so a message built from them is stable.

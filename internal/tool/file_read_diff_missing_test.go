@@ -27,26 +27,10 @@ func TestFileReadDiffNamesMissingPathAndAvailablePaths(t *testing.T) {
 	}))
 
 	got, err := p.Execute(context.Background(), map[string]any{
-		"path_array": []any{"a.go"},
+		"path_array": []any{"a.go", "b.go"},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(got, "a.go") {
-		t.Errorf("message should name the path it could not serve: %q", got)
-	}
-	if !strings.Contains(got, "reviewed.go") {
-		t.Errorf("message should name a path that does have a diff: %q", got)
-	}
-	if !strings.Contains(got, "diff not found") {
-		t.Errorf("the original reason must survive: %q", got)
-	}
-	// Recovering is the point of the change: the non-empty case must point the
-	// model at the paths that do have diffs and, for a file outside the change
-	// set, at file_read.
-	if !strings.Contains(got, "file_read for a file outside the reviewed set") {
-		t.Errorf("message should tell the model how to reach a file outside the change set: %q", got)
-	}
+	assertDiagnosticError(t, got, err, "Error: diff not found for: a.go, b.go\n"+
+		"Diffs exist for: reviewed.go\nUse one of those paths, or file_read for a file outside the reviewed set.\n")
 }
 
 // Several paths in one call: the message must not pretend every path was
@@ -109,14 +93,12 @@ func TestFileReadDiffCapsAvailablePathList(t *testing.T) {
 	got, err := p.Execute(context.Background(), map[string]any{
 		"path_array": []any{"missing.go"},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	diagnostic := requireDiagnosticError(t, got, err)
+	if !strings.Contains(diagnostic, "(and 2 more)") {
+		t.Errorf("the paths beyond the cap should be counted: %q", diagnostic)
 	}
-	if !strings.Contains(got, "(and 2 more)") {
-		t.Errorf("the paths beyond the cap should be counted: %q", got)
-	}
-	if strings.Contains(got, fmt.Sprintf("f%02d.go", diffNotFoundMaxListed)) {
-		t.Errorf("a path past the cap should not be listed: %q", got)
+	if strings.Contains(diagnostic, fmt.Sprintf("f%02d.go", diffNotFoundMaxListed)) {
+		t.Errorf("a path past the cap should not be listed: %q", diagnostic)
 	}
 }
 
@@ -125,12 +107,7 @@ func TestFileReadDiffEmptyRequestUnchanged(t *testing.T) {
 	p := NewFileReadDiff(NewDiffMap(nil))
 
 	got, err := p.Execute(context.Background(), map[string]any{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "Error: no files found" {
-		t.Fatalf("empty request should keep its own message, got %q", got)
-	}
+	assertDiagnosticError(t, got, err, "Error: no files found")
 }
 
 // An empty snapshot has no paths to offer. Both review and scan reach this
@@ -143,18 +120,6 @@ func TestFileReadDiffEmptySnapshotClaimsNoMode(t *testing.T) {
 	got, err := p.Execute(context.Background(), map[string]any{
 		"path_array": []any{"a.go"},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(got, "a.go") {
-		t.Errorf("message should name the path it could not serve: %q", got)
-	}
-	if !strings.Contains(got, "file_read") {
-		t.Errorf("with nothing to point at, file_read is the only recovery the message can offer: %q", got)
-	}
-	for _, unwanted := range []string{"scan", "reviewed set"} {
-		if strings.Contains(got, unwanted) {
-			t.Errorf("message guesses at the mode (%q): %q", unwanted, got)
-		}
-	}
+	assertDiagnosticError(t, got, err, "Error: diff not found for: a.go\n"+
+		"This run has no diffs. Read the file with file_read instead.\n")
 }

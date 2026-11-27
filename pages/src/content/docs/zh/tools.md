@@ -389,6 +389,9 @@ Match lines: 1
 文本形如 `"Error: file not found: src/missing.go"`。模型再决定是重试、换文件，
 还是调 `task_done`。
 
+代码评审中，`file_read` 和 `code_search` 拒绝的调用，以及 `file_read_diff` 未返回任何请求差异的调用，均记为失败。
+只要返回了至少一项请求的差异，`file_read_diff` 就记为成功，并提示缺失的路径。合法搜索没有匹配结果时也记为成功。
+
 若工具名不在注册表中，OCR 返回常量 `tool.NotAvailableMsg` 而不是崩溃，
 将未知工具调用作为工具不可用的结果反馈给模型。
 

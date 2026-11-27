@@ -71,6 +71,11 @@ func (t Tool) IsKnown() bool {
 	return t != Unknown
 }
 
+// DiagnosticError carries a tool's failure message for direct presentation to the model.
+type DiagnosticError string
+
+func (e DiagnosticError) Error() string { return string(e) }
+
 // Provider is the interface that all concrete tool implementations satisfy.
 // Each tool handles one specific capability (read file, search code, etc.).
 type Provider interface {
