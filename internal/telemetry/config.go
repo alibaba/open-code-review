@@ -26,6 +26,7 @@ type Config struct {
 	OTLPEndpoint string // OTLP collector address (grpc/http)
 	OTLPProtocol string // "grpc", "http/protobuf", "http/json"
 	ContentLog   bool   // Include prompt/response content in log events
+	NoMetrics    bool   // OTEL_METRICS_EXPORTER=none: export traces only
 }
 
 // DefaultConfig returns a disabled default configuration.
@@ -55,6 +56,9 @@ func resolveEnv(cfg *Config) {
 	}
 	if v := os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"); v != "" {
 		cfg.OTLPProtocol = v
+	}
+	if os.Getenv("OTEL_METRICS_EXPORTER") == "none" {
+		cfg.NoMetrics = true
 	}
 	if os.Getenv("OCR_CONTENT_LOGGING") == "1" {
 		cfg.ContentLog = true

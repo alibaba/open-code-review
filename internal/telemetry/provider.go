@@ -56,11 +56,14 @@ func Init(ctx context.Context) bool {
 	case "otlp":
 		initOTLPProviders(ctx, res, cfg)
 	default:
-		initConsoleProviders(res)
+		initConsoleProviders(res, cfg)
 	}
 
 	otel.SetTracerProvider(tracerProvider)
-	otel.SetMeterProvider(meterProvider)
+	// A nil *MeterProvider would replace the global no-op provider and panic on first use.
+	if meterProvider != nil {
+		otel.SetMeterProvider(meterProvider)
+	}
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
