@@ -5,8 +5,15 @@ import { useCallback, useEffect, useState } from 'react';
 
 export function useCopyToast(duration = 1200) {
   const [toastVisible, setToastVisible] = useState(false);
+  // Bumped on every successful copy so the hide timer restarts even when
+  // the toast is already visible.
+  const [copyCount, setCopyCount] = useState(0);
 
   const handleCopy = useCallback((text: string) => {
+    const showToast = () => {
+      setToastVisible(true);
+      setCopyCount((n) => n + 1);
+    };
     const fallbackCopy = (value: string) => {
       const textarea = document.createElement('textarea');
       textarea.value = value;
@@ -16,12 +23,12 @@ export function useCopyToast(duration = 1200) {
       textarea.select();
       const success = document.execCommand('copy');
       document.body.removeChild(textarea);
-      if (success) setToastVisible(true);
+      if (success) showToast();
     };
 
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text)
-        .then(() => setToastVisible(true))
+        .then(showToast)
         .catch(() => fallbackCopy(text));
     } else {
       fallbackCopy(text);
@@ -32,7 +39,7 @@ export function useCopyToast(duration = 1200) {
     if (!toastVisible) return;
     const timer = setTimeout(() => setToastVisible(false), duration);
     return () => clearTimeout(timer);
-  }, [toastVisible, duration]);
+  }, [toastVisible, copyCount, duration]);
 
   return { toastVisible, handleCopy };
 }
