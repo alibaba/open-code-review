@@ -346,9 +346,18 @@ func (a *responseStreamAccumulator) response() (*responses.Response, error) {
 		if a.terminalType != "response.completed" || a.terminal.Status != responses.ResponseStatusCompleted {
 			return nil, &responseStatusError{message: "chatgpt stream did not reach response.completed"}
 		}
-		if len(a.terminal.Output) > 0 {
-			return a.terminal, nil
-		}
+	}
+	if err := checkResponseStatus(a.terminal); err != nil {
+		return nil, err
+	}
+	if a.terminal.Status != responses.ResponseStatusCompleted && a.terminal.Status != responses.ResponseStatusIncomplete {
+		return nil, &responseStatusError{message: fmt.Sprintf(
+			"openai-responses terminal event carried unexpected status=%q", a.terminal.Status)}
+	}
+	// A populated terminal output is authoritative; item events may be absent
+	// or incomplete on compatible gateways.
+	if len(a.terminal.Output) > 0 {
+		return a.terminal, nil
 	}
 
 	sort.SliceStable(a.items, func(i, j int) bool {
@@ -370,13 +379,6 @@ func (a *responseStreamAccumulator) response() (*responses.Response, error) {
 	var full responses.Response
 	if err := full.UnmarshalJSON(merged); err != nil {
 		return nil, fmt.Errorf("unmarshal accumulated openai-responses stream: %w", err)
-	}
-	if err := checkResponseStatus(&full); err != nil {
-		return nil, err
-	}
-	if full.Status != responses.ResponseStatusCompleted && full.Status != responses.ResponseStatusIncomplete {
-		return nil, &responseStatusError{message: fmt.Sprintf(
-			"openai-responses terminal event carried unexpected status=%q", full.Status)}
 	}
 	return &full, nil
 }
