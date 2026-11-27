@@ -5,6 +5,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -469,5 +471,553 @@ func TestDispatchSubtasks_TokenBudgetSkipsNextRoundAfterCompletedRound(t *testin
 	manifest := a.RunManifest()
 	if manifest == nil || len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 0 {
 		t.Fatalf("coverage = %+v, want the group completed", manifest)
+	}
+}
+
+type fakeProviderBudgetError struct{ msg string }
+
+func (e fakeProviderBudgetError) Error() string          { return e.msg }
+func (e fakeProviderBudgetError) IsBudgetExceeded() bool { return true }
+
+type fakeProviderBudgetClient struct {
+	calls atomic.Int64
+	err   error
+}
+
+func (f *fakeProviderBudgetClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.calls.Add(1)
+	return nil, f.err
+}
+
+func assertSafeProviderBudgetWarning(t *testing.T, warnings []AgentWarning, rawSecret string) {
+	t.Helper()
+	var count int
+	for _, w := range warnings {
+		if w.Type != "provider_budget_exceeded" {
+			continue
+		}
+		count++
+		if w.Message != providerBudgetExceededReason {
+			t.Errorf("provider_budget_exceeded warning message = %q, want %q", w.Message, providerBudgetExceededReason)
+		}
+		if rawSecret != "" && strings.Contains(w.Message, rawSecret) {
+			t.Errorf("provider_budget_exceeded warning leaked raw provider error: %q", w.Message)
+		}
+	}
+	if count != 1 {
+		t.Errorf("provider_budget_exceeded warnings = %d, want 1", count)
+	}
+}
+
+func TestDispatchSubtasks_GroupingBudgetExceededAbortsWithoutPerFileFallback(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	fake := &fakeProviderBudgetClient{err: fakeProviderBudgetError{msg: "429 budget_exceeded: secret=DO_NOT_EXPOSE max budget 10.0 reached"}}
+	tpl := budgetAgentTestTemplate()
+	tpl.GroupingMinFiles = 2
+	tpl.GroupingBundleLineThreshold = 0
+	tpl.GroupingTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{
+			{Role: "user", Content: "group {{file_list}}"},
+		},
+	}
+
+	a := New(Args{
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   4,
+		Template:         tpl,
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = makeBudgetDiffs(5)
+	a.currentDate = "2026-01-01 09:00"
+	a.args.Tools.Freeze()
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err == nil {
+		t.Fatal("expected budget error from dispatchSubtasks, got nil")
+	}
+	if !llm.IsBudgetExceededError(err) {
+		t.Fatalf("expected error to wrap budget exceeded, got: %v", err)
+	}
+	if len(comments) != 0 {
+		t.Fatalf("comments = %d, want 0", len(comments))
+	}
+	if got := fake.calls.Load(); got != 1 {
+		t.Fatalf("LLM calls = %d, want 1 (grouping must not fall back to 5 per-file calls)", got)
+	}
+	if a.BudgetExceeded() {
+		t.Error("expected BudgetExceeded()==false on provider quota error (reserved for aggregate token budget)")
+	}
+	assertSafeProviderBudgetWarning(t, a.Warnings(), "DO_NOT_EXPOSE")
+
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.TerminalState != session.StateFailed {
+		t.Fatalf("manifest terminal = %+v, want failed", manifest)
+	}
+	if got, want := len(manifest.Coverage.Failed), len(a.diffs); got != want {
+		t.Fatalf("failed coverage = %d, want %d", got, want)
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureProvider {
+			t.Fatalf("item %s classification = %q, want provider", item.Path, item.Classification)
+		}
+		if item.Reason != providerBudgetExceededReason {
+			t.Fatalf("item %s reason = %q, want %q", item.Path, item.Reason, providerBudgetExceededReason)
+		}
+	}
+}
+
+func TestDispatchSubtasks_GroupingBudgetExceededPreservesResumedFindings(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := makeBudgetDiffs(3)
+	fp := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	resume := &session.ResumeState{
+		SessionID:  "prior-session",
+		Model:      "fake",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items: map[string]session.ResumeItem{
+			fp: {
+				FilePath:    diffs[0].NewPath,
+				OldPath:     diffs[0].OldPath,
+				NewPath:     diffs[0].NewPath,
+				Fingerprint: fp,
+				Comments: []model.LlmComment{{
+					Path:    diffs[0].NewPath,
+					Content: "cached finding from prior run",
+				}},
+			},
+		},
+		Manifest: &session.RunManifest{
+			Coverage: session.Coverage{
+				Completed: []session.CoverageItem{{ItemID: fp, Fingerprint: fp}},
+			},
+		},
+	}
+
+	fake := &fakeProviderBudgetClient{err: fakeProviderBudgetError{msg: "429 budget_exceeded: secret=DO_NOT_EXPOSE max budget 10.0 reached"}}
+	tpl := budgetAgentTestTemplate()
+	tpl.GroupingMinFiles = 2
+	tpl.GroupingBundleLineThreshold = 0
+	tpl.GroupingTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{
+			{Role: "user", Content: "group {{file_list}}"},
+		},
+	}
+
+	a := New(Args{
+		From:             "main",
+		To:               "feature",
+		ReviewMode:       session.ReviewModeRange,
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   4,
+		Resume:           resume,
+		Template:         tpl,
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = diffs
+	a.currentDate = "2026-01-01 09:00"
+	a.args.Tools.Freeze()
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err == nil {
+		t.Fatal("expected budget error from dispatchSubtasks, got nil")
+	}
+	if !llm.IsBudgetExceededError(err) {
+		t.Fatalf("expected error to wrap budget exceeded, got: %v", err)
+	}
+	if len(comments) != 1 || comments[0].Content != "cached finding from prior run" {
+		t.Fatalf("comments = %+v, want 1 preserved resumed finding", comments)
+	}
+	if got := fake.calls.Load(); got != 1 {
+		t.Fatalf("LLM calls = %d, want 1", got)
+	}
+	assertSafeProviderBudgetWarning(t, a.Warnings(), "DO_NOT_EXPOSE")
+
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.TerminalState != session.StatePartial {
+		t.Fatalf("manifest terminal = %+v, want partial", manifest)
+	}
+	if got := len(manifest.Coverage.Reused); got != 1 {
+		t.Fatalf("reused coverage = %d, want 1", got)
+	}
+	if got := len(manifest.Coverage.Failed); got != 2 {
+		t.Fatalf("failed coverage = %d, want 2", got)
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureProvider {
+			t.Fatalf("item %s classification = %q, want provider", item.Path, item.Classification)
+		}
+		if item.Reason != providerBudgetExceededReason {
+			t.Fatalf("item %s reason = %q, want %q", item.Path, item.Reason, providerBudgetExceededReason)
+		}
+	}
+}
+
+func TestDispatchSubtasks_SubtaskBudgetExceededCancelsRemainingGroups(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	fake := &fakeProviderBudgetClient{err: fakeProviderBudgetError{msg: "429 budget_exceeded: secret=DO_NOT_EXPOSE max budget 10.0 reached"}}
+	a := New(Args{
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		Template:         budgetAgentTestTemplate(),
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = makeBudgetDiffs(6)
+	a.currentDate = "2026-01-01 09:00"
+	a.args.Tools.Freeze()
+
+	_, err := a.dispatchSubtasks(context.Background())
+	if err == nil {
+		t.Fatal("expected budget error from dispatchSubtasks, got nil")
+	}
+	if !llm.IsBudgetExceededError(err) {
+		t.Fatalf("expected error to wrap budget exceeded, got: %v", err)
+	}
+	if got := fake.calls.Load(); got != 1 {
+		t.Fatalf("LLM calls = %d, want 1 (remaining 5 groups must be skipped after budget exhaustion)", got)
+	}
+	if a.BudgetExceeded() {
+		t.Error("expected BudgetExceeded()==false on provider quota error (reserved for aggregate token budget)")
+	}
+	assertSafeProviderBudgetWarning(t, a.Warnings(), "DO_NOT_EXPOSE")
+
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.TerminalState != session.StateFailed {
+		t.Fatalf("manifest terminal = %+v, want failed", manifest)
+	}
+	if got, want := len(manifest.Coverage.Failed), len(a.diffs); got != want {
+		t.Fatalf("failed coverage = %d, want %d", got, want)
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureProvider {
+			t.Fatalf("item %s classification = %q, want provider", item.Path, item.Classification)
+		}
+		if item.Reason != providerBudgetExceededReason {
+			t.Fatalf("item %s reason = %q, want %q", item.Path, item.Reason, providerBudgetExceededReason)
+		}
+	}
+}
+
+type fakePartialThenProviderBudgetClient struct {
+	calls atomic.Int64
+	path  string
+	err   error
+}
+
+func (f *fakePartialThenProviderBudgetClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	if f.calls.Add(1) == 1 {
+		return &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{Role: "assistant", ToolCalls: []llm.ToolCall{
+					{ID: "1", Type: "function", Function: llm.FunctionCall{
+						Name:      "code_comment",
+						Arguments: `{"comments":[{"path":"` + f.path + `","content":"finding before quota exhaustion"}]}`,
+					}},
+					{ID: "2", Type: "function", Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"}},
+				}},
+				FinishReason: "tool_calls",
+			}},
+			Model: "fake",
+			Usage: &llm.UsageInfo{PromptTokens: 100, TotalTokens: 100},
+		}, nil
+	}
+	return nil, f.err
+}
+
+func TestDispatchSubtasks_PartialSuccessThenProviderBudgetExceededClassifiesProvider(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := makeBudgetDiffs(4)
+	fake := &fakePartialThenProviderBudgetClient{
+		path: diffs[0].NewPath,
+		err:  fakeProviderBudgetError{msg: "429 insufficient_quota: secret=DO_NOT_EXPOSE quota exhausted"},
+	}
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+
+	a := New(Args{
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: collector,
+		Tools:            reg,
+		MaxConcurrency:   1,
+		SkipFilter:       true,
+		Template:         budgetAgentTestTemplate(),
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment", Description: "comment"}},
+		},
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = diffs
+	a.currentDate = "2026-01-01 09:00"
+	a.args.Tools.Freeze()
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if got := fake.calls.Load(); got != 2 {
+		t.Fatalf("LLM calls = %d, want 2 (1 completed group + 1 quota failure; remaining 2 skipped)", got)
+	}
+	if len(comments) != 1 || comments[0].Content != "finding before quota exhaustion" {
+		t.Fatalf("comments = %+v, want 1 finding from completed group", comments)
+	}
+	if a.BudgetExceeded() {
+		t.Error("expected BudgetExceeded()==false on provider quota error (reserved for aggregate token budget)")
+	}
+	assertSafeProviderBudgetWarning(t, a.Warnings(), "DO_NOT_EXPOSE")
+
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.TerminalState != session.StatePartial {
+		t.Fatalf("manifest terminal = %+v, want partial", manifest)
+	}
+	if got := len(manifest.Coverage.Completed); got != 1 {
+		t.Fatalf("completed coverage = %d, want 1", got)
+	}
+	if got := len(manifest.Coverage.Failed); got != 3 {
+		t.Fatalf("failed coverage = %d, want 3", got)
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureProvider {
+			t.Fatalf("item %s classification = %q, want provider (must not use budget and mask non-zero exit)", item.Path, item.Classification)
+		}
+		if item.Reason != providerBudgetExceededReason {
+			t.Fatalf("item %s reason = %q, want %q", item.Path, item.Reason, providerBudgetExceededReason)
+		}
+	}
+}
+
+func TestDispatchSubtasks_PlanBudgetExceededAbortsWithoutMainTask(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	fake := &fakeProviderBudgetClient{err: fakeProviderBudgetError{msg: "429 budget_exceeded: max budget 10.0 reached"}}
+	tpl := budgetAgentTestTemplate()
+	tpl.PlanModeLineThreshold = 0
+	tpl.PlanModeGroupLineThreshold = 0
+	tpl.PlanTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{
+			{Role: "user", Content: "plan {{diffs}}"},
+		},
+	}
+
+	a := New(Args{
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		Template:         tpl,
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = makeBudgetDiffs(4)
+	a.currentDate = "2026-01-01 09:00"
+	a.args.Tools.Freeze()
+
+	_, err := a.dispatchSubtasks(context.Background())
+	if err == nil || !llm.IsBudgetExceededError(err) {
+		t.Fatalf("expected budget exceeded error, got: %v", err)
+	}
+	if got := fake.calls.Load(); got != 1 {
+		t.Fatalf("LLM calls = %d, want 1 (plan budget error must not fall through to main task or other groups)", got)
+	}
+	if a.BudgetExceeded() {
+		t.Error("expected BudgetExceeded()==false on provider quota error (reserved for aggregate token budget)")
+	}
+}
+
+func TestDispatchSubtasks_LaterRoundProviderBudgetExceededCancelsRemainingGroups(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := makeBudgetDiffs(4)
+	fake := &fakePartialThenProviderBudgetClient{
+		path: diffs[0].NewPath,
+		err:  fakeProviderBudgetError{msg: "429 budget_exceeded: secret=DO_NOT_EXPOSE quota exhausted"},
+	}
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+
+	tpl := budgetAgentTestTemplate()
+	tpl.MaxReviewRounds = 2
+	a := New(Args{
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: collector,
+		Tools:            reg,
+		MaxConcurrency:   1,
+		SkipFilter:       true,
+		Template:         tpl,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment", Description: "comment"}},
+		},
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = diffs
+	a.currentDate = "2026-01-01 09:00"
+	a.args.Tools.Freeze()
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if got := fake.calls.Load(); got != 2 {
+		t.Fatalf("LLM calls = %d, want 2 (round 1 completed + round 2 quota failure; remaining 3 groups must be skipped)", got)
+	}
+	if len(comments) != 1 || comments[0].Content != "finding before quota exhaustion" {
+		t.Fatalf("comments = %+v, want 1 preserved round-1 finding", comments)
+	}
+	if a.BudgetExceeded() {
+		t.Error("expected BudgetExceeded()==false on provider quota error")
+	}
+	assertSafeProviderBudgetWarning(t, a.Warnings(), "DO_NOT_EXPOSE")
+	var roundWarn int
+	for _, w := range a.Warnings() {
+		if w.Type == "review_round_failed" {
+			roundWarn++
+			if strings.Contains(w.Message, "DO_NOT_EXPOSE") {
+				t.Errorf("review_round_failed warning leaked raw provider error: %q", w.Message)
+			}
+		}
+	}
+	if roundWarn != 1 {
+		t.Errorf("review_round_failed warnings = %d, want 1", roundWarn)
+	}
+
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.TerminalState != session.StatePartial {
+		t.Fatalf("manifest terminal = %+v, want partial", manifest)
+	}
+	if got := len(manifest.Coverage.Completed); got != 1 {
+		t.Fatalf("completed coverage = %d, want 1", got)
+	}
+	if got := len(manifest.Coverage.Failed); got != 3 {
+		t.Fatalf("failed coverage = %d, want 3", got)
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureProvider {
+			t.Fatalf("item %s classification = %q, want provider", item.Path, item.Classification)
+		}
+		if item.Reason != providerBudgetExceededReason {
+			t.Fatalf("item %s reason = %q, want %q", item.Path, item.Reason, providerBudgetExceededReason)
+		}
+	}
+}
+
+type fakeLaterRoundOrdinaryErrorClient struct {
+	calls atomic.Int64
+	path  string
+}
+
+func (f *fakeLaterRoundOrdinaryErrorClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	switch f.calls.Add(1) {
+	case 1:
+		return &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{Role: "assistant", ToolCalls: []llm.ToolCall{
+					{ID: "1", Type: "function", Function: llm.FunctionCall{
+						Name:      "code_comment",
+						Arguments: `{"comments":[{"path":"` + f.path + `","content":"round 1 finding"}]}`,
+					}},
+					{ID: "2", Type: "function", Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"}},
+				}},
+				FinishReason: "tool_calls",
+			}},
+			Model: "fake",
+			Usage: &llm.UsageInfo{PromptTokens: 100, TotalTokens: 100},
+		}, nil
+	case 2:
+		return nil, errors.New("transient round-2 error")
+	default:
+		return &llm.ChatResponse{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{Role: "assistant", ToolCalls: []llm.ToolCall{
+					{ID: "1", Type: "function", Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"}},
+				}},
+				FinishReason: "tool_calls",
+			}},
+			Model: "fake",
+			Usage: &llm.UsageInfo{PromptTokens: 100, TotalTokens: 100},
+		}, nil
+	}
+}
+
+func TestDispatchSubtasks_LaterRoundOrdinaryErrorContinuesRemainingGroups(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := makeBudgetDiffs(2)
+	fake := &fakeLaterRoundOrdinaryErrorClient{path: diffs[0].NewPath}
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+
+	tpl := budgetAgentTestTemplate()
+	tpl.MaxReviewRounds = 2
+	a := New(Args{
+		LLMClient:        fake,
+		Model:            "fake",
+		CommentCollector: collector,
+		Tools:            reg,
+		MaxConcurrency:   1,
+		SkipFilter:       true,
+		Template:         tpl,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment", Description: "comment"}},
+		},
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = diffs
+	a.currentDate = "2026-01-01 09:00"
+	a.args.Tools.Freeze()
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if got := fake.calls.Load(); got != 3 {
+		t.Fatalf("LLM calls = %d, want 3 (group 0 round 1+2, then group 1 round 1)", got)
+	}
+	if len(comments) != 1 || comments[0].Content != "round 1 finding" {
+		t.Fatalf("comments = %+v, want 1 preserved round-1 finding", comments)
+	}
+	for _, w := range a.Warnings() {
+		if w.Type == "provider_budget_exceeded" {
+			t.Fatalf("unexpected provider_budget_exceeded warning on ordinary error: %+v", w)
+		}
+	}
+
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.TerminalState != session.StateComplete {
+		t.Fatalf("manifest terminal = %+v, want complete", manifest)
+	}
+	if got := len(manifest.Coverage.Completed); got != 2 {
+		t.Fatalf("completed coverage = %d, want 2", got)
 	}
 }

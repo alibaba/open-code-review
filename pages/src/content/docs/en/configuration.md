@@ -371,7 +371,10 @@ Only 4xx HTTP status codes are accepted. `408`, `409`, and `429` are already
 retried by the SDK. When read from the config file, these redundant codes are
 ignored. When supplied through `ocr config set`, OCR also prints a warning and
 omits them from the saved value. All 5xx responses are already retried by the
-SDK and cannot be added to `retry_codes`.
+SDK and cannot be added to `retry_codes`. Terminal budget or quota exhaustion
+errors (`budget_exceeded`, `insufficient_quota`) on `429` or `retry_codes`
+bypass SDK retries so OCR stops immediately, while transient rate-limit `429`
+responses retain the existing retry behavior.
 
 ### Prompt limit
 

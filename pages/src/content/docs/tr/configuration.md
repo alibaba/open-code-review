@@ -257,7 +257,7 @@ ocr config set llm.retry_codes 403,400
 ocr config set custom_providers.my-gateway.retry_codes 403,400
 ```
 
-Yalnızca 4xx HTTP kodları kabul edilir. `408`, `409` ve `429` zaten SDK tarafından yeniden denenir; dosyadan okunurken bu gereksiz kodlar yok sayılır. `ocr config set` ayrıca uyarır ve bunları kaydedilen değerden çıkarır. Tüm 5xx yanıtları zaten yeniden denendiğinden `retry_codes` içine eklenemez.
+Yalnızca 4xx HTTP kodları kabul edilir. `408`, `409` ve `429` zaten SDK tarafından yeniden denenir; dosyadan okunurken bu gereksiz kodlar yok sayılır. `ocr config set` ayrıca uyarır ve bunları kaydedilen değerden çıkarır. Tüm 5xx yanıtları zaten yeniden denendiğinden `retry_codes` içine eklenemez. Ancak `429` veya `retry_codes` yanıtları kalıcı bütçe ya da kota tükenmesi hataları (`budget_exceeded`, `insufficient_quota`) içeriyorsa SDK yeniden denemeleri atlanır ve işlem hemen durdurulur; geçici hız sınırı `429` yanıtları mevcut yeniden deneme davranışını korur.
 
 ### İstem sınırı {#prompt-limit}
 

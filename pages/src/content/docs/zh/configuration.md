@@ -338,7 +338,7 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 只接受 4xx HTTP 状态码。`408`、`409` 和 `429` 已由 SDK 重试；直接从配置文件
 读取时，这些冗余状态码会被忽略。通过 `ocr config set` 设置时，OCR 还会输出
 警告，并且不会把这些状态码保存到配置中。所有 5xx 响应也已由 SDK 默认重试，
-因此不能加入 `retry_codes`。
+因此不能加入 `retry_codes`。如果 `429` 或 `retry_codes` 响应包含结构化的预算或配额耗尽错误（`budget_exceeded`、`insufficient_quota`），OCR 会跳过 SDK 重试并立即停止；临时限流 `429` 响应仍保留原有重试行为。
 
 ### 提示词上限
 

@@ -48,10 +48,12 @@ type groupingResponse struct {
 	Files []int  `json:"files"`
 }
 
-// groupDiffsResult holds the grouping output and any LLM usage to record.
+// groupDiffsResult holds the grouping output, any LLM usage to record, and a
+// fatal error when grouping stopped on a terminal provider budget/quota limit.
 type groupDiffsResult struct {
 	groups []FileGroup
 	usage  *llm.UsageInfo
+	err    error
 }
 
 // groupingSessionOpts carries optional session-recording context.
@@ -99,6 +101,10 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 
 	groups, usage, err := callGroupingLLM(ctx, diffs, client, modelName, tpl.GroupingTask, tpl.CompletionTokenLimit(), sessOpts)
 	if err != nil {
+		if llm.IsBudgetExceededError(err) {
+			fmt.Fprintf(stdout.Writer(), "[ocr] LLM grouping stopped by provider budget/quota limit (%v); skipping per-file fallback\n", err)
+			return groupDiffsResult{usage: usage, err: err}
+		}
 		fmt.Fprintf(stdout.Writer(), "[ocr] LLM grouping failed (%v), falling back to per-file dispatch\n", err)
 		return groupDiffsResult{groups: toSingleFileGroups(diffs), usage: usage}
 	}
