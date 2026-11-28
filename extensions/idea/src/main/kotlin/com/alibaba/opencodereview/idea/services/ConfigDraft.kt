@@ -12,6 +12,7 @@ import com.fasterxml.jackson.core.JsonParseException
 import com.fasterxml.jackson.core.JsonParser
 import com.intellij.openapi.diagnostic.Logger
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -33,15 +34,16 @@ fun emptyRawConfig(): RawConfig = mutableMapOf()
 private val uniqueKeyJson = JsonFactory().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
 internal fun parseRawConfigForDeletion(text: String, name: String): RawConfig {
     // kotlinx.serialization keeps the last duplicate key, which can discard settings on writeback.
-    try {
+    val raw = try {
         uniqueKeyJson.createParser(text).use { parser ->
             parser.nextToken()
             parser.skipChildren()
         }
-    } catch (e: JsonParseException) {
-        throw IllegalArgumentException(HostStrings.t(currentIdeLocale(), "ext.config.invalidProviderJson"), e)
+        OcrJson.decodeFromString<JsonObject>(text).toMutableMap()
+    } catch (e: Exception) {
+        if (e !is JsonParseException && e !is SerializationException) throw e
+        throw IllegalArgumentException(HostStrings.t(currentIdeLocale(), "ext.config.invalidProviderJson"))
     }
-    val raw = parseRawConfig(text)
     val active = name.isNotEmpty() && raw["provider"] == JsonPrimitive(name)
     for (key in raw.keys) {
         // Go's JSON field matching also folds Unicode long s to ASCII s.

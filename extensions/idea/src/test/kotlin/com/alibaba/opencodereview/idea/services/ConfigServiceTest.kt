@@ -55,11 +55,13 @@ class ConfigServiceTest {
     }
 
     @Test
-    fun `deleting a provider leaves ambiguous configuration keys untouched`() {
+    fun `deleting a provider leaves invalid or ambiguous configurations untouched`() {
         val config = temp.newFile("config.json")
         val service = ConfigService(CliService(), configFile = config)
         val locale = currentIdeLocale()
         for ((original, message) in listOf(
+            """{"custom_providers":{"local":{}},"future_option":false} {}""" to
+                HostStrings.t(locale, "ext.config.invalidProviderJson"),
             """{"custom_providers":{"keep":{}},"custom_providers":{"local":{}}}""" to
                 HostStrings.t(locale, "ext.config.invalidProviderJson"),
             """{"Provider":"local","custom_providers":{"local":{}}}""" to
