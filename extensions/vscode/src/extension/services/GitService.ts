@@ -4,7 +4,7 @@
 import { t, resolveLocale } from '@shared/i18n';
 import * as vscode from 'vscode';
 import { readFile } from 'fs/promises';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { GitState, FileChange, ReviewMode, ReviewContext } from '@shared/types';
 import { buildWorkspaceFiles, branchRefCandidates, parseNameStatus, pickRepoRoot } from './gitMap';
 
@@ -14,6 +14,8 @@ export class GitService {
   private api: any | null = null;
   private cache: GitState = { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
   private reviewFileStatus = new Map<string, FileChange['status']>();
+  private commitParentKnown = new Map<string, boolean>();
+  private emptyTreeId: string | null = null;
 
   constructor(private log?: vscode.OutputChannel) {}
 
@@ -266,6 +268,64 @@ export class GitService {
       ?? process.cwd();
   }
 
+  /**
+   * Verify the commit has a parent (`rev-parse --verify <sha>^` fails for the repository's
+   * root commit). Any git failure classifies as parentless so diffs stay viewable.
+   */
+  private async hasParentCommit(commit: string): Promise<boolean> {
+    const known = this.commitParentKnown.get(commit);
+    if (known !== undefined) return known;
+    const root = await this.repoRoot();
+    let hasParent = false;
+    if (root) {
+      try {
+        // --end-of-options matches getCommitFiles: a commit value beginning
+        // with "-" can never parse as a git option.
+        const out = await runGit(root, ['rev-parse', '--verify', '--end-of-options', `${commit}^`]);
+        hasParent = Boolean(out.trim());
+      } catch { /* root commit or unresolvable ref */ }
+    }
+    // Only a positive result is immutable. A false result can be a transient
+    // git failure, so it must not stick for the session.
+    if (hasParent) this.commitParentKnown.set(commit, true);
+    return hasParent;
+  }
+
+  /**
+   * Compute the repository's empty-tree id — the ref VS Code's git extension
+   * renders as zero bytes (sha1 and sha256 alike), so a root commit's files
+   * diff as fully added. `--stdin` with a closed stdin keeps this
+   * cross-platform (no /dev/null path), so this spawns instead of execFile:
+   * execFile leaves the child's stdin pipe open and `hash-object --stdin`
+   * would wait for EOF forever. Memoized; null on git failure (callers
+   * degrade to the historical sides).
+   */
+  private async emptyTreeRef(): Promise<string | null> {
+    if (this.emptyTreeId) return this.emptyTreeId;
+    const root = await this.repoRoot();
+    if (!root) return null;
+    try {
+      const out = await new Promise<string>((resolve, reject) => {
+        const child = spawn('git', ['-c', 'core.quotepath=false', 'hash-object', '-t', 'tree', '--stdin'], {
+          cwd: root,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        let stdout = '';
+        child.stdout!.on('data', (d: Buffer) => { stdout += d; });
+        child.on('error', reject);
+        child.on('close', (code) => {
+          if (code === 0) resolve(stdout);
+          else reject(new Error(`git hash-object exited ${code}`));
+        });
+      });
+      const id = out.trim();
+      if (id) this.emptyTreeId = id;
+      return this.emptyTreeId;
+    } catch {
+      return null;
+    }
+  }
+
   /** Open a review file in the native VS Code diff view. Each of the three modes determines its left and right sides. */
   async openDiff(opts: {
     path: string; status: FileChange['status'];
@@ -294,12 +354,14 @@ export class GitService {
     }
 
     if (opts.mode === ReviewMode.Commit && opts.commit) {
-      const parent = `${opts.commit}^`;
-      const label = `${opts.commit}^ ↔ ${opts.commit}`;
-      const leftRef = opts.status === 'added' ? null : parent;
-      const rightRef = opts.status === 'deleted' ? null : opts.commit;
-      await this.presentRefDiff(api, root, opts.path, opts.status, leftRef, rightRef, `${opts.path} (${label})`, {
-        fallbackRange: `${parent}..${opts.commit}`,
+      const hasParent = await this.hasParentCommit(opts.commit);
+      const refs = commitDiffRefs(opts.commit, opts.status, hasParent);
+      const emptyTree = refs.rootLeft ? await this.emptyTreeRef() : null;
+      await this.presentRefDiff(api, root, opts.path, opts.status, refs.leftRef, refs.rightRef, `${opts.path} (${refs.label})`, {
+        // A root commit diffs against the empty tree: the left side renders
+        // zero bytes (fully added) and the range is a working patch fallback.
+        leftUri: refs.rootLeft && emptyTree ? api.toGitUri(fileUri, emptyTree) : undefined,
+        fallbackRange: hasParent ? `${opts.commit}^..${opts.commit}` : (emptyTree ? `${emptyTree}..${opts.commit}` : undefined),
       });
       return;
     }
@@ -327,12 +389,12 @@ export class GitService {
     leftRef: string | null,
     rightRef: string | null,
     title: string,
-    opts: { fallbackRange: string },
+    opts: { fallbackRange?: string; leftUri?: vscode.Uri },
   ): Promise<void> {
-    const left = await this.resolveDiffSide(api, root, relPath, leftRef, status, 'left');
+    const left = opts.leftUri ?? (await this.resolveDiffSide(api, root, relPath, leftRef, status, 'left'));
     const right = await this.resolveDiffSide(api, root, relPath, rightRef, status, 'right');
     const opened = await this.presentDiff(left, right, title);
-    if (!opened) {
+    if (!opened && opts.fallbackRange) {
       await this.presentPatchDiff(root, opts.fallbackRange, relPath, title);
     }
   }
@@ -463,15 +525,14 @@ export class GitService {
     if (!api || !root) return null;
 
     if (ctx.mode === ReviewMode.Commit && ctx.commit) {
-      const parent = `${ctx.commit}^`;
-      const label = `${ctx.commit}^ ↔ ${ctx.commit}`;
-      const leftRef = status === 'added' ? null : parent;
-      const rightRef = status === 'deleted' ? null : ctx.commit;
-      const mountRef = status === 'deleted' ? parent : ctx.commit;
-      const mountSide: 'left' | 'right' = status === 'deleted' ? 'left' : 'right';
-      const left = await this.resolveDiffSide(api, root, relPath, leftRef, status, 'left');
-      const right = await this.resolveDiffSide(api, root, relPath, rightRef, status, 'right');
-      return { left, right, title: `${relPath} (${label})`, mountRef, mountSide, leftRef, rightRef };
+      const hasParent = await this.hasParentCommit(ctx.commit);
+      const refs = commitDiffRefs(ctx.commit, status, hasParent);
+      const emptyTree = refs.rootLeft ? await this.emptyTreeRef() : null;
+      const left = refs.rootLeft && emptyTree
+        ? api.toGitUri(vscode.Uri.file(`${root}/${relPath}`), emptyTree)
+        : await this.resolveDiffSide(api, root, relPath, refs.leftRef, status, 'left');
+      const right = await this.resolveDiffSide(api, root, relPath, refs.rightRef, status, 'right');
+      return { left, right, title: `${relPath} (${refs.label})`, mountRef: refs.mountRef, mountSide: refs.mountSide, leftRef: refs.leftRef, rightRef: refs.rightRef };
     }
 
     if (ctx.mode === ReviewMode.Branch && ctx.from && ctx.to) {
@@ -507,6 +568,47 @@ function runGit(cwd: string, args: string[]): Promise<string> {
       else resolve(stdout);
     });
   });
+}
+
+/**
+ * Decide refs, mount point, and label for commit-mode diffs.
+ * A parentless (root) commit keeps every file viewable: no dead `<sha>^` refs, and
+ * `rootLeft` tells the caller to build the left side from the repository's empty-tree
+ * id so files render as fully added (VS Code renders that ref as zero bytes). The
+ * mount falls back to the commit itself. With a parent, values match the historical
+ * output byte for byte.
+ */
+export function commitDiffRefs(
+  commit: string,
+  status: FileChange['status'],
+  hasParent: boolean,
+): {
+  leftRef: string | null;
+  rightRef: string | null;
+  mountRef: string;
+  mountSide: 'left' | 'right';
+  label: string;
+  rootLeft: boolean;
+} {
+  if (!hasParent) {
+    return {
+      leftRef: null,
+      rightRef: status === 'deleted' ? null : commit,
+      mountRef: commit,
+      mountSide: status === 'deleted' ? 'left' : 'right',
+      label: `${commit} ↔ ${commit}`,
+      rootLeft: true,
+    };
+  }
+  const parent = `${commit}^`;
+  return {
+    leftRef: status === 'added' ? null : parent,
+    rightRef: status === 'deleted' ? null : commit,
+    mountRef: status === 'deleted' ? parent : commit,
+    mountSide: status === 'deleted' ? 'left' : 'right',
+    label: `${parent} ↔ ${commit}`,
+    rootLeft: false,
+  };
 }
 
 function formatRelative(date?: Date): string {
