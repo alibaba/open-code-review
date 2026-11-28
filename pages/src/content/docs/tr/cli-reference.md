@@ -194,6 +194,19 @@ ocr review --commit abc123 --resume <session-id>
 ocr review --resume <session-id>   # workspace (no mode flags)
 ```
 
+#### Çalıştırma makbuzu (`<session-id>.receipt.json`) {#run-receipts}
+
+Oturum günlüğünün yanında makine tarafından okunabilen bir çalıştırma makbuzu
+(`ocr.session-receipt/v1`) tutulur ve her kontrol noktasında atomik olarak yeniden
+yazılır: süreç zorla öldürüldüğünde (SIGKILL, denetleyici zaman aşımı) son anlık görüntü
+ayrıştırılabilir kalır — `session_id`, `status` (çalışırken `running`; sonda `complete` /
+`partial` / `failed` / `cancelled` / `skipped`) ve grup/file kapsamı. Makbuz, günlüğün en
+son kontrol noktası kadar geride kalabilir — günlük kaydı önce yazıldığından günlük
+tabanlı devam, makbuzun gösterdiğinden fazlasını yeniden kullanabilir. İnceleme
+grupları sonuçtaki `groups[]` ile aynıdır; taramada bunlar dağıtım toplu işleridir.
+Oturum silme (`ocr session rm`), makbuzu günlükle birlikte silir.
+
+
 Devam ettirme bilinçli olarak katıdır. Kontrol noktaları yalnızca önceki çalıştırmayla aynı şey incelenecekse yeniden kullanılır:
 
 - Çalışma alanında hem taban commit hem commit edilmemiş değişiklikler eşleşmelidir. Aralık/commit kipinden farklı olarak sabitlenecek bir commit olmadığından devam ederken yapılan düzenlemeler korunmaz. Kimlik, bayt bayt görüntüden değil seçilip ayrıştırılan farktan hesaplanır. İzlenmeyen dosyanın son satır sonunu eklemek/kaldırmak veya yalnızca LF/CRLF değiştirmek aynı farka normalleşir; devam edilebilir. İçerik değişikliği reddedilir.

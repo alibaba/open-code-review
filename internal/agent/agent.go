@@ -499,7 +499,10 @@ func (a *Agent) Diffs() []model.Diff {
 	return a.diffs
 }
 
-// FileGroups returns the semantic grouping result for JSON output.
+// FileGroups returns the semantic grouping result for JSON output, enriched
+// with the per-group state rollup (#2124): state, completed_files,
+// missing_files, and failure_code come from the session's receipt snapshot, so
+// coverage can be mapped to groups after the fact.
 func (a *Agent) FileGroups() []FileGroupInfo {
 	if len(a.fileGroups) == 0 {
 		return nil
@@ -512,7 +515,44 @@ func (a *Agent) FileGroups() []FileGroupInfo {
 		}
 		result[i] = FileGroupInfo{Label: g.Label, Files: files}
 	}
+	snapshot := a.session.ReceiptSnapshot()
+	byGroup := make(map[string]session.ReceiptGroup, len(snapshot.Groups))
+	for _, rg := range snapshot.Groups {
+		byGroup[rg.GroupID] = rg
+	}
+	for i := range result {
+		if rg, ok := byGroup[receiptGroupID(i)]; ok {
+			result[i].State = rg.State
+			result[i].CompletedFiles = rg.CompletedFiles
+			result[i].MissingFiles = rg.MissingFiles
+			result[i].FailureCode = rg.FailureCode
+		}
+	}
 	return result
+}
+
+// receiptGroupID is the stable group identifier shared by the receipt and the
+// JSON result: dispatch order index.
+func receiptGroupID(i int) string {
+	return strconv.Itoa(i)
+}
+
+// receiptGroupsFrom maps the dispatch groups onto the receipt's group shape,
+// keyed by dispatch order so FileGroups() can join states back.
+func receiptGroupsFrom(groups []FileGroup) []session.ReceiptGroup {
+	out := make([]session.ReceiptGroup, 0, len(groups))
+	for i, g := range groups {
+		files := make([]string, 0, len(g.Diffs))
+		for _, d := range g.Diffs {
+			files = append(files, d.NewPath)
+		}
+		out = append(out, session.ReceiptGroup{
+			GroupID: receiptGroupID(i),
+			Label:   g.Label,
+			Files:   files,
+		})
+	}
+	return out
 }
 
 // TotalTokensUsed returns PromptTokens + CompletionTokens across all LLM calls.
@@ -679,6 +719,10 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		&groupingSessionOpts{session: a.session, provider: a.args.Provider, model: a.args.Model})
 	groups := groupResult.groups
 	a.fileGroups = groups
+	// Install the receipt's expected set (#2124): group identity + files, all
+	// pending. Item transitions land via RecordReviewItem* hooks so a killed
+	// process leaves the last written receipt beside the journal.
+	a.session.SetReceiptGroups(receiptGroupsFrom(a.fileGroups))
 	if groupResult.usage != nil {
 		a.runner.RecordUsage(groupResult.usage)
 	}
@@ -887,6 +931,9 @@ func (a *Agent) recordContextFailure(err error) {
 			a.recordWarning("manifest_error", "", setErr.Error())
 		}
 	}
+	// Both shapes are unclean interruptions (#2124): pin the receipt's terminal
+	// status so a cancelled or deadline-truncated run never reads as partial.
+	a.session.MarkReceiptCancelled()
 }
 
 func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {

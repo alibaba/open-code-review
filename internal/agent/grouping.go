@@ -33,9 +33,16 @@ type FileGroup struct {
 }
 
 // FileGroupInfo is the exported, JSON-friendly representation of a file group.
+// The state fields (#2124) are the per-group rollup joined from the session's
+// receipt snapshot, so coverage can be mapped to groups after the fact; label
+// and files keep their historical shape.
 type FileGroupInfo struct {
-	Label string   `json:"label"`
-	Files []string `json:"files"`
+	Label          string   `json:"label"`
+	Files          []string `json:"files"`
+	State          string   `json:"state,omitempty"`
+	CompletedFiles int      `json:"completed_files,omitempty"`
+	MissingFiles   []string `json:"missing_files,omitempty"`
+	FailureCode    string   `json:"failure_code,omitempty"`
 }
 
 // groupingResponse is one group as returned by the LLM. Files holds the integer

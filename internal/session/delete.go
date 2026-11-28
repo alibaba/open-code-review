@@ -115,6 +115,13 @@ func removeReport(path string) error {
 			return err
 		}
 	}
+	// The run receipt (#2124) and its tmp residue go with the journal so a
+	// deleted session can't leave a stale discovery surface behind.
+	for _, suffix := range []string{".receipt.json", ".receipt.json.tmp"} {
+		if err := os.Remove(strings.TrimSuffix(path, ".jsonl") + suffix); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 	return os.Remove(path)
 }
 

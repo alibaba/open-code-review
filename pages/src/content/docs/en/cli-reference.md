@@ -240,9 +240,49 @@ ocr review --commit abc123 --resume <session-id>
 ocr review --resume <session-id>   # workspace (no mode flags)
 ```
 
+#### Run receipts (`<session-id>.receipt.json`) {#run-receipts}
+
+Alongside each session's journal, every run that has started dispatching
+maintains a machine-readable receipt at
+`~/.opencodereview/sessions/<repo>/<session-id>.receipt.json`
+(`ocr.session-receipt/v1`). It is rewritten atomically as checkpoints land, so
+even a run killed hard (SIGKILL, supervisor timeout) leaves a parseable
+snapshot a caller can read without scraping the journal: the `session_id`,
+a `status` (`running` while live; `complete` / `partial` / `failed` /
+`cancelled` / `skipped` at the end — a `running` receipt whose
+`updated_at` has gone stale means the process died), and per-group /
+per-file coverage:
+
+```json
+{
+  "schema": "ocr.session-receipt/v1",
+  "session_id": "…",
+  "status": "running",
+  "groups": [
+    {
+      "group_id": "batch-0",
+      "label": "batch 0 (by-language)",
+      "files": ["a.go"],
+      "state": "pending",
+      "completed_files": 0,
+      "missing_files": ["a.go"]
+    }
+  ],
+  "files": [{ "path": "a.go", "state": "pending", "group_id": "batch-0" }]
+}
+```
+
+Review groups mirror the semantic grouping in the result's `groups[]` (which
+carries the same `state` / `completed_files` / `missing_files` /
+`failure_code` rollup); scan groups are its dispatch batches. The receipt can
+lag the journal by the most recent checkpoint — the journal record is written
+first — so resume, which is journal-driven, may reuse slightly more than the
+receipt shows. `--resume <session-id>` after an unclean kill reuses completed
+files without re-issuing model requests for them. Deleting a session
+(`ocr session rm`) removes its receipt along with the journal.
+
 Resume is strict by design. Checkpoints are only reused when the resumed run
 would review the same thing the parent did:
-
 - a workspace review resumes only when the worktree it reviews is unchanged:
   the base commit and the uncommitted changes must both match. Unlike range or
   commit reviews there is no commit to pin, so edits made during the resumed
