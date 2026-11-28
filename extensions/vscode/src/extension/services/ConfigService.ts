@@ -3,12 +3,19 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
-import { dirname, join } from 'path';
+import { join } from 'path';
+import * as vscode from 'vscode';
+import { applyEdits, findNodeAtLocation, getNodeValue, modify, parseTree, ParseError } from 'jsonc-parser';
+import { resolveLocale, t } from '@shared/i18n';
 import { ConfigEntry } from '@shared/configUtils';
 import { OcrConfig } from '@shared/types';
 import { CliService } from './CliService';
 import { applyConfigEntries, RawConfig } from './configDraft';
 import { parseConfig, toConfigSetArgs } from './configParse';
+
+function removeProperty(text: string, path: string[]): string {
+  return applyEdits(text, modify(text, path, undefined, {}));
+}
 
 export class ConfigService {
   constructor(private cli: CliService) {}
@@ -37,37 +44,52 @@ export class ConfigService {
     }
   }
 
-  private writeRaw(raw: RawConfig): OcrConfig | null {
+  deleteCustomProvider(name: string): OcrConfig | null {
     const p = this.configPath();
-    const hasContent = Boolean(
-      raw.provider
-      || raw.model
-      || (raw.providers && Object.keys(raw.providers).length > 0)
-      || (raw.custom_providers && Object.keys(raw.custom_providers).length > 0)
-      || (raw.llm && Object.keys(raw.llm).length > 0),
-    );
-    if (!hasContent) {
-      if (existsSync(p)) unlinkSync(p);
+    if (!existsSync(p)) return null;
+    let text = readFileSync(p, 'utf8');
+    const errors: ParseError[] = [];
+    const root = parseTree(text, errors, { disallowComments: true });
+    if (errors.length || root?.type !== 'object') return this.read();
+
+    // Go can merge repeated maps and ignore null when decoding a string field.
+    const locale = resolveLocale(vscode.env.language);
+    const keys: string[] = root.children?.map(property => property.children![0].value) ?? [];
+    const raw = getNodeValue(root) as RawConfig;
+    const { custom_providers: bucket, providers, llm, provider, model, ...otherSettings } = raw;
+    const active = name !== '' && provider === name;
+    for (const key of keys) {
+      // Go's JSON field matching also folds Unicode long s to ASCII s.
+      const canonical = key.replace(/\u017f/g, 's').toLowerCase();
+      if (canonical !== 'custom_providers' && canonical !== 'provider' && !(active && canonical === 'model')) continue;
+      if (key !== canonical) {
+        throw new Error(t(locale, 'ext.config.renameKey').replace('{key}', key).replace('{canonical}', canonical));
+      }
+      if (keys.indexOf(key) !== keys.lastIndexOf(key)) {
+        throw new Error(t(locale, 'ext.config.duplicateKey').replace('{key}', key));
+      }
+    }
+    if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)
+        || !Object.prototype.hasOwnProperty.call(bucket, name)) return this.read();
+    const entries = findNodeAtLocation(root, ['custom_providers'])?.children ?? [];
+    if (entries.filter(entry => entry.children![0].value === name).length > 1) {
+      throw new Error(t(locale, 'ext.config.duplicateProvider').replace('{name}', () => JSON.stringify(name)));
+    }
+
+    const keepBucket = Object.keys(bucket).length > 1;
+    if (!keepBucket && keys.length === new Set(keys).size && (active || (!provider && !model))
+        && !Object.keys(providers ?? {}).length && !Object.keys(llm ?? {}).length && !Object.keys(otherSettings).length) {
+      unlinkSync(p);
       return null;
     }
-    const dir = dirname(p);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o755 });
-    writeFileSync(p, JSON.stringify(raw, null, 2), { encoding: 'utf8', mode: 0o600 });
+    // Edit the original text so unrelated numbers and unknown fields retain their original representation.
+    text = removeProperty(text, keepBucket ? ['custom_providers', name] : ['custom_providers']);
+    if (active) {
+      text = removeProperty(text, ['provider']);
+      text = removeProperty(text, ['model']);
+    }
+    writeFileSync(p, text, { encoding: 'utf8', mode: 0o600 });
     return this.read();
-  }
-
-  deleteCustomProvider(name: string): OcrConfig | null {
-    const raw = this.readRaw();
-    if (!raw.custom_providers?.[name]) return this.read();
-    delete raw.custom_providers[name];
-    if (Object.keys(raw.custom_providers).length === 0) {
-      delete raw.custom_providers;
-    }
-    if (raw.provider === name) {
-      delete raw.provider;
-      delete raw.model;
-    }
-    return this.writeRaw(raw);
   }
 
   /** Run ocr llm test with an isolated temporary HOME without modifying ~/.opencodereview/config.json. */

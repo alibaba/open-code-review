@@ -9,7 +9,12 @@ import com.alibaba.opencodereview.idea.model.OcrConfig
 import com.alibaba.opencodereview.idea.model.currentIdeLocale
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.util.SystemInfo
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonUnquotedLiteral
 import kotlin.jvm.Synchronized
 import java.io.IOException
 import java.io.File
@@ -26,10 +31,11 @@ class ConfigService(
     private val cli: CliService,
     /** Working directory for `ocr config set`. That subcommand does not depend on cwd, so any stable value works. */
     private val cwd: File = File(System.getProperty("user.dir")),
+    private val configFile: File? = null,
 ) {
 
     private fun configPath(): File =
-        File(File(System.getProperty("user.home"), ".opencodereview"), "config.json")
+        configFile ?: File(File(System.getProperty("user.home"), ".opencodereview"), "config.json")
 
     /** Reads the file and converts it to the plugin's internal camelCase config; returns null when the file is missing or invalid. */
     fun read(): OcrConfig? {
@@ -60,7 +66,7 @@ class ConfigService(
     @Synchronized
     private fun writeRaw(raw: RawConfig): OcrConfig? {
         val path = configPath()
-        if (!raw.hasContent()) {
+        if (!raw.hasContent() && raw.keys.all { it in setOf("provider", "model", "providers", "custom_providers", "llm") }) {
             if (path.exists() && !path.delete()) {
                 thisLogger().warn("[ocr] Failed to delete empty config file: ${path.absolutePath}")
             }
@@ -80,6 +86,8 @@ class ConfigService(
             val tmp = tmpPath.toFile()
             trySetPosixPermissions(tmp, "rw-------")
             try {
+                // The pretty serializer otherwise rounds parsed numbers through Double.
+                raw.replaceAll { _, value -> value.withExactNumbers() }
                 tmp.writeText(raw.toPrettyJson())
             } catch (e: IOException) {
                 // If writeText fails (e.g. disk full), tmp may already hold a partial api_key; permissions are
@@ -131,7 +139,9 @@ class ConfigService(
      */
     @Synchronized
     fun deleteCustomProvider(name: String): OcrConfig? {
-        val raw = readRaw()
+        val path = configPath()
+        if (!path.isFile) return null
+        val raw = parseRawConfigForDeletion(path.readText(), name)
         val bucket = (raw["custom_providers"] as? JsonObject)?.toMutableMap() ?: return read()
         if (bucket.remove(name) == null) return read()
         if (bucket.isEmpty()) {
@@ -141,7 +151,7 @@ class ConfigService(
         }
         val currentProvider = (raw["provider"] as? kotlinx.serialization.json.JsonPrimitive)
             ?.takeIf { it.isString }?.content
-        if (currentProvider == name) {
+        if (name.isNotEmpty() && currentProvider == name) {
             raw.remove("provider")
             raw.remove("model")
         }
@@ -222,4 +232,13 @@ class ConfigService(
             Files.setPosixFilePermissions(target.toPath(), PosixFilePermissions.fromString(spec))
         }.onFailure { thisLogger().warn("[ocr] Failed to set permissions $spec on ${target.absolutePath}", it) }
     }
+}
+
+private val jsonNumber = Regex("""-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?""")
+
+@OptIn(ExperimentalSerializationApi::class)
+private fun JsonElement.withExactNumbers(): JsonElement = when (this) {
+    is JsonObject -> JsonObject(mapValues { (_, value) -> value.withExactNumbers() })
+    is JsonArray -> JsonArray(map { it.withExactNumbers() })
+    is JsonPrimitive -> if (!isString && jsonNumber.matches(content)) JsonUnquotedLiteral(content) else this
 }

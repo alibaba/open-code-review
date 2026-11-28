@@ -4,7 +4,12 @@
 package com.alibaba.opencodereview.idea.services
 
 import com.alibaba.opencodereview.idea.model.ConfigEntry
+import com.alibaba.opencodereview.idea.model.HostStrings
 import com.alibaba.opencodereview.idea.model.OcrJson
+import com.alibaba.opencodereview.idea.model.currentIdeLocale
+import com.fasterxml.jackson.core.JsonFactory
+import com.fasterxml.jackson.core.JsonParseException
+import com.fasterxml.jackson.core.JsonParser
 import com.intellij.openapi.diagnostic.Logger
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.JsonArray
@@ -24,6 +29,30 @@ import java.util.Locale
 typealias RawConfig = MutableMap<String, JsonElement>
 
 fun emptyRawConfig(): RawConfig = mutableMapOf()
+
+private val uniqueKeyJson = JsonFactory().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+internal fun parseRawConfigForDeletion(text: String, name: String): RawConfig {
+    // kotlinx.serialization keeps the last duplicate key, which can discard settings on writeback.
+    try {
+        uniqueKeyJson.createParser(text).use { parser ->
+            parser.nextToken()
+            parser.skipChildren()
+        }
+    } catch (e: JsonParseException) {
+        throw IllegalArgumentException(HostStrings.t(currentIdeLocale(), "ext.config.invalidProviderJson"), e)
+    }
+    val raw = parseRawConfig(text)
+    val active = name.isNotEmpty() && raw["provider"] == JsonPrimitive(name)
+    for (key in raw.keys) {
+        // Go's JSON field matching also folds Unicode long s to ASCII s.
+        val canonical = key.replace('\u017f', 's').lowercase(Locale.ROOT)
+        if (canonical != "custom_providers" && canonical != "provider" && !(active && canonical == "model")) continue
+        require(key == canonical) {
+            HostStrings.t(currentIdeLocale(), "ext.config.renameKey", "key" to key, "canonical" to canonical)
+        }
+    }
+    return raw
+}
 
 /** Parses the config file text; blank input or invalid JSON yields an empty draft (semantically "no configuration" for callers). */
 fun parseRawConfig(text: String): RawConfig {

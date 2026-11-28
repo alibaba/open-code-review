@@ -128,6 +128,7 @@
     "browserslist": ">=4.28.7 <5"
   },
   "dependencies": {
+    "jsonc-parser": "^3.2.0",
     "preact": "^10.29.8"
   }
 }

@@ -206,7 +206,7 @@ fun parseWebviewMessage(raw: String, locale: SupportedLocale): WebviewToHost {
         "testConnection" -> WebviewToHost.TestConnection(msg.entries("entries"))
 
         "deleteCustomProvider" -> {
-            val name = msg.optStr("name")
+            val name = msg.str("name")
                 ?: return missingField(locale, "deleteCustomProvider", "name")
             WebviewToHost.DeleteCustomProvider(name)
         }
