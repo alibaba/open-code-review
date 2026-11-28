@@ -31,6 +31,7 @@
   <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Copilot CLI" src="https://img.shields.io/badge/Copilot_CLI-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
@@ -58,13 +59,13 @@ Một benchmark rà soát mã trong thế giới thực được xây dựng t�
 
 <a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> Khám phá bộ dữ liệu AACR-Bench trên Hugging Face</a>.
 
-| Chỉ số | Đo lường điều gì | Vì sao quan trọng |
-|--------|-----------------|----------------|
-| **F1** | Trung bình điều hòa của precision và recall | Con số đơn lẻ tốt nhất cho chất lượng rà soát tổng thể |
-| **Precision** | Tỷ lệ vấn đề được báo cáo là lỗi thật | Càng cao = càng ít báo động giả phải sàng lọc |
-| **Recall** | Tỷ lệ lỗi thật được tìm thấy | Càng cao = càng ít vấn đề lọt qua rà soát |
-| **Avg Time** | Thời gian thực tế cho mỗi lần rà soát | Quan trọng với độ trễ của pipeline CI |
-| **Avg Token** | Tổng token tiêu thụ cho mỗi lần rà soát | Ảnh hưởng trực tiếp tới chi phí API |
+| Chỉ số        | Đo lường điều gì                            | Vì sao quan trọng                                      |
+| ------------- | ------------------------------------------- | ------------------------------------------------------ |
+| **F1**        | Trung bình điều hòa của precision và recall | Con số đơn lẻ tốt nhất cho chất lượng rà soát tổng thể |
+| **Precision** | Tỷ lệ vấn đề được báo cáo là lỗi thật       | Càng cao = càng ít báo động giả phải sàng lọc          |
+| **Recall**    | Tỷ lệ lỗi thật được tìm thấy                | Càng cao = càng ít vấn đề lọt qua rà soát              |
+| **Avg Time**  | Thời gian thực tế cho mỗi lần rà soát       | Quan trọng với độ trễ của pipeline CI                  |
+| **Avg Token** | Tổng token tiêu thụ cho mỗi lần rà soát     | Ảnh hưởng trực tiếp tới chi phí API                    |
 
 ![Benchmark](../../imgs/benchmark-en.png)
 
@@ -86,7 +87,7 @@ Triết lý cốt lõi của Open Code Review là kết hợp kỹ thuật xác 
 
 **Kỹ thuật xác định — Ràng buộc cứng**
 
-Đối với các bước rà soát *tuyệt đối không được sai*, logic kỹ thuật — không phải mô hình ngôn ngữ — đảm bảo tính đúng đắn:
+Đối với các bước rà soát _tuyệt đối không được sai_, logic kỹ thuật — không phải mô hình ngôn ngữ — đảm bảo tính đúng đắn:
 
 - **Chọn tệp chính xác** — Xác định đúng tệp nào cần rà soát và tệp nào nên được lọc, đảm bảo không bỏ sót thay đổi quan trọng nào.
 - **Gom tệp thông minh** — Nhóm các tệp liên quan thành một đơn vị rà soát duy nhất (ví dụ: `message_en.properties` và `message_zh.properties` được gom cùng nhau). Mỗi gói chạy như một sub-agent với ngữ cảnh tách biệt — một chiến lược chia để trị vẫn ổn định trên các changeset rất lớn và hỗ trợ rà soát đồng thời một cách tự nhiên.
@@ -110,7 +111,7 @@ Thế mạnh của agent được tập trung vào nơi quan trọng nhất — 
 
 ### Agent Skills
 
-Sử dụng các skill trong Claude Code, Codex, Cursor, Kimi Code, hoặc một agent khác hỗ trợ Agent Skills và có thể chạy lệnh cục bộ. Cả hai chế độ đều yêu cầu **Git >= 2.41** và **CLI `ocr`**; chỉ chế độ native mới yêu cầu một nhà cung cấp mô hình OCR.
+Sử dụng các skill trong Claude Code, Codex, Copilot CLI, Cursor, Kimi Code, hoặc một agent khác hỗ trợ Agent Skills và có thể chạy lệnh cục bộ. Cả hai chế độ đều yêu cầu **Git >= 2.41** và **CLI `ocr`**; chỉ chế độ native mới yêu cầu một nhà cung cấp mô hình OCR.
 
 #### 1. Cài đặt Skills
 
@@ -124,12 +125,12 @@ Các skill sẽ hướng dẫn agent của bạn cài đặt `ocr` nếu nó ch�
 
 #### 2. Chọn chế độ rà soát
 
-| | Chế độ native | Chế độ ủy quyền (delegation) |
-|---|---|---|
-| Skill | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
-| Ai rà soát? | Agent rà soát chuyên biệt và pipeline của OCR | Agent lập trình hiện tại của bạn, tuân theo pipeline rà soát và các rào chắn của OCR |
-| Mô hình và xác thực | Cấu hình nhà cung cấp riêng của OCR | Mô hình và xác thực sẵn có của agent chủ |
-| Chọn khi | Bạn có một đầu mối mô hình cho OCR và muốn dùng toàn bộ pipeline rà soát của nó | Bạn không có API key riêng, hoặc muốn dùng gói đăng ký/thiết lập agent sẵn có của mình |
+|                     | Chế độ native                                                                   | Chế độ ủy quyền (delegation)                                                           |
+| ------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Skill               | [`open-code-review`](../../skills/open-code-review/SKILL.md)                    | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md)         |
+| Ai rà soát?         | Agent rà soát chuyên biệt và pipeline của OCR                                   | Agent lập trình hiện tại của bạn, tuân theo pipeline rà soát và các rào chắn của OCR   |
+| Mô hình và xác thực | Cấu hình nhà cung cấp riêng của OCR                                             | Mô hình và xác thực sẵn có của agent chủ                                               |
+| Chọn khi            | Bạn có một đầu mối mô hình cho OCR và muốn dùng toàn bộ pipeline rà soát của nó | Bạn không có API key riêng, hoặc muốn dùng gói đăng ký/thiết lập agent sẵn có của mình |
 
 **Không có key riêng? Hãy bắt đầu với chế độ ủy quyền.** Chế độ này bỏ qua việc thiết lập nhà cung cấp OCR, chứ không bỏ qua xác thực, giới hạn sử dụng hay chi phí của chính agent chủ. Một gói đăng ký agent chủ không tự động là thông tin xác thực API cho chế độ native. Ở chế độ ủy quyền, CLI và skill của OCR cùng nhau cung cấp pipeline rà soát và các rào chắn: chọn tệp, phân giải quy tắc, yêu cầu độ bao phủ, và báo cáo có cấu trúc. Agent chủ thực hiện phân tích, định vị và báo cáo trong quy trình đó; nó không chạy toàn bộ pipeline native của OCR.
 
@@ -215,6 +216,7 @@ Tài liệu đầy đủ có tại **[open-codereview.ai/docs](https://open-code
 - Tích hợp Coding Agent — chọn nền tảng bạn sử dụng
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — cài plugin với các lệnh gạch chéo rà soát
   - [Codex](../../plugins/open-code-review/README.md#codex) — cài plugin với các skill rà soát có thể gọi
+  - [Copilot CLI](../../plugins/open-code-review/README.md#copilot-cli) — cài plugin với các skill rà soát cho chế độ native và chế độ ủy quyền
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — cài plugin với các skill rà soát di động
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — cài plugin với các lệnh gạch chéo và skill rà soát
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — cài công cụ rà soát native và các lệnh gạch chéo

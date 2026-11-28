@@ -74,12 +74,12 @@ ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <p
 
 자주 쓰는 호출:
 
-| 상황 | 명령 |
-|----------|---------|
-| 워크스페이스 변경 | `ocr delegate preview` |
-| 브랜치 비교 | `ocr delegate preview --from main --to feature` |
-| 현재 브랜치를 main과 비교 | `ocr delegate preview --from main` |
-| 단일 커밋 | `ocr delegate preview -c abc123` |
+| 상황                      | 명령                                            |
+| ------------------------- | ----------------------------------------------- |
+| 워크스페이스 변경         | `ocr delegate preview`                          |
+| 브랜치 비교               | `ocr delegate preview --from main --to feature` |
+| 현재 브랜치를 main과 비교 | `ocr delegate preview --from main`              |
+| 단일 커밋                 | `ocr delegate preview -c abc123`                |
 
 ### 2단계: 파일별 규칙 가져오기 {#step-2-get-rules-for-files}
 
@@ -97,16 +97,19 @@ ocr delegate rule [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> 
 아래 diff 명령은 외부 diff 프로그램, 텍스트 변환, 색상 출력을 꺼서 일반 텍스트 패치를 가져옵니다.
 
 **range 모드**(merge\_base가 제공됨):
+
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **commit 모드**:
+
 ```bash
 git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **workspace 모드**:
+
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 추적 중인 파일
 cat "<path>"                     # 새로 추가된 추적되지 않은 파일
@@ -148,36 +151,38 @@ preview의 각 `(path, status)`를 `reviewed` 또는 `skipped`로 기록하고, 
 
 ## 하위 명령 레퍼런스 {#sub-commands-reference}
 
-| 명령 | 용도 |
-|---------|---------|
-| `ocr delegate preview` | 리뷰 대상 파일과 모드/ref 메타데이터를 나열 |
-| `ocr delegate rule <path...>` | 리뷰 규칙을 내용별로 묶어 해석 |
+| 명령                          | 용도                                        |
+| ----------------------------- | ------------------------------------------- |
+| `ocr delegate preview`        | 리뷰 대상 파일과 모드/ref 메타데이터를 나열 |
+| `ocr delegate rule <path...>` | 리뷰 규칙을 내용별로 묶어 해석              |
 
 ## 공통 플래그 {#shared-flags}
 
 두 하위 명령에서 `--from main`은 `--from main --to HEAD`의 축약형입니다. 범위 리뷰는 `merge-base(from, to)..to`를 비교하며 스테이징된 변경, 스테이징되지 않은 변경, 추적되지 않는 파일을 포함하지 않습니다. 범위 및 커밋 플래그를 생략하면 워크스페이스 모드를 사용합니다. 같은 대상을 사용하도록 `preview`와 `rule`에 동일한 범위 또는 커밋 플래그를 전달하세요. 범위 플래그와 커밋 플래그는 함께 사용할 수 없습니다.
 
-| 플래그 | 설명 |
-|------|-------------|
-| `--from <ref>` | range 모드의 원본 ref |
-| `--to <ref>` | range 모드의 대상 ref. `--from`을 지정하면 기본값은 `HEAD` |
-| `-c, --commit <hash>` | 단일 커밋 모드 |
-| `--repo <path>` | 저장소 루트(기본값: 현재 디렉터리) |
-| `--rule <path>` | 커스텀 rule.json 경로 |
-| `--exclude <patterns>` | 쉼표로 구분한 제외 패턴 |
-| `-b, --background <text>` | 비즈니스 맥락 |
-| `-B, --background-file <path>` | Markdown 파일에서 읽는 비즈니스 맥락(`-b`보다 우선) |
+| 플래그                         | 설명                                                       |
+| ------------------------------ | ---------------------------------------------------------- |
+| `--from <ref>`                 | range 모드의 원본 ref                                      |
+| `--to <ref>`                   | range 모드의 대상 ref. `--from`을 지정하면 기본값은 `HEAD` |
+| `-c, --commit <hash>`          | 단일 커밋 모드                                             |
+| `--repo <path>`                | 저장소 루트(기본값: 현재 디렉터리)                         |
+| `--rule <path>`                | 커스텀 rule.json 경로                                      |
+| `--exclude <patterns>`         | 쉼표로 구분한 제외 패턴                                    |
+| `-b, --background <text>`      | 비즈니스 맥락                                              |
+| `-B, --background-file <path>` | Markdown 파일에서 읽는 비즈니스 맥락(`-b`보다 우선)        |
 
 ## 다른 연동 방식과 비교 {#comparison-with-other-integration-modes}
 
-| 방식 | LLM을 호출하는 주체 | 용도 |
-|------|-------------------|----------|
-| [Agent Skill](../agent-skill/) | OCR | Agent가 `ocr review`를 호출하고, OCR이 리뷰 전체를 주도 |
-| [Command (Claude Code)](../claude-code/) | OCR | Claude Code의 슬래시 명령. OCR이 리뷰를 주도 |
-| **위임 모드** | 호스트 Agent | OCR은 뼈대만 제공하고, Agent가 리뷰를 주도 |
+| 방식                                     | LLM을 호출하는 주체              | 용도                                                         |
+| ---------------------------------------- | -------------------------------- | ------------------------------------------------------------ |
+| [Agent Skill](../agent-skill/)           | OCR                              | Agent가 `ocr review`를 호출하고, OCR이 리뷰 전체를 주도      |
+| [Command (Claude Code)](../claude-code/) | OCR                              | Claude Code의 슬래시 명령. OCR이 리뷰를 주도                 |
+| [Copilot CLI](../copilot-cli/)           | OCR(네이티브) 또는 Copilot(위임) | GitHub Copilot CLI에서 네이티브 또는 위임 방식으로 리뷰 실행 |
+| **위임 모드**                            | 호스트 Agent                     | OCR은 뼈대만 제공하고, Agent가 리뷰를 주도                   |
 
 ## 관련 문서 {#see-also}
 
 - [Agent Skill](../agent-skill/) — Agent를 대신해 OCR이 리뷰 전체를 수행합니다.
 - [Command (Claude Code)](../claude-code/) — 자동 수정이 기본인 슬래시 명령
   형태입니다.
+- [Copilot CLI](../copilot-cli/) — GitHub Copilot CLI에 OCR 리뷰 스킬을 설치하는 방법입니다.

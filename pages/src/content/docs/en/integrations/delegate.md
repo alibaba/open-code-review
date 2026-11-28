@@ -77,12 +77,12 @@ Outputs:
 
 Common invocations:
 
-| Scenario | Command |
-|----------|---------|
-| Workspace changes | `ocr delegate preview` |
-| Branch comparison | `ocr delegate preview --from main --to feature` |
-| Current branch against main | `ocr delegate preview --from main` |
-| Single commit | `ocr delegate preview -c abc123` |
+| Scenario                    | Command                                         |
+| --------------------------- | ----------------------------------------------- |
+| Workspace changes           | `ocr delegate preview`                          |
+| Branch comparison           | `ocr delegate preview --from main --to feature` |
+| Current branch against main | `ocr delegate preview --from main`              |
+| Single commit               | `ocr delegate preview -c abc123`                |
 
 ### Step 2: Get rules for files
 
@@ -101,16 +101,19 @@ Choose the diff command using the mode and refs from Step 1. Use `git --no-pager
 The diff commands disable external diff programs, text conversion, and color to produce plain patches.
 
 **Range mode** (merge\_base provided):
+
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit mode**:
+
 ```bash
 git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace mode**:
+
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # tracked files
 cat "<path>"                     # new untracked files
@@ -152,35 +155,37 @@ Classify each finding by severity:
 
 ## Sub-commands reference
 
-| Command | Purpose |
-|---------|---------|
-| `ocr delegate preview` | List reviewable files + mode/ref metadata |
-| `ocr delegate rule <path...>` | Resolve review rules grouped by content |
+| Command                       | Purpose                                   |
+| ----------------------------- | ----------------------------------------- |
+| `ocr delegate preview`        | List reviewable files + mode/ref metadata |
+| `ocr delegate rule <path...>` | Resolve review rules grouped by content   |
 
 ## Shared flags
 
 Both subcommands accept `--from main` as shorthand for `--from main --to HEAD`. Range review compares `merge-base(from, to)..to` and excludes staged, unstaged, and untracked changes; omit range/commit flags for workspace mode. Pass the same range or commit flags to `preview` and `rule` so they use the same target. Range and commit flags are mutually exclusive.
 
-| Flag | Description |
-|------|-------------|
-| `--from <ref>` | Source ref for range mode |
-| `--to <ref>` | Target ref for range mode; defaults to `HEAD` when `--from` is supplied |
-| `-c, --commit <hash>` | Single commit mode |
-| `--repo <path>` | Repository root (default: cwd) |
-| `--rule <path>` | Custom rule.json path |
-| `--exclude <patterns>` | Comma-separated exclude patterns |
-| `-b, --background <text>` | Business context |
-| `-B, --background-file <path>` | Business context from Markdown file (takes precedence over `-b`) |
+| Flag                           | Description                                                             |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| `--from <ref>`                 | Source ref for range mode                                               |
+| `--to <ref>`                   | Target ref for range mode; defaults to `HEAD` when `--from` is supplied |
+| `-c, --commit <hash>`          | Single commit mode                                                      |
+| `--repo <path>`                | Repository root (default: cwd)                                          |
+| `--rule <path>`                | Custom rule.json path                                                   |
+| `--exclude <patterns>`         | Comma-separated exclude patterns                                        |
+| `-b, --background <text>`      | Business context                                                        |
+| `-B, --background-file <path>` | Business context from Markdown file (takes precedence over `-b`)        |
 
 ## Comparison with other integration modes
 
-| Mode | Who calls the LLM? | Use case |
-|------|-------------------|----------|
-| [Agent Skill](../agent-skill/) | OCR | Agent invokes `ocr review`; OCR drives the full review |
-| [Command (Claude Code)](../claude-code/) | OCR | Slash command in Claude Code; OCR drives the review |
-| **Delegation Mode** | Host agent | OCR provides scaffolding; agent drives the review |
+| Mode                                     | Who calls the LLM?                   | Use case                                                  |
+| ---------------------------------------- | ------------------------------------ | --------------------------------------------------------- |
+| [Agent Skill](../agent-skill/)           | OCR                                  | Agent invokes `ocr review`; OCR drives the full review    |
+| [Command (Claude Code)](../claude-code/) | OCR                                  | Slash command in Claude Code; OCR drives the review       |
+| [Copilot CLI](../copilot-cli/)           | OCR (native) or Copilot (delegation) | Run native or delegated reviews inside GitHub Copilot CLI |
+| **Delegation Mode**                      | Host agent                           | OCR provides scaffolding; agent drives the review         |
 
 ## See Also
 
 - [Agent Skill](../agent-skill/) — OCR drives the full review on behalf of the agent.
 - [Command (Claude Code)](../claude-code/) — slash-command flavor with auto-fix.
+- [Copilot CLI](../copilot-cli/) — install the OCR review skills in GitHub Copilot CLI.

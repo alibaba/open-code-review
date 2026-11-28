@@ -31,6 +31,7 @@
   <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Copilot CLI" src="https://img.shields.io/badge/Copilot_CLI-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
@@ -58,13 +59,13 @@ Gitのdiffを読み取り、変更されたファイルをツール利用機能�
 
 <a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> Hugging FaceでAACR-Benchデータセットを見る</a>。
 
-| 指標 | 測定内容 | 重要性 |
-|------|----------|--------|
-| **F1** | 精度とリコールの調和平均 | レビュー品質を示す最良の単一指標 |
-| **精度 (Precision)** | 報告された問題のうち実際の欠陥の割合 | 高い = 確認すべき偽陽性が少ない |
-| **リコール (Recall)** | 実際の欠陥のうち発見された割合 | 高い = 見逃しが少ない |
-| **平均時間 (Avg Time)** | レビューあたりの実時間 | CIパイプラインの待機時間に影響 |
-| **平均トークン (Avg Token)** | レビューあたりの総トークン消費量 | APIコストに直接影響 |
+| 指標                         | 測定内容                             | 重要性                           |
+| ---------------------------- | ------------------------------------ | -------------------------------- |
+| **F1**                       | 精度とリコールの調和平均             | レビュー品質を示す最良の単一指標 |
+| **精度 (Precision)**         | 報告された問題のうち実際の欠陥の割合 | 高い = 確認すべき偽陽性が少ない  |
+| **リコール (Recall)**        | 実際の欠陥のうち発見された割合       | 高い = 見逃しが少ない            |
+| **平均時間 (Avg Time)**      | レビューあたりの実時間               | CIパイプラインの待機時間に影響   |
+| **平均トークン (Avg Token)** | レビューあたりの総トークン消費量     | APIコストに直接影響              |
 
 ![Benchmark](../../imgs/benchmark-ja.png)
 
@@ -113,7 +114,7 @@ Open Code Reviewのコア哲学は、決定論的エンジニアリングとエ�
 
 ### Agent Skills
 
-Claude Code、Codex、Cursor、Kimi Codeなど、Agent Skillsに対応しローカルコマンドを実行できるエージェントで利用できます。両モードとも **Git >= 2.41** と **`ocr` CLI** が必要ですが、OCRのモデルプロバイダー設定が必要なのはネイティブモードだけです。
+Claude Code、Codex、Copilot CLI、Cursor、Kimi Codeなど、Agent Skillsに対応しローカルコマンドを実行できるエージェントで利用できます。両モードとも **Git >= 2.41** と **`ocr` CLI** が必要ですが、OCRのモデルプロバイダー設定が必要なのはネイティブモードだけです。
 
 #### 1. スキルをインストール
 
@@ -127,12 +128,12 @@ npx skills add alibaba/open-code-review
 
 #### 2. レビューモードを選択
 
-| | ネイティブモード | デリゲートモード |
-|---|---|---|
-| スキル | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
-| レビュー担当 | OCR専用のレビューエージェントとパイプライン | OCRのレビューパイプラインとガードレールに従う現在のエージェント |
-| モデルと認証 | OCR独自のプロバイダー設定 | ホストエージェントの既存モデルと認証 |
-| 適した用途 | OCR用のモデルエンドポイントがあり、完全なレビューパイプラインを使いたい場合 | 別のAPIキーがない、または既存のエージェントの契約・設定を使いたい場合 |
+|              | ネイティブモード                                                            | デリゲートモード                                                               |
+| ------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| スキル       | [`open-code-review`](../../skills/open-code-review/SKILL.md)                | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
+| レビュー担当 | OCR専用のレビューエージェントとパイプライン                                 | OCRのレビューパイプラインとガードレールに従う現在のエージェント                |
+| モデルと認証 | OCR独自のプロバイダー設定                                                   | ホストエージェントの既存モデルと認証                                           |
+| 適した用途   | OCR用のモデルエンドポイントがあり、完全なレビューパイプラインを使いたい場合 | 別のAPIキーがない、または既存のエージェントの契約・設定を使いたい場合          |
 
 **別のキーがなければ、デリゲートモードから始めてください。** 不要になるのはOCRのプロバイダー設定だけで、ホストエージェントの認証、利用制限、料金は引き続き適用されます。エージェントのサブスクリプションは、ネイティブモード用のAPI認証情報にはなりません。デリゲートモードでは、OCRのCLIとスキルが共同でレビューパイプラインとガードレールを提供します。ファイル選択、ルール解決、カバレッジ要件、構造化された報告が含まれます。ホストエージェントがこの手順に沿って分析・位置特定・報告を行い、OCRの完全なネイティブパイプラインを実行するわけではありません。
 
@@ -218,6 +219,7 @@ ocr delegate rule src/main.go src/handler.go
 - コーディングエージェント連携 — 使用するプラットフォームを選択
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — レビュー用スラッシュコマンドを含むプラグインをインストール
   - [Codex](../../plugins/open-code-review/README.md#codex) — 呼び出し可能なレビュースキルを含むプラグインをインストール
+  - [Copilot CLI](../../plugins/open-code-review/README.md#copilot-cli) — ネイティブモードとデリゲートモードのレビュースキルを含むプラグインをインストール
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — 移植可能なレビュースキルを含むプラグインをインストール
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — レビュー用スラッシュコマンドとスキルを含むプラグインをインストール
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — ネイティブレビュー・ツールとスラッシュコマンドをインストール

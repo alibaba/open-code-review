@@ -31,6 +31,7 @@
   <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Copilot CLI" src="https://img.shields.io/badge/Copilot_CLI-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
@@ -58,13 +59,13 @@ Ayrıntılar için [resmî web sitesini](https://open-codereview.ai) ziyaret edi
 
 <a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> Hugging Face üzerinde AACR-Bench veri kümesini inceleyin</a>.
 
-| Ölçüt | Neyi ölçer? | Neden önemli? |
-|--------|-----------------|----------------|
-| **F1** | Kesinlik ve duyarlılığın harmonik ortalaması | Genel inceleme kalitesini tek sayıyla ifade eder |
+| Ölçüt                    | Neyi ölçer?                                            | Neden önemli?                                          |
+| ------------------------ | ------------------------------------------------------ | ------------------------------------------------------ |
+| **F1**                   | Kesinlik ve duyarlılığın harmonik ortalaması           | Genel inceleme kalitesini tek sayıyla ifade eder       |
 | **Precision (kesinlik)** | Bildirilen sorunlar içinde gerçek hata olanların oranı | Yüksek olması, ele alınacak yanlış alarmın azalmasıdır |
-| **Recall (duyarlılık)** | Gerçek hataların bulunan kısmı | Yüksek olması, incelemeden kaçan hataların azalmasıdır |
-| **Ortalama süre** | İnceleme başına geçen gerçek süre | CI işlem hattının gecikmesini etkiler |
-| **Ortalama token** | İnceleme başına toplam token tüketimi | API maliyetini doğrudan etkiler |
+| **Recall (duyarlılık)**  | Gerçek hataların bulunan kısmı                         | Yüksek olması, incelemeden kaçan hataların azalmasıdır |
+| **Ortalama süre**        | İnceleme başına geçen gerçek süre                      | CI işlem hattının gecikmesini etkiler                  |
+| **Ortalama token**       | İnceleme başına toplam token tüketimi                  | API maliyetini doğrudan etkiler                        |
 
 ![Karşılaştırmalı değerlendirme](../../imgs/benchmark-en.png)
 
@@ -86,7 +87,7 @@ Open Code Review, belirlenimci mühendisliği ajanla birleştirir; her biri en i
 
 **Belirlenimci mühendislik — Kesin kurallar**
 
-*Hata yapılmaması gereken* inceleme adımlarında doğruluğu dil modeli değil, mühendislik mantığı sağlar:
+_Hata yapılmaması gereken_ inceleme adımlarında doğruluğu dil modeli değil, mühendislik mantığı sağlar:
 
 - **Hassas dosya seçimi** — İncelenecek ve filtrelenecek dosyaları kesin olarak belirleyerek önemli değişikliklerin atlanmasını önler.
 - **Akıllı dosya gruplama** — İlgili dosyaları tek inceleme biriminde toplar (ör. `message_en.properties` ve `message_zh.properties`). Her grup yalıtılmış bağlama sahip bir alt ajan olarak çalışır. Bu böl ve yönet yaklaşımı çok büyük değişikliklerde de kararlı kalır ve eşzamanlı incelemeyi doğal olarak destekler.
@@ -113,7 +114,7 @@ Ajanın güçlü yanları, dinamik kararlar ve dinamik bağlam getirme üzerinde
 
 ### Ajan becerileri
 
-Becerileri Claude Code, Codex, Cursor, Kimi Code veya Agent Skills destekleyen ve yerel komut çalıştırabilen başka bir ajanda kullanın. Her iki mod da **Git >= 2.41** ve **`ocr` CLI** gerektirir; yalnızca yerel OCR modu bir OCR model sağlayıcısı ister.
+Becerileri Claude Code, Codex, Copilot CLI, Cursor, Kimi Code veya Agent Skills destekleyen ve yerel komut çalıştırabilen başka bir ajanda kullanın. Her iki mod da **Git >= 2.41** ve **`ocr` CLI** gerektirir; yalnızca yerel OCR modu bir OCR model sağlayıcısı ister.
 
 #### 1. Becerileri kurun
 
@@ -127,12 +128,12 @@ Beceriler, ortam izinlerine bağlı olarak eksikse `ocr` kurması için ajanın�
 
 #### 2. İnceleme modunu seçin
 
-| | Yerel OCR modu | Görev devri modu |
-|---|---|---|
-| Beceri | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
-| Kim inceler? | OCR'ın uzman inceleme ajanı ve işlem hattı | OCR'ın işlem hattı ve kurallarını izleyen mevcut kodlama ajanınız |
-| Model ve kimlik doğrulama | OCR'ın kendi sağlayıcı ayarları | Ajan ortamınızın mevcut modeli ve kimlik doğrulaması |
-| Ne zaman seçilmeli? | OCR için model uç noktanız varsa ve tam inceleme hattını istiyorsanız | Ayrı API anahtarınız yoksa veya mevcut ajan aboneliğinizi/kurulumunuzu kullanmak istiyorsanız |
+|                           | Yerel OCR modu                                                        | Görev devri modu                                                                              |
+| ------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Beceri                    | [`open-code-review`](../../skills/open-code-review/SKILL.md)          | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md)                |
+| Kim inceler?              | OCR'ın uzman inceleme ajanı ve işlem hattı                            | OCR'ın işlem hattı ve kurallarını izleyen mevcut kodlama ajanınız                             |
+| Model ve kimlik doğrulama | OCR'ın kendi sağlayıcı ayarları                                       | Ajan ortamınızın mevcut modeli ve kimlik doğrulaması                                          |
+| Ne zaman seçilmeli?       | OCR için model uç noktanız varsa ve tam inceleme hattını istiyorsanız | Ayrı API anahtarınız yoksa veya mevcut ajan aboneliğinizi/kurulumunuzu kullanmak istiyorsanız |
 
 **Ayrı anahtarınız yok mu? Görev devri moduyla başlayın.** Bu mod OCR sağlayıcı kurulumunu atlar; ajan ortamının kimlik doğrulamasını, kullanım sınırlarını veya maliyetlerini kaldırmaz. Ajan aboneliği, yerel OCR modu için otomatik olarak API kimlik bilgisi sayılmaz. Görev devri modunda CLI ve beceri birlikte dosya seçimi, kural çözümleme, kapsam gereksinimleri ve yapılandırılmış raporlama sağlar. Analiz, konumlandırma ve raporlamayı bu akış içinde mevcut ajan yapar; OCR'ın tam yerel işlem hattı çalışmaz.
 
@@ -218,6 +219,7 @@ Tüm belgeler **[open-codereview.ai/docs](https://open-codereview.ai/docs)** adr
 - Kodlama ajanı entegrasyonları — kullandığınız platformu seçin
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — inceleme komutları sağlayan eklenti
   - [Codex](../../plugins/open-code-review/README.md#codex) — çağrılabilir inceleme becerileri sağlayan eklenti
+  - [Copilot CLI](../../plugins/open-code-review/README.md#copilot-cli) — yerel mod ve görev devri modu için inceleme becerileri sağlayan eklenti
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — taşınabilir inceleme becerileri sağlayan eklenti
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — inceleme komutları ve becerileri sağlayan eklenti
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — yerel inceleme araçları ve komutları
