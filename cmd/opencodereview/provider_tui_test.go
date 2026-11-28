@@ -556,12 +556,12 @@ func TestProviderTUI_SessionModelPickSurvivesOfficialProviderSwitch(t *testing.T
 
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
-	m2.modelIdx = modelIdxForName(t, m2, "glm-5")
+	m2.modelIdx = modelIdxForName(t, m2, "glm-5.3")
 
 	result, _ = m2.Update(enterKey())
 	m3 := result.(providerTUIModel)
-	if got := m3.sessionModelPick["baidu-qianfan"]; got != "glm-5" {
-		t.Errorf("sessionModelPick = %q, want glm-5", got)
+	if got := m3.sessionModelPick["baidu-qianfan"]; got != "glm-5.3" {
+		t.Errorf("sessionModelPick = %q, want glm-5.3", got)
 	}
 
 	result, _ = m3.Update(escKey())
@@ -571,8 +571,8 @@ func TestProviderTUI_SessionModelPickSurvivesOfficialProviderSwitch(t *testing.T
 
 	result, _ = m5.Update(enterKey())
 	m6 := result.(providerTUIModel)
-	if got := m6.models()[m6.modelIdx]; got != "glm-5" {
-		t.Errorf("model cursor = %q, want glm-5", got)
+	if got := m6.models()[m6.modelIdx]; got != "glm-5.3" {
+		t.Errorf("model cursor = %q, want glm-5.3", got)
 	}
 }
 
@@ -1512,14 +1512,14 @@ func TestProviderTUI_OfficialTab_CustomModelInput_RejectsDuplicate(t *testing.T)
 
 func officialDashscopeModelTUI(t *testing.T, configPath string, extraModels []string) providerTUIModel {
 	t.Helper()
-	models := []string{"qwen3.7-max"}
+	models := []string{"qwen4-max"}
 	models = append(models, extraModels...)
 	cfg := &Config{
 		Provider: "dashscope",
-		Model:    "qwen3.7-max",
+		Model:    "qwen4-max",
 		Providers: map[string]ProviderEntry{
 			"dashscope": {
-				Model:  "qwen3.7-max",
+				Model:  "qwen4-max",
 				Models: models,
 			},
 		},
@@ -1597,8 +1597,8 @@ func TestProviderTUI_OfficialTab_DeleteUserAddedModel(t *testing.T) {
 		t.Error("confirmingDeleteModel should be false after y")
 	}
 	got := m3.existingCfg.Providers["dashscope"].Models
-	if len(got) != 1 || got[0] != "qwen3.7-max" {
-		t.Errorf("Models = %v, want [qwen3.7-max]", got)
+	if len(got) != 1 || got[0] != "qwen4-max" {
+		t.Errorf("Models = %v, want [qwen4-max]", got)
 	}
 	if !m3.savedInSession {
 		t.Error("savedInSession should be true after delete")
@@ -1609,13 +1609,13 @@ func TestProviderTUI_OfficialTab_DeleteUserAddedModel(t *testing.T) {
 		t.Fatalf("load disk config: %v", err)
 	}
 	if len(diskCfg.Providers["dashscope"].Models) != 1 {
-		t.Errorf("disk Models = %v, want [qwen3.7-max]", diskCfg.Providers["dashscope"].Models)
+		t.Errorf("disk Models = %v, want [qwen4-max]", diskCfg.Providers["dashscope"].Models)
 	}
 }
 
 func TestProviderTUI_OfficialTab_DeleteBuiltInModelIgnored(t *testing.T) {
 	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
-	m.modelIdx = modelIdxForName(t, m, "qwen3.7-max")
+	m.modelIdx = modelIdxForName(t, m, "qwen4-max")
 
 	result, _ := m.Update(dKey())
 	m2 := result.(providerTUIModel)
@@ -1626,10 +1626,10 @@ func TestProviderTUI_OfficialTab_DeleteBuiltInModelIgnored(t *testing.T) {
 
 func TestProviderTUI_OfficialTab_RegistryModelNotDeletable(t *testing.T) {
 	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
-	m.modelIdx = modelIdxForName(t, m, "qwen3.7-max")
+	m.modelIdx = modelIdxForName(t, m, "qwen4-max")
 
-	if m.isUserAddedOfficialModel("qwen3.7-max") {
-		t.Error("qwen3.7-max should not be user-added when it is in the registry")
+	if m.isUserAddedOfficialModel("qwen4-max") {
+		t.Error("qwen4-max should not be user-added when it is in the registry")
 	}
 
 	result, _ := m.Update(dKey())
@@ -1680,7 +1680,7 @@ func TestProviderTUI_CustomTab_ModelShowsDeleteHint(t *testing.T) {
 func TestProviderTUI_OfficialTab_UserAddedModelShowsDeleteHint(t *testing.T) {
 	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
 
-	m.modelIdx = modelIdxForName(t, m, "qwen3.7-max")
+	m.modelIdx = modelIdxForName(t, m, "qwen4-max")
 	got := stripANSI(m.View().Content)
 	if strings.Contains(got, "d Delete") {
 		t.Errorf("built-in model should not show d Delete hint; got:\n%s", got)
@@ -1697,10 +1697,10 @@ func TestProviderTUI_OfficialTab_DeleteModelPreservesActiveModel(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	m := officialDashscopeModelTUI(t, configPath, []string{"my-custom-model"})
-	m.existingCfg.Model = "qwen3.7-max"
+	m.existingCfg.Model = "qwen4-max"
 	m.existingCfg.Providers["dashscope"] = ProviderEntry{
-		Model:  "qwen3.7-max",
-		Models: []string{"qwen3.7-max", "my-custom-model"},
+		Model:  "qwen4-max",
+		Models: []string{"qwen4-max", "my-custom-model"},
 	}
 	m.modelIdx = modelIdxForName(t, m, "my-custom-model")
 
@@ -1709,11 +1709,11 @@ func TestProviderTUI_OfficialTab_DeleteModelPreservesActiveModel(t *testing.T) {
 	result, _ = m2.Update(yKey())
 	m3 := result.(providerTUIModel)
 
-	if m3.existingCfg.Providers["dashscope"].Model != "qwen3.7-max" {
-		t.Errorf("entry.Model = %q, want qwen3.7-max", m3.existingCfg.Providers["dashscope"].Model)
+	if m3.existingCfg.Providers["dashscope"].Model != "qwen4-max" {
+		t.Errorf("entry.Model = %q, want qwen4-max", m3.existingCfg.Providers["dashscope"].Model)
 	}
-	if m3.existingCfg.Model != "qwen3.7-max" {
-		t.Errorf("cfg.Model = %q, want qwen3.7-max", m3.existingCfg.Model)
+	if m3.existingCfg.Model != "qwen4-max" {
+		t.Errorf("cfg.Model = %q, want qwen4-max", m3.existingCfg.Model)
 	}
 }
 
@@ -1756,7 +1756,7 @@ func TestProviderTUI_OfficialTab_DeleteActiveUserModelClearsCfg(t *testing.T) {
 	m.existingCfg.Model = "my-custom-model"
 	m.existingCfg.Providers["dashscope"] = ProviderEntry{
 		Model:  "my-custom-model",
-		Models: []string{"qwen3.7-max", "my-custom-model"},
+		Models: []string{"qwen4-max", "my-custom-model"},
 	}
 	m.modelIdx = modelIdxForName(t, m, "my-custom-model")
 
@@ -2489,7 +2489,7 @@ func TestProviderTUI_CancelIncompleteOfficialProviderSwitch_NoPersistedChanges(t
 		}
 	}
 	m.step = stepModel
-	m.modelIdx = modelIdxForName(t, m, "glm-5")
+	m.modelIdx = modelIdxForName(t, m, "glm-5.3")
 
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
@@ -2583,7 +2583,7 @@ func TestProviderTUI_OfficialModelChangeBlockedAtAPIKey_KeepsGlobalModel(t *test
 		}
 	}
 	m.step = stepModel
-	m.modelIdx = modelIdxForName(t, m, "claude-opus-4-7")
+	m.modelIdx = modelIdxForName(t, m, "claude-sonnet-5-5")
 
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)

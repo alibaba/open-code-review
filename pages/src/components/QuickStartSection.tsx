@@ -134,7 +134,7 @@ const QuickStartSection: React.FC = () => {
                 label={t('quickstart.step2Label2')}
                 code={`ocr config set llm.url https://api.anthropic.com \\
     && ocr config set llm.auth_token {{your-api-key}} \\
-    && ocr config set llm.model claude-opus-4-6 \\
+    && ocr config set llm.model claude-opus-5-5 \\
     && ocr config set llm.use_anthropic true`}
                 multiline
                 onCopy={handleCopy}
