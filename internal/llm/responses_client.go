@@ -158,6 +158,12 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 	var opts []openaiopt.RequestOption
 	if c.cfg.ChatGPTPlan {
 		opts = append(opts, openaiopt.WithAPIKey(planToken))
+		if affinityKey := chatGPTSessionAffinityKey(ctx, req.SessionID, sessionKey); affinityKey != "" {
+			if !params.PromptCacheKey.Valid() {
+				params.PromptCacheKey = openai.String(affinityKey)
+			}
+			opts = append(opts, openaiopt.WithHeader("session-id", affinityKey))
+		}
 	}
 	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
 		opts = append(opts, openaiopt.WithHeader(k, v))
@@ -199,6 +205,17 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		}
 	}
 	return c.mapResponsesResponse(sdkResp), nil
+}
+
+// chatGPTSessionAffinityKey prefers context session keys, then reqSessionID, then fallbackKey.
+func chatGPTSessionAffinityKey(ctx context.Context, reqSessionID, fallbackKey string) string {
+	if k := SessionKeyFromContext(ctx); k != "" {
+		return k
+	}
+	if reqSessionID != "" {
+		return reqSessionID
+	}
+	return fallbackKey
 }
 
 type responseStatusError struct {
