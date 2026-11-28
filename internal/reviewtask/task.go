@@ -148,9 +148,7 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 // like an untruncated review.
 const WarningReviewLimitReached = "review_limit_reached"
 
-// WarningTaskDoneWithUnfiledText is the warning type recorded when a subtask
-// ends via task_done with non-empty visible text after having submitted no
-// code_comment findings (even after a nudge or inside the grace round).
+// WarningTaskDoneWithUnfiledText marks tasks that finish with visible text and no code_comment submissions.
 const WarningTaskDoneWithUnfiledText = "task_done_with_unfiled_text"
 
 // recordGraceRoundLimit records which declared budget reached its grace round,
