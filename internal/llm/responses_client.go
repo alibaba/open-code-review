@@ -162,10 +162,7 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 			if !params.PromptCacheKey.Valid() {
 				params.PromptCacheKey = openai.String(affinityKey)
 			}
-			opts = append(opts,
-				openaiopt.WithHeader("session_id", affinityKey),
-				openaiopt.WithHeader("session-id", affinityKey),
-			)
+			opts = append(opts, openaiopt.WithHeader("session-id", affinityKey))
 		}
 	}
 	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
@@ -210,9 +207,7 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 	return c.mapResponsesResponse(sdkResp), nil
 }
 
-// chatGPTSessionAffinityKey resolves the sticky routing key for ChatGPT plan
-// requests. Task-scoped context keys isolate concurrent subtask prefixes,
-// falling back to per-request SessionID and finally the client-level key.
+// chatGPTSessionAffinityKey prefers context session keys, then reqSessionID, then fallbackKey.
 func chatGPTSessionAffinityKey(ctx context.Context, reqSessionID, fallbackKey string) string {
 	if k := SessionKeyFromContext(ctx); k != "" {
 		return k
