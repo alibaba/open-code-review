@@ -44,7 +44,7 @@ CI や TUI のない環境では、`ocr config set` で同じ設定に直接書�
 
 ```bash
 ocr config set provider                    anthropic
-ocr config set model                       claude-opus-4-6
+ocr config set model                       claude-opus-5-5
 ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ```
 

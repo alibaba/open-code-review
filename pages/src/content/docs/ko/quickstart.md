@@ -44,7 +44,7 @@ CI나 TUI가 없는 환경에서는 `ocr config set`으로 같은 설정 파일�
 
 ```bash
 ocr config set provider                    anthropic
-ocr config set model                       claude-opus-4-6
+ocr config set model                       claude-opus-5-5
 ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ```
 

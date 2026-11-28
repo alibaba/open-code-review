@@ -34,7 +34,7 @@ ocr config model
 
 ```bash
 ocr config set provider                    anthropic
-ocr config set model                       claude-opus-4-6
+ocr config set model                       claude-opus-5-5
 ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ```
 
@@ -46,33 +46,37 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 окружения. Провайдер `chatgpt` вместо этого использует учётные данные ChatGPT,
 созданные командой `ocr auth login`.
 
-| Имя | Протокол | Базовый URL | Переменная окружения для API-ключа |
-|---|---|---|---|
-| `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
-| `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
-| `chatgpt` | openai-responses | `https://api.openai.com/v1` | не применяется (Sign in with ChatGPT) |
-| `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
-| `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
-| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
-| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
-| `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
-| `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
-| `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
-| `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
-| `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
-| `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
-| `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
-| `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
-| `kimi-global` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_GLOBAL_API_KEY` |
-| `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
-| `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
-| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
-| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
-| `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
-| `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
-| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
-| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
-| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+| Имя                   | Протокол          | Базовый URL                                                          | Переменная окружения для API-ключа    |
+| --------------------- | ----------------- | -------------------------------------------------------------------- | ------------------------------------- |
+| `anthropic`           | anthropic         | `https://api.anthropic.com`                                          | `ANTHROPIC_API_KEY`                   |
+| `bedrock`             | anthropic-bedrock | определяется `aws_region`                                            | — (цепочка учётных данных AWS)        |
+| `chatgpt`             | openai-responses  | `https://api.openai.com/v1`                                          | не применяется (Sign in with ChatGPT) |
+| `openai`              | openai            | `https://api.openai.com/v1`                                          | `OPENAI_API_KEY`                      |
+| `openai-responses`    | openai-responses  | `https://api.openai.com/v1`                                          | `OPENAI_RESPONSES_API_KEY`            |
+| `openrouter`          | openai            | `https://openrouter.ai/api/v1`                                       | `OPENROUTER_API_KEY`                  |
+| `gemini`              | openai            | `https://generativelanguage.googleapis.com/v1beta/openai`            | `GEMINI_API_KEY`                      |
+| `dashscope`           | openai            | `https://dashscope.aliyuncs.com/compatible-mode/v1`                  | `DASHSCOPE_API_KEY`                   |
+| `dashscope-tokenplan` | openai            | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY`             |
+| `volcengine`          | openai            | `https://ark.cn-beijing.volces.com/api/v3`                           | `ARK_API_KEY`                         |
+| `deepseek`            | openai            | `https://api.deepseek.com`                                           | `DEEPSEEK_API_KEY`                    |
+| `tencent-tokenhub`    | openai            | `https://tokenhub.tencentmaas.com/v1`                                | `TENCENT_TOKENHUB_API_KEY`            |
+| `hy-tokenplan`        | openai            | `https://api.lkeap.cloud.tencent.com/plan/v3`                        | `TENCENT_HUNYUAN_TOKENPLAN_KEY`       |
+| `iflytek`             | openai            | `https://spark-api-open.xf-yun.com/v1`                               | `SPARK_API_KEY`                       |
+| `kimi`                | openai            | `https://api.moonshot.cn/v1`                                         | `MOONSHOT_API_KEY`                    |
+| `kimi-global`         | openai            | `https://api.moonshot.ai/v1`                                         | `MOONSHOT_GLOBAL_API_KEY`             |
+| `z-ai`                | openai            | `https://open.bigmodel.cn/api/paas/v4`                               | `Z_AI_API_KEY`                        |
+| `mimo`                | openai            | `https://api.xiaomimimo.com/v1`                                      | `MIMO_API_KEY`                        |
+| `minimax`             | openai            | `https://api.minimax.io/v1`                                          | `MINIMAX_GLOBAL_API_KEY`              |
+| `minimax-cn`          | openai            | `https://api.minimaxi.com/v1`                                        | `MINIMAX_API_KEY`                     |
+| `baidu-qianfan`       | openai            | `https://qianfan.baidubce.com/v2`                                    | `QIANFAN_API_KEY`                     |
+| `siliconflow`         | openai            | `https://api.siliconflow.com/v1`                                     | `SILICONFLOW_GLOBAL_API_KEY`          |
+| `siliconflow-cn`      | openai            | `https://api.siliconflow.cn/v1`                                      | `SILICONFLOW_API_KEY`                 |
+| `novita`              | openai            | `https://api.novita.ai/openai`                                       | `NOVITA_API_KEY`                      |
+| `xai`                 | openai            | `https://api.x.ai/v1`                                                | `XAI_API_KEY`                         |
+
+Для каждого встроенного провайдера в списке выбора есть несколько актуальных
+моделей. Для ревью с GPT-6 и вызовом инструментов используйте `openai-responses`.
+[Руководство по развёртыванию OpenAI API](https://developers.openai.com/api/docs/guides/deployment-checklist)
 
 Списки моделей встроенных провайдеров служат подсказкой для `ocr config model` и
 не ограничивают `--model`. Если модель отсутствует и во встроенном списке, и в
@@ -121,7 +125,7 @@ ocr llm test
 
 ```bash
 ocr config set provider                   litellm
-ocr config set model                      openai/gpt-5.4
+ocr config set model                      openai/gpt-5.5
 ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
 ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 ```
@@ -140,17 +144,17 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ```bash
 ocr config set provider                      bedrock
-ocr config set model                         us.anthropic.claude-sonnet-4-6
+ocr config set model                         us.anthropic.claude-sonnet-5-5
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
 
 Если для подключения к OpenAI-совместимому шлюзу вы задаете `providers.bedrock.protocol` значение `openai`, укажите адрес шлюза в `providers.bedrock.url`, а его API-ключ — через `providers.bedrock.api_key` или `providers.bedrock.api_key_cmd`. При выборе другой модели в `ocr config provider` сохраненный API-ключ остается на месте.
 
-| Поле | Значение |
-|---|---|
-| `providers.bedrock.aws_region` | Регион, чей хост `bedrock-runtime` обслуживает запрос. По умолчанию — `AWS_REGION` или активный профиль. |
-| `providers.bedrock.aws_profile` | Именованный профиль для получения учётных данных. По умолчанию — `AWS_PROFILE` или окружающая цепочка. |
+| Поле                            | Значение                                                                                                 |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `providers.bedrock.aws_region`  | Регион, чей хост `bedrock-runtime` обслуживает запрос. По умолчанию — `AWS_REGION` или активный профиль. |
+| `providers.bedrock.aws_profile` | Именованный профиль для получения учётных данных. По умолчанию — `AWS_PROFILE` или окружающая цепочка.   |
 
 Оба поля необязательны: если они не заданы, выбор делает стандартная цепочка,
 как и для любого другого инструмента AWS. Явная фиксация делает запуск
@@ -171,7 +175,7 @@ ocr config set providers.bedrock.aws_profile example-profile
 Source: provider:bedrock
 Region: us-east-1
 Profile: example-profile
-Model:  claude-sonnet-5
+Model:  us.anthropic.claude-sonnet-5-5
 ✓ Connection test successful
 ```
 
@@ -226,7 +230,7 @@ Responses API (`/v1/responses`):
 ocr config set provider                                               openai-responses-gateway
 ocr config set custom_providers.openai-responses-gateway.url          https://api.openai.com/v1
 ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
-ocr config set custom_providers.openai-responses-gateway.model        gpt-5
+ocr config set custom_providers.openai-responses-gateway.model        gpt-6.2-sol
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
 ```
 
@@ -239,7 +243,7 @@ ocr config set provider                                bedrock-eu
 ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
 ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
-ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
+ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-5-5
 ```
 
 В качестве `url` можно указать как базовый URL API, так и полный эндпоинт
@@ -292,7 +296,11 @@ Ollama игнорирует API-ключ, однако для пользоват
 ```json
 {
   "custom_providers": {
-    "ollama": { "url": "http://127.0.0.1:11434/v1", "protocol": "openai", "timeout_sec": 900 }
+    "ollama": {
+      "url": "http://127.0.0.1:11434/v1",
+      "protocol": "openai",
+      "timeout_sec": 900
+    }
   }
 }
 ```
