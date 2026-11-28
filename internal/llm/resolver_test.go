@@ -1386,7 +1386,7 @@ func TestResolveEndpointWithModelOverride_OpenRouterAcceptsUnlistedModel(t *test
 		t.Fatalf("write config: %v", err)
 	}
 
-	const model = "deepseek/deepseek-v4.1-flash"
+	const model = "openai/gpt-5.2"
 	var ep ResolvedEndpoint
 	var err error
 	stderr := captureStderr(t, func() {
@@ -1488,12 +1488,12 @@ func TestResolveEndpointWithModelOverride_MergesPresetAndEntryModels(t *testing.
 	var ep1 ResolvedEndpoint
 	var err error
 	stderr := captureStderr(t, func() {
-		ep1, err = ResolveEndpointWithModelOverride(cfgPath, "claude-opus-4-8")
+		ep1, err = ResolveEndpointWithModelOverride(cfgPath, "claude-opus-5-5")
 	})
 	if err != nil {
 		t.Fatalf("unexpected error for preset model: %v", err)
 	}
-	if ep1.Model != "claude-opus-4-8" || stderr != "" {
+	if ep1.Model != "claude-opus-5-5" || stderr != "" {
 		t.Errorf("endpoint = %+v, stderr = %q, want listed model without warning", ep1, stderr)
 	}
 

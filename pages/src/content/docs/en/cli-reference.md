@@ -51,9 +51,9 @@ GitHub: https://github.com/alibaba/open-code-review
 Available on every command, and accepted either before or after the subcommand
 (`ocr --color=never review` and `ocr review --color=never` are equivalent).
 
-| Flag | Default | What it does |
-|---|---|---|
-| `--color <auto\|always\|never>` | `auto` | When to emit ANSI color. `auto` colorizes only when stdout is a terminal, so piping or redirecting yields plain text. `always` keeps color through a pipe (useful for `\| less -R`). |
+| Flag                            | Default | What it does                                                                                                                                                                         |
+| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--color <auto\|always\|never>` | `auto`  | When to emit ANSI color. `auto` colorizes only when stdout is a terminal, so piping or redirecting yields plain text. `always` keeps color through a pipe (useful for `\| less -R`). |
 
 Text output is plain whenever stdout is not a terminal, so it can be piped
 safely:
@@ -66,25 +66,25 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 ## Command summary
 
-| Command | Alias | What it does |
-|---|---|---|
-| `ocr review` | `ocr r` | Run a code review and emit comments. |
-| `ocr scan` | `ocr s` | Scan complete files without requiring a Git diff. |
-| `ocr rules check <file>` | — | Show which rule applies to a given file path and where it came from. |
-| `ocr config set <key> <value>` | — | Persist a config value to `~/.opencodereview/config.json`. |
-| `ocr config unset custom_providers.<name>` | — | Delete a custom provider (clears active `provider`/`model` if it was active). |
-| `ocr config provider` | — | Interactive provider-setup TUI. |
-| `ocr config model` | — | Interactive model-selection TUI. |
-| `ocr llm test` | — | Send a small chat request to verify the configured endpoint. |
-| `ocr llm providers` | — | List all built-in LLM providers. |
-| `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
-| `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
-| `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
-| `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Compare two sessions' findings: new, persisting, resolved, not reviewed. |
-| `ocr session export [id]` | — | Export one session as a self-contained HTML file. |
-| `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | Delete one saved review session. |
-| `ocr viewer` | — | Launch the local web UI for past review sessions (`localhost:5483`). |
-| `ocr version` | — | Print version, commit, platform, build date, and GitHub URL. |
+| Command                                    | Alias                                                | What it does                                                                  |
+| ------------------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `ocr review`                               | `ocr r`                                              | Run a code review and emit comments.                                          |
+| `ocr scan`                                 | `ocr s`                                              | Scan complete files without requiring a Git diff.                             |
+| `ocr rules check <file>`                   | —                                                    | Show which rule applies to a given file path and where it came from.          |
+| `ocr config set <key> <value>`             | —                                                    | Persist a config value to `~/.opencodereview/config.json`.                    |
+| `ocr config unset custom_providers.<name>` | —                                                    | Delete a custom provider (clears active `provider`/`model` if it was active). |
+| `ocr config provider`                      | —                                                    | Interactive provider-setup TUI.                                               |
+| `ocr config model`                         | —                                                    | Interactive model-selection TUI.                                              |
+| `ocr llm test`                             | —                                                    | Send a small chat request to verify the configured endpoint.                  |
+| `ocr llm providers`                        | —                                                    | List all built-in LLM providers.                                              |
+| `ocr session list`                         | `ocr sessions list`, `ocr session ls`                | List saved review sessions.                                                   |
+| `ocr session show <id>`                    | `ocr sessions show <id>`                             | Inspect one session and its per-file checkpoints.                             |
+| `ocr session comments <id>`                | `ocr sessions comments <id>`                         | Print the review comments recorded in one session.                            |
+| `ocr session compare <before> <after>`     | `ocr session diff <before> <after>`                  | Compare two sessions' findings: new, persisting, resolved, not reviewed.      |
+| `ocr session export [id]`                  | —                                                    | Export one session as a self-contained HTML file.                             |
+| `ocr session rm <id>`                      | `ocr session delete <id>`, `ocr session remove <id>` | Delete one saved review session.                                              |
+| `ocr viewer`                               | —                                                    | Launch the local web UI for past review sessions (`localhost:5483`).          |
+| `ocr version`                              | —                                                    | Print version, commit, platform, build date, and GitHub URL.                  |
 
 `ocr` and `ocr -h` print top-level usage. Each subcommand also accepts
 `-h` / `--help`.
@@ -111,33 +111,33 @@ staged + unstaged + untracked changes in the current directory's repo.
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|---|---|---|---|
-| `--repo <path>` | — | current dir | Git repository root. |
-| `--from <ref>` | — | — | Source ref to start the diff from (e.g., `main`). |
-| `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. When `--from` is set and `--to` is omitted, it defaults to `HEAD` (committed changes only, like `git diff <from>...HEAD`). |
-| `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
-| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
-| `--no-filter` | — | `false` | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files. |
-| `--resume <session-id>` | — | — | Resume from a previous compatible range, commit, or workspace review session. |
-| `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
-| `--output <path>` | `-o` | stdout | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
-| `--audience <who>` | — | `human` | `human` streams progress lines (to stderr when `--format` is `json`/`sarif`, so stdout stays a single parseable document); `agent` suppresses progress entirely and prints only the final summary / JSON. |
-| `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
-| `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set. |
-| `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
-| `--concurrency <n>` | — | `8` | Maximum number of subtasks reviewed in parallel. |
-| `--timeout <minutes>` | — | `15` | Per-subtask budget, including LLM calls, tools, and retry waits. `0` disables the task deadline, not request timeouts. Independent request timeout: `OCR_LLM_TIMEOUT` or provider `timeout_sec`, in seconds (default `300`). Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high). |
-| `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
-| `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
-| `--max-tools <n>` | — | template default | Max tool-call rounds per subtask. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. A resolved positive value sets the cap exactly. |
-| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask in both Review and Analysis; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
-| `--analysis` | — | off | Run a separate Behavior/Impact analysis alongside a commit or range review (`--commit` or `--from`, text or JSON only). Omit this flag for workspace reviews of uncommitted changes. Not compatible with preview or resume. Analysis has 300 investigation rounds, independent of `--max-tools`, plus at most one submission-only round if the budget is exhausted. A failed or skipped analysis does not change the Review exit status. |
-| `--analysis-max-tokens-budget <n>` | — | `0` (unlimited) | Set a soft limit on total input and output tokens for Analysis only. One additional model request can run concurrently with Review. Inspect `analysis_meta.usage` and `analysis_meta.execution_status` in JSON. |
-| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Checked before every LLM round: a subtask already over budget gets one final round to submit findings and is reported as `failed(budget)`, no further subtasks are dispatched, and the CLI emits available results. |
-| `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
-| `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
-| `--max-git-procs <n>` | — | `16` | Maximum number of concurrent Git subprocesses across Review and Analysis combined. |
+| Flag                               | Short | Default                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------- | ----- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--repo <path>`                    | —     | current dir                | Git repository root.                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `--from <ref>`                     | —     | —                          | Source ref to start the diff from (e.g., `main`).                                                                                                                                                                                                                                                                                                                                                                                        |
+| `--to <ref>`                       | —     | —                          | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. When `--from` is set and `--to` is omitted, it defaults to `HEAD` (committed changes only, like `git diff <from>...HEAD`).                                                                                                                                                                                                    |
+| `--commit <sha>`                   | `-c`  | —                          | Single commit to review (vs its parent).                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `--preview`                        | `-p`  | `false`                    | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit).                                                                                                                                                                                                                                           |
+| `--no-filter`                      | —     | `false`                    | Keep all review comments and skip the per-subtask `REVIEW_FILTER_TASK` LLM post-processing call. A subtask reviews a single file or a bundle of related files.                                                                                                                                                                                                                                                                           |
+| `--resume <session-id>`            | —     | —                          | Resume from a previous compatible range, commit, or workspace review session.                                                                                                                                                                                                                                                                                                                                                            |
+| `--format <fmt>`                   | `-f`  | `text`                     | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning).                                                                                                                                                                                                                                                                                                              |
+| `--output <path>`                  | `-o`  | stdout                     | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes.                                                                                                                                                                                                                                                 |
+| `--audience <who>`                 | —     | `human`                    | `human` streams progress lines (to stderr when `--format` is `json`/`sarif`, so stdout stays a single parseable document); `agent` suppresses progress entirely and prints only the final summary / JSON.                                                                                                                                                                                                                                |
+| `--background <text>`              | `-b`  | —                          | Optional requirement / business context injected into the plan + main prompts.                                                                                                                                                                                                                                                                                                                                                           |
+| `--background-file <path>`         | `-B`  | —                          | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set.                                                                                                                                                                                                                                                                                                                               |
+| `--exclude <patterns>`             | —     | —                          | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json`                                                                                                                                                                                                                                                                                                                                   |
+| `--concurrency <n>`                | —     | `8`                        | Maximum number of subtasks reviewed in parallel.                                                                                                                                                                                                                                                                                                                                                                                         |
+| `--timeout <minutes>`              | —     | `15`                       | Per-subtask budget, including LLM calls, tools, and retry waits. `0` disables the task deadline, not request timeouts. Independent request timeout: `OCR_LLM_TIMEOUT` or provider `timeout_sec`, in seconds (default `300`). Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high).                                                                                                              |
+| `--effort <level>`                 | —     | `medium`                   | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run.                                                                                                                                                                                                                                       |
+| `--rule <path>`                    | —     | —                          | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`.                                                                                                                                                                                                                                                                                                                                              |
+| `--max-tools <n>`                  | —     | template default           | Max tool-call rounds per subtask. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. A resolved positive value sets the cap exactly.                                                                                                                                                                                                                                                                             |
+| `--max-tokens <n>`                 | —     | config or template default | Prompt (input) token ceiling per subtask in both Review and Analysis; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`.                                                                                                                                                                                                             |
+| `--analysis`                       | —     | off                        | Run a separate Behavior/Impact analysis alongside a commit or range review (`--commit` or `--from`, text or JSON only). Omit this flag for workspace reviews of uncommitted changes. Not compatible with preview or resume. Analysis has 300 investigation rounds, independent of `--max-tools`, plus at most one submission-only round if the budget is exhausted. A failed or skipped analysis does not change the Review exit status. |
+| `--analysis-max-tokens-budget <n>` | —     | `0` (unlimited)            | Set a soft limit on total input and output tokens for Analysis only. One additional model request can run concurrently with Review. Inspect `analysis_meta.usage` and `analysis_meta.execution_status` in JSON.                                                                                                                                                                                                                          |
+| `--max-tokens-budget <n>`          | —     | `0` (unlimited)            | Cap total input + output token usage for the review. Checked before every LLM round: a subtask already over budget gets one final round to submit findings and is reported as `failed(budget)`, no further subtasks are dispatched, and the CLI emits available results.                                                                                                                                                                 |
+| `--provider <name>`                | —     | —                          | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted.                                                                                                                                                                                                                                                                                                                             |
+| `--model <name>`                   | —     | —                          | Override the resolved LLM model for this run (e.g., `claude-opus-5-5`).                                                                                                                                                                                                                                                                                                                                                                  |
+| `--max-git-procs <n>`              | —     | `16`                       | Maximum number of concurrent Git subprocesses across Review and Analysis combined.                                                                                                                                                                                                                                                                                                                                                       |
 
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
@@ -150,8 +150,8 @@ Both `review` and `scan` accept `--provider` and `--model`. The overrides
 apply only to the current invocation and do not modify saved configuration:
 
 ```bash
-ocr review --provider anthropic --model claude-opus-4-6 --format json
-ocr scan --provider openai --model gpt-5.4 --format json
+ocr review --provider anthropic --model claude-opus-5-5 --format json
+ocr scan --provider openai-responses --model gpt-6.2-sol --format json
 ```
 
 An explicit `--provider` selects a saved entry from `providers` or
@@ -193,7 +193,7 @@ ocr review --from main --to feature-branch
 ```
 
 OCR computes `merge-base(main, feature-branch)..feature-branch` so you only
-see the diff *introduced by* the feature branch — not unrelated changes
+see the diff _introduced by_ the feature branch — not unrelated changes
 that landed on `main` since branching.
 
 #### Commit mode
@@ -252,7 +252,7 @@ would review the same thing the parent did:
   same diff and still resumes; a substantive content edit changes the diff and
   is rejected
 - the review mode must match: a range session cannot be resumed as a commit one
-- the resolved input must match. Ref *spellings* are not compared — `abc1234`
+- the resolved input must match. Ref _spellings_ are not compared — `abc1234`
   and `abc1234def` name the same commit — but if the same refs now resolve to a
   different diff, or the rules or filters changed the selected file set, the
   whole resume is rejected rather than partially reused
@@ -325,7 +325,7 @@ to discard them at the shell.
   "status": "success",
   "llm": {
     "provider": "anthropic",
-    "model": "claude-opus-4-6"
+    "model": "claude-opus-5-5"
   },
   "summary": {
     "files_reviewed": 9,
@@ -351,16 +351,16 @@ to discard them at the shell.
 
 Top-level fields:
 
-| Field | Notes |
-|---|---|
-| `status` | When the output includes a `manifest` field, its terminal state: `complete`, `partial`, `failed`, or `skipped`. Otherwise: `success`, `completed_with_warnings`, or `completed_with_errors`. `skipped` also covers the no-supported-files case. |
-| `llm` | Resolved LLM identity. The normalized `model` is always present; `provider` is present only for a named configured provider. |
-| `message` | Optional. Human-readable summary, e.g. `"No comments generated. Looks good to me."`. |
-| `summary` | Optional. Run aggregates: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Omitted for `skipped` runs. |
-| `comments` | Always present, possibly empty. Per-comment fields are the ones in the example above. |
-| `warnings` | Optional. Present when one or more sub-agents failed; each entry describes the affected file and the error. |
-| `session_id` | Optional. Present on persisted review runs; pass this to `ocr review --resume <session-id>` when retrying compatible reviews. |
-| `resume` | Optional. Present on resumed runs with `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, and `current_model`. |
+| Field        | Notes                                                                                                                                                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`     | When the output includes a `manifest` field, its terminal state: `complete`, `partial`, `failed`, or `skipped`. Otherwise: `success`, `completed_with_warnings`, or `completed_with_errors`. `skipped` also covers the no-supported-files case. |
+| `llm`        | Resolved LLM identity. The normalized `model` is always present; `provider` is present only for a named configured provider.                                                                                                                    |
+| `message`    | Optional. Human-readable summary, e.g. `"No comments generated. Looks good to me."`.                                                                                                                                                            |
+| `summary`    | Optional. Run aggregates: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Omitted for `skipped` runs.                              |
+| `comments`   | Always present, possibly empty. Per-comment fields are the ones in the example above.                                                                                                                                                           |
+| `warnings`   | Optional. Present when one or more sub-agents failed; each entry describes the affected file and the error.                                                                                                                                     |
+| `session_id` | Optional. Present on persisted review runs; pass this to `ocr review --resume <session-id>` when retrying compatible reviews.                                                                                                                   |
+| `resume`     | Optional. Present on resumed runs with `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, and `current_model`.                                                                                                                    |
 
 When no files were eligible for review, JSON mode emits a `skipped`
 envelope instead so callers can distinguish "no changes" from "no findings":
@@ -371,7 +371,7 @@ envelope instead so callers can distinguish "no changes" from "no findings":
   "message": "No supported files changed.",
   "llm": {
     "provider": "anthropic",
-    "model": "claude-opus-4-6"
+    "model": "claude-opus-5-5"
   },
   "comments": []
 }
@@ -379,10 +379,10 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 
 ### Exit codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Review completed or was skipped (possibly with zero comments or non-fatal warnings). A partial review caused only by configured budget limits also exits `0`. |
-| `1` | Fatal error, or an operational per-group failure such as a timeout, provider error, or bad configuration. The CLI emits available results before returning the error. |
+| Code | Meaning                                                                                                                                                               |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Review completed or was skipped (possibly with zero comments or non-fatal warnings). A partial review caused only by configured budget limits also exits `0`.         |
+| `1`  | Fatal error, or an operational per-group failure such as a timeout, provider error, or bad configuration. The CLI emits available results before returning the error. |
 
 Warnings are printed inline; in JSON mode they're added to the `warnings`
 array. Inspect `manifest.coverage.failed` for the affected files and their
@@ -403,12 +403,12 @@ With no `--path`, the whole repository is scanned.
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|---|---|---|---|
-| `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). Selectors resolve against the working tree: the spelled path wins over a case-variant sibling, a differently-cased spelling that the filesystem resolves (Windows, default macOS) still selects the tracked files, and a selector that names no existing path is an error rather than an empty scan. |
-| `--exclude <patterns>` | - | - | Comma-separated gitignore-style patterns to skip (e.g., `**/generated/*,*.pb.go`); merged with `rule.json` excludes. |
-| `--output <path>` | `-o` | stdout | Write scan results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
-| `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`; `--format sarif` is not supported. |
+| Flag                   | Short | Default    | Description                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------- | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--path <list>`        | -     | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). Selectors resolve against the working tree: the spelled path wins over a case-variant sibling, a differently-cased spelling that the filesystem resolves (Windows, default macOS) still selects the tracked files, and a selector that names no existing path is an error rather than an empty scan. |
+| `--exclude <patterns>` | -     | -          | Comma-separated gitignore-style patterns to skip (e.g., `**/generated/*,*.pb.go`); merged with `rule.json` excludes.                                                                                                                                                                                                                                                                                                |
+| `--output <path>`      | `-o`  | stdout     | Write scan results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes.                                                                                                                                                                                                                              |
+| `--preview`            | `-p`  | `false`    | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`; `--format sarif` is not supported.                                                                                                                                                                                                       |
 
 ```bash
 ocr scan --preview                              # see what would be scanned
@@ -445,12 +445,12 @@ ocr session list --branch feat/my-feature --limit 5
 ocr sessions ls --repo /path/to/repo --branch main --json
 ```
 
-| Flag | Default | Description |
-|---|---|---|
-| `--repo <path>` | current dir | Repository whose sessions should be listed. |
-| `--json` | `false` | Emit session summaries as JSON. |
-| `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
-| `--branch <name>` | empty | Only list sessions whose saved branch name matches exactly, including case. |
+| Flag              | Default     | Description                                                                 |
+| ----------------- | ----------- | --------------------------------------------------------------------------- |
+| `--repo <path>`   | current dir | Repository whose sessions should be listed.                                 |
+| `--json`          | `false`     | Emit session summaries as JSON.                                             |
+| `--limit <n>`     | `20`        | Cap the number of listed sessions. Use `0` for unlimited.                   |
+| `--branch <name>` | empty       | Only list sessions whose saved branch name matches exactly, including case. |
 
 Branch filtering runs before `--limit` and preserves newest-first ordering.
 Omitting `--branch` or passing an empty value keeps the unfiltered behavior.
@@ -483,10 +483,10 @@ ocr session show --repo . <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
-| Flag | Default | Description |
-|---|---|---|
+| Flag            | Default          | Description                                                        |
+| --------------- | ---------------- | ------------------------------------------------------------------ |
 | `--repo <path>` | all repositories | Restrict the session lookup to this existing repository directory. |
-| `--json` | `false` | Emit session metadata and per-file items as JSON. |
+| `--json`        | `false`          | Emit session metadata and per-file items as JSON.                  |
 
 ### `ocr session comments`
 
@@ -501,12 +501,12 @@ ocr session comments --severity high <session-id>
 ocr session comments --severity critical,high --category bug,security <session-id>
 ```
 
-| Flag | Default | Description |
-|---|---|---|
-| `--repo <path>` | current dir | Repository whose session should be inspected. |
-| `--json` | `false` | Emit the comments as a JSON array. |
-| `--severity <list>` | all | Comma-separated severities to include (`critical`, `high`, `medium`, `low`). |
-| `--category <list>` | all | Comma-separated categories to include (e.g. `bug`, `security`). |
+| Flag                | Default     | Description                                                                  |
+| ------------------- | ----------- | ---------------------------------------------------------------------------- |
+| `--repo <path>`     | current dir | Repository whose session should be inspected.                                |
+| `--json`            | `false`     | Emit the comments as a JSON array.                                           |
+| `--severity <list>` | all         | Comma-separated severities to include (`critical`, `high`, `medium`, `low`). |
+| `--category <list>` | all         | Comma-separated categories to include (e.g. `bug`, `security`).              |
 
 ### `ocr session compare`
 
@@ -530,10 +530,10 @@ Both sessions must belong to the same repository; otherwise the command
 fails. Different review modes only print a warning on stderr, so `--json`
 output stays pipeable.
 
-| Flag | Default | Description |
-|---|---|---|
-| `--repo <path>` | current dir | Repository whose sessions should be compared. |
-| `--json` | `false` | Emit the comparison as JSON (`new`, `persisting`, `resolved`, `not_reviewed`). |
+| Flag            | Default     | Description                                                                    |
+| --------------- | ----------- | ------------------------------------------------------------------------------ |
+| `--repo <path>` | current dir | Repository whose sessions should be compared.                                  |
+| `--json`        | `false`     | Emit the comparison as JSON (`new`, `persisting`, `resolved`, `not_reviewed`). |
 
 ### `ocr session export`
 
@@ -547,16 +547,16 @@ ocr session export 20250601-100000-abc123 -o review.html
 ```
 
 With no session id the newest session for the repository is exported. That is
-the default because a *successful* `ocr review` never prints its session id.
+the default because a _successful_ `ocr review` never prints its session id.
 Without `-o` the HTML goes to stdout.
 
 The exported page embeds the reviewed source excerpts the session recorded, so
 treat the file with the same care as the repository itself before publishing it.
 
-| Flag | Default | Description |
-|---|---|---|
-| `--repo <path>` | current dir | Repository whose session should be exported. |
-| `--output <path>`, `-o` | stdout | Write the HTML to a file instead of stdout. |
+| Flag                    | Default     | Description                                  |
+| ----------------------- | ----------- | -------------------------------------------- |
+| `--repo <path>`         | current dir | Repository whose session should be exported. |
+| `--output <path>`, `-o` | stdout      | Write the HTML to a file instead of stdout.  |
 
 ### `ocr session rm`
 
@@ -581,10 +581,10 @@ A session whose metadata cannot be parsed is still deletable; one that cannot be
 read at all is reported instead. With `--repo`, a session that records a
 different repository, or none, is refused: delete it by id alone.
 
-| Flag | Default | Description |
-|---|---|---|
+| Flag            | Default          | Description                                      |
+| --------------- | ---------------- | ------------------------------------------------ |
 | `--repo <path>` | every repository | Only look for the session under this repository. |
-| `--yes`, `-y` | `false` | Skip the confirmation prompt. |
+| `--yes`, `-y`   | `false`          | Skip the confirmation prompt.                    |
 
 ## `ocr rules`
 
@@ -648,8 +648,6 @@ ocr config model                           Interactive model selection
 
 See [Configuration](../configuration/) for the full key reference,
 schemas, and examples.
-
-
 
 ## `ocr auth`
 
@@ -762,7 +760,6 @@ Prints the version stamped at build time, the short Git commit (when
 present), the platform (`<GOOS>/<GOARCH>`), the build date (when present),
 and the GitHub URL (`https://github.com/alibaba/open-code-review`).
 
-
 ## ocr completion
 
 Generate shell completion scripts for `ocr`, so command names, flags,
@@ -834,7 +831,6 @@ ocr completion powershell > ocr.ps1
 ```
 
 Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
-
 
 ## Tips & gotchas
 

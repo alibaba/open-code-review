@@ -30,7 +30,7 @@ ocr config model
 
 ```bash
 ocr config set provider                    anthropic
-ocr config set model                       claude-opus-4-6
+ocr config set model                       claude-opus-5-5
 ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ```
 
@@ -38,33 +38,36 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 대부분은 API 키가 필요하며, `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다. `chatgpt`는 대신 `ocr auth login`이 만든 ChatGPT 자격 증명을 사용합니다.
 
-| 이름 | 프로토콜 | Base URL | API 키 환경 변수 |
-|---|---|---|---|
-| `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
-| `bedrock` | anthropic-bedrock | `aws_region`에서 결정 | — (AWS 자격 증명 체인) |
-| `chatgpt` | openai-responses | `https://api.openai.com/v1` | 해당 없음 (Sign in with ChatGPT) |
-| `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
-| `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
-| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
-| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
-| `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
-| `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
-| `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
-| `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
-| `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
-| `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
-| `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
-| `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
-| `kimi-global` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_GLOBAL_API_KEY` |
-| `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
-| `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
-| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
-| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
-| `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
-| `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
-| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
-| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
-| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+| 이름                  | 프로토콜          | Base URL                                                             | API 키 환경 변수                 |
+| --------------------- | ----------------- | -------------------------------------------------------------------- | -------------------------------- |
+| `anthropic`           | anthropic         | `https://api.anthropic.com`                                          | `ANTHROPIC_API_KEY`              |
+| `bedrock`             | anthropic-bedrock | `aws_region`에서 결정                                                | — (AWS 자격 증명 체인)           |
+| `chatgpt`             | openai-responses  | `https://api.openai.com/v1`                                          | 해당 없음 (Sign in with ChatGPT) |
+| `openai`              | openai            | `https://api.openai.com/v1`                                          | `OPENAI_API_KEY`                 |
+| `openai-responses`    | openai-responses  | `https://api.openai.com/v1`                                          | `OPENAI_RESPONSES_API_KEY`       |
+| `openrouter`          | openai            | `https://openrouter.ai/api/v1`                                       | `OPENROUTER_API_KEY`             |
+| `gemini`              | openai            | `https://generativelanguage.googleapis.com/v1beta/openai`            | `GEMINI_API_KEY`                 |
+| `dashscope`           | openai            | `https://dashscope.aliyuncs.com/compatible-mode/v1`                  | `DASHSCOPE_API_KEY`              |
+| `dashscope-tokenplan` | openai            | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY`        |
+| `volcengine`          | openai            | `https://ark.cn-beijing.volces.com/api/v3`                           | `ARK_API_KEY`                    |
+| `deepseek`            | openai            | `https://api.deepseek.com`                                           | `DEEPSEEK_API_KEY`               |
+| `tencent-tokenhub`    | openai            | `https://tokenhub.tencentmaas.com/v1`                                | `TENCENT_TOKENHUB_API_KEY`       |
+| `hy-tokenplan`        | openai            | `https://tokenhub.tencentmaas.com/plan/v3`                           | `TENCENT_HUNYUAN_TOKENPLAN_KEY`  |
+| `iflytek`             | openai            | `https://spark-api-open.xf-yun.com/v1`                               | `SPARK_API_KEY`                  |
+| `kimi`                | openai            | `https://api.moonshot.cn/v1`                                         | `MOONSHOT_API_KEY`               |
+| `kimi-global`         | openai            | `https://api.moonshot.ai/v1`                                         | `MOONSHOT_GLOBAL_API_KEY`        |
+| `z-ai`                | openai            | `https://open.bigmodel.cn/api/paas/v4`                               | `Z_AI_API_KEY`                   |
+| `mimo`                | openai            | `https://api.xiaomimimo.com/v1`                                      | `MIMO_API_KEY`                   |
+| `minimax`             | openai            | `https://api.minimax.io/v1`                                          | `MINIMAX_GLOBAL_API_KEY`         |
+| `minimax-cn`          | openai            | `https://api.minimaxi.com/v1`                                        | `MINIMAX_API_KEY`                |
+| `baidu-qianfan`       | openai            | `https://qianfan.baidubce.com/v2`                                    | `QIANFAN_API_KEY`                |
+| `siliconflow`         | openai            | `https://api.siliconflow.com/v1`                                     | `SILICONFLOW_GLOBAL_API_KEY`     |
+| `siliconflow-cn`      | openai            | `https://api.siliconflow.cn/v1`                                      | `SILICONFLOW_API_KEY`            |
+| `novita`              | openai            | `https://api.novita.ai/openai`                                       | `NOVITA_API_KEY`                 |
+| `xai`                 | openai            | `https://api.x.ai/v1`                                                | `XAI_API_KEY`                    |
+
+모델 선택 목록에는 내장 제공자별로 현재 권장 모델 몇 개가 표시됩니다. 도구를 호출하는
+GPT-6 리뷰에는 `openai-responses`를 사용하세요. [OpenAI API 배포 체크리스트](https://developers.openai.com/api/docs/guides/deployment-checklist)
 
 내장 프로바이더의 모델 목록은 `ocr config model`에서 선택할 때 제안하는 목록이며
 `--model`을 제한하지 않습니다. 지정한 모델이 내장 목록과
@@ -109,7 +112,7 @@ ocr llm test
 
 ```bash
 ocr config set provider                   litellm
-ocr config set model                      openai/gpt-5.4
+ocr config set model                      openai/gpt-5.5
 ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
 ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 ```
@@ -122,17 +125,17 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 ```bash
 ocr config set provider                      bedrock
-ocr config set model                         us.anthropic.claude-sonnet-4-6
+ocr config set model                         us.anthropic.claude-sonnet-5-5
 ocr config set providers.bedrock.aws_region  us-west-2
 ocr config set providers.bedrock.aws_profile example-profile
 ```
 
 OpenAI 호환 게이트웨이에 연결하려고 `providers.bedrock.protocol`을 `openai`로 설정했다면, `providers.bedrock.url`에 게이트웨이 URL을 설정하고 `providers.bedrock.api_key` 또는 `providers.bedrock.api_key_cmd`로 게이트웨이의 API 키를 제공하세요. `ocr config provider`에서 모델을 변경해도 저장된 API 키는 유지됩니다.
 
-| 필드 | 의미 |
-|---|---|
-| `providers.bedrock.aws_region` | 요청을 처리할 `bedrock-runtime` 호스트의 리전. 비어 있으면 `AWS_REGION`이나 활성 프로필로 대체합니다. |
-| `providers.bedrock.aws_profile` | 자격 증명을 가져올 명명 프로필. 비어 있으면 `AWS_PROFILE`이나 환경의 자격 증명 체인으로 대체합니다. |
+| 필드                            | 의미                                                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `providers.bedrock.aws_region`  | 요청을 처리할 `bedrock-runtime` 호스트의 리전. 비어 있으면 `AWS_REGION`이나 활성 프로필로 대체합니다. |
+| `providers.bedrock.aws_profile` | 자격 증명을 가져올 명명 프로필. 비어 있으면 `AWS_PROFILE`이나 환경의 자격 증명 체인으로 대체합니다.   |
 
 두 필드 모두 선택 사항이며, 비워 두면 다른 AWS 도구와 마찬가지로 표준 체인이 결정합니다. 값을 고정해 두면 `AWS_PROFILE`을 먼저 내보내지 않아도 실행을 재현할 수 있는데, 기본 프로필이 다른 CI 러너에서 특히 유용합니다.
 
@@ -144,7 +147,7 @@ OpenAI 호환 게이트웨이에 연결하려고 `providers.bedrock.protocol`을
 Source: provider:bedrock
 Region: us-east-1
 Profile: example-profile
-Model:  claude-sonnet-5
+Model:  us.anthropic.claude-sonnet-5-5
 ✓ Connection test successful
 ```
 
@@ -182,7 +185,7 @@ ocr config set custom_providers.openai-chat-gateway.api_key  "$OPENAI_API_KEY"
 ocr config set provider                                               openai-responses-gateway
 ocr config set custom_providers.openai-responses-gateway.url          https://api.openai.com/v1
 ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
-ocr config set custom_providers.openai-responses-gateway.model        gpt-5
+ocr config set custom_providers.openai-responses-gateway.model        gpt-6.2-sol
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
 ```
 
@@ -193,7 +196,7 @@ ocr config set provider                                bedrock-eu
 ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
 ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
-ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
+ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-5-5
 ```
 
 `url`은 API Base URL이든 전체 `/responses` 엔드포인트든 상관없습니다. OCR이 어느 쪽이든 정규화합니다.
@@ -233,7 +236,11 @@ LLM 요청마다 HTTP 타임아웃이 있으며 기본값은 **300초**입니다
 ```json
 {
   "custom_providers": {
-    "ollama": { "url": "http://127.0.0.1:11434/v1", "protocol": "openai", "timeout_sec": 900 }
+    "ollama": {
+      "url": "http://127.0.0.1:11434/v1",
+      "protocol": "openai",
+      "timeout_sec": 900
+    }
   }
 }
 ```

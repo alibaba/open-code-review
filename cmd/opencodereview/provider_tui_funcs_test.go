@@ -1058,14 +1058,14 @@ func officialConfigModelTUI(t *testing.T, configPath string, extraModels []strin
 	if !ok {
 		t.Skip("dashscope provider not in registry")
 	}
-	models := []string{"qwen3.7-max"}
+	models := []string{"qwen4-max"}
 	models = append(models, extraModels...)
 	cfg := &Config{
 		Provider: "dashscope",
-		Model:    "qwen3.7-max",
+		Model:    "qwen4-max",
 		Providers: map[string]ProviderEntry{
 			"dashscope": {
-				Model:  "qwen3.7-max",
+				Model:  "qwen4-max",
 				Models: models,
 			},
 		},
@@ -1164,7 +1164,7 @@ func TestModelTUI_Official_AddCustomModelStaysOnList(t *testing.T) {
 	if !llm.ModelListContains(got, "new-model") {
 		t.Errorf("Models = %v, want new-model appended", got)
 	}
-	if m3.existingCfg.Model != "qwen3.7-max" {
+	if m3.existingCfg.Model != "qwen4-max" {
 		t.Errorf("cfg.Model = %q, want active model unchanged", m3.existingCfg.Model)
 	}
 	diskCfg, err := loadOrCreateConfig(configPath)
@@ -1268,8 +1268,8 @@ func TestModelTUI_Official_DeleteUserAddedModel(t *testing.T) {
 	result, _ = m2.Update(yKey())
 	m3 := result.(modelTUIModel)
 	got := m3.existingCfg.Providers["dashscope"].Models
-	if len(got) != 1 || got[0] != "qwen3.7-max" {
-		t.Errorf("Models = %v, want [qwen3.7-max]", got)
+	if len(got) != 1 || got[0] != "qwen4-max" {
+		t.Errorf("Models = %v, want [qwen4-max]", got)
 	}
 
 	diskCfg, err := loadOrCreateConfig(configPath)
@@ -1277,13 +1277,13 @@ func TestModelTUI_Official_DeleteUserAddedModel(t *testing.T) {
 		t.Fatalf("load disk config: %v", err)
 	}
 	if len(diskCfg.Providers["dashscope"].Models) != 1 {
-		t.Errorf("disk Models = %v, want [qwen3.7-max]", diskCfg.Providers["dashscope"].Models)
+		t.Errorf("disk Models = %v, want [qwen4-max]", diskCfg.Providers["dashscope"].Models)
 	}
 }
 
 func TestModelTUI_Official_DeleteBuiltInModelIgnored(t *testing.T) {
 	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
-	m.modelIdx = modelTUIIdxForName(t, m, "qwen3.7-max")
+	m.modelIdx = modelTUIIdxForName(t, m, "qwen4-max")
 
 	result, _ := m.Update(dKey())
 	m2 := result.(modelTUIModel)
@@ -1299,10 +1299,10 @@ func TestIsUserAddedOfficialModelName_RegistryDuplicateNotUserAdded(t *testing.T
 	}
 	cfg := &Config{
 		Providers: map[string]ProviderEntry{
-			"dashscope": {Models: []string{"qwen3.7-max", "my-custom-model"}},
+			"dashscope": {Models: []string{"qwen4-max", "my-custom-model"}},
 		},
 	}
-	if isUserAddedOfficialModelName("qwen3.7-max", "dashscope", preset.Models, cfg) {
+	if isUserAddedOfficialModelName("qwen4-max", "dashscope", preset.Models, cfg) {
 		t.Error("registry model should not be treated as user-added even when listed in config")
 	}
 	if !isUserAddedOfficialModelName("my-custom-model", "dashscope", preset.Models, cfg) {
@@ -1312,10 +1312,10 @@ func TestIsUserAddedOfficialModelName_RegistryDuplicateNotUserAdded(t *testing.T
 
 func TestModelTUI_Official_RegistryModelNotDeletable(t *testing.T) {
 	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
-	m.modelIdx = modelTUIIdxForName(t, m, "qwen3.7-max")
+	m.modelIdx = modelTUIIdxForName(t, m, "qwen4-max")
 
-	if m.isUserAddedModel("qwen3.7-max") {
-		t.Error("qwen3.7-max should not be user-added when it is in the registry")
+	if m.isUserAddedModel("qwen4-max") {
+		t.Error("qwen4-max should not be user-added when it is in the registry")
 	}
 
 	result, _ := m.Update(dKey())
@@ -1350,7 +1350,7 @@ func TestModelTUI_CustomProvider_DeleteOnCustomModelInputIgnored(t *testing.T) {
 func TestModelTUI_Official_UserAddedModelShowsDeleteHint(t *testing.T) {
 	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
 
-	m.modelIdx = modelTUIIdxForName(t, m, "qwen3.7-max")
+	m.modelIdx = modelTUIIdxForName(t, m, "qwen4-max")
 	got := stripANSI(m.View().Content)
 	if strings.Contains(got, "d Delete") {
 		t.Errorf("built-in model should not show d Delete hint; got:\n%s", got)
@@ -1476,7 +1476,7 @@ func TestModelTUI_Official_DeleteActiveUserModelClearsCfg(t *testing.T) {
 	m.existingCfg.Model = "my-custom-model"
 	m.existingCfg.Providers["dashscope"] = ProviderEntry{
 		Model:  "my-custom-model",
-		Models: []string{"qwen3.7-max", "my-custom-model"},
+		Models: []string{"qwen4-max", "my-custom-model"},
 	}
 	m.modelIdx = modelTUIIdxForName(t, m, "my-custom-model")
 
@@ -1729,7 +1729,7 @@ func TestSyncSessionModelSelection_CrossOfficialProviderNoPersist(t *testing.T) 
 	}
 	m.modelIdx = 0
 	for i, name := range m.models() {
-		if name == "glm-5" {
+		if name == "glm-5.3" {
 			m.modelIdx = i
 			break
 		}
@@ -1844,7 +1844,7 @@ func TestSyncSessionModelSelection_RecordsSessionPickForInactiveOfficialProvider
 		}
 	}
 	for i, name := range m.models() {
-		if name == "glm-5" {
+		if name == "glm-5.3" {
 			m.modelIdx = i
 			break
 		}
@@ -1856,8 +1856,8 @@ func TestSyncSessionModelSelection_RecordsSessionPickForInactiveOfficialProvider
 	if m.savedInSession {
 		t.Error("savedInSession should be false for inactive provider")
 	}
-	if got := m.sessionModelPick["baidu-qianfan"]; got != "glm-5" {
-		t.Errorf("sessionModelPick = %q, want glm-5", got)
+	if got := m.sessionModelPick["baidu-qianfan"]; got != "glm-5.3" {
+		t.Errorf("sessionModelPick = %q, want glm-5.3", got)
 	}
 	if _, err := os.Stat(configPath); err == nil {
 		t.Fatal("config file should not be written for inactive provider")

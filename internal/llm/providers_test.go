@@ -45,6 +45,17 @@ func TestLookupProvider_ChatGPTDetails(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_HyTokenPlanBaseURL(t *testing.T) {
+	provider, ok := LookupProvider("hy-tokenplan")
+	if !ok {
+		t.Fatal("hy-tokenplan preset not found")
+	}
+	const want = "https://tokenhub.tencentmaas.com/plan/v3"
+	if provider.BaseURL != want {
+		t.Errorf("hy-tokenplan BaseURL = %q, want %q", provider.BaseURL, want)
+	}
+}
+
 func TestLookupProvider_MiniMaxDetails(t *testing.T) {
 	tests := []struct {
 		name, wantURL, wantEnvVar string
@@ -86,15 +97,15 @@ func TestMiniMaxSuggestedModels(t *testing.T) {
 			if !strings.HasPrefix(strings.ToLower(model), "minimax-") {
 				continue
 			}
-			if model != "MiniMax-M3.1-Flash" && model != "MiniMax-M3" && model != "minimax-m3" {
+			if model != "MiniMax-M3.1-Flash" && model != "MiniMax-M3" && model != "minimax-m3.1-flash" {
 				t.Errorf("provider %q suggests legacy MiniMax model %q", provider.Name, model)
 			}
 		}
 	}
 	for _, name := range []string{"tencent-tokenhub", "ollama-cloud"} {
 		provider, _ := LookupProvider(name)
-		if !ModelListContains(provider.Models, "minimax-m3") {
-			t.Errorf("provider %q lost its existing M3 route", name)
+		if !ModelListContains(provider.Models, "minimax-m3.1-flash") {
+			t.Errorf("provider %q is missing its M3.1 Flash route", name)
 		}
 	}
 }
@@ -148,12 +159,10 @@ func TestLookupProvider_PreservesModelOrder(t *testing.T) {
 		t.Fatal("anthropic not found")
 	}
 	expected := []string{
-		"claude-opus-5",
-		"claude-sonnet-5",
-		"claude-opus-4-8",
-		"claude-opus-4-7",
-		"claude-opus-4-6",
-		"claude-sonnet-4-6",
+		"claude-fable-5-2",
+		"claude-opus-5-5",
+		"claude-sonnet-5-5",
+		"claude-haiku-5-5",
 	}
 	if len(p.Models) != len(expected) {
 		t.Fatalf("expected %d models, got %d", len(expected), len(p.Models))
@@ -203,12 +212,8 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 	if p.AuthHeader != "" {
 		t.Errorf("AuthHeader = %q, want empty", p.AuthHeader)
 	}
-	// GPT-5.6 models are intentionally absent here: they require the Responses
-	// API and live under the "openai-responses" preset (issue #559).
 	expectedModels := []string{
 		"gpt-5.5",
-		"gpt-5.4",
-		"gpt-5.4-mini",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
@@ -266,9 +271,11 @@ func TestLookupProvider_OpenAIResponsesDetails(t *testing.T) {
 		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
 	}
 	expectedModels := []string{
-		"gpt-5.6-sol",
-		"gpt-5.6-terra",
-		"gpt-5.6-luna",
+		"gpt-6.2-astra",
+		"gpt-6.2-sol",
+		"gpt-6.1-sol",
+		"gpt-6.1-terra",
+		"gpt-6-luna",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
@@ -280,31 +287,24 @@ func TestLookupProvider_OpenAIResponsesDetails(t *testing.T) {
 	}
 }
 
-// TestGPT56ModelsUseResponsesProtocol guards the fix for issue #559: GPT-5.6
-// models require the OpenAI Responses API (/v1/responses). A built-in provider
-// pointing at api.openai.com must never offer a gpt-5.6 model over Chat
-// Completions, because ocr's tool-calling review workflow then fails with a
-// 400 ("function tools with reasoning_effort are not supported ... in
-// /v1/chat/completions").
-func TestGPT56ModelsUseResponsesProtocol(t *testing.T) {
-	const gpt56Prefix = "gpt-5.6"
-	found := false
-	for _, p := range ListProviders() {
-		if !strings.Contains(p.BaseURL, "api.openai.com") {
+func TestOpenAIToolCallingModelsUseResponses(t *testing.T) {
+	for _, provider := range ListProviders() {
+		if provider.BaseURL != "https://api.openai.com/v1" || provider.Protocol != ProtocolOpenAIChatCompletions {
 			continue
 		}
-		for _, m := range p.Models {
-			if !strings.HasPrefix(m, gpt56Prefix) {
-				continue
-			}
-			found = true
-			if p.Protocol != ProtocolOpenAIResponses {
-				t.Errorf("provider %q offers %q over %q; GPT-5.6 needs %q", p.Name, m, p.Protocol, ProtocolOpenAIResponses)
+		for _, model := range provider.Models {
+			if strings.HasPrefix(model, "gpt-6") || strings.HasPrefix(model, "gpt-5.6") {
+				t.Errorf("provider %q suggests %q over Chat Completions, but OCR tool calls require Responses", provider.Name, model)
 			}
 		}
 	}
-	if !found {
-		t.Fatalf("no built-in OpenAI provider offers a %q model; expected the openai-responses preset to serve them", gpt56Prefix)
+}
+
+func TestProviderSuggestionsStayShort(t *testing.T) {
+	for _, provider := range ListProviders() {
+		if len(provider.Models) > 6 {
+			t.Errorf("provider %q suggests %d models, want at most 6", provider.Name, len(provider.Models))
+		}
 	}
 }
 
@@ -327,22 +327,12 @@ func TestLookupProvider_OllamaCloudDetails(t *testing.T) {
 	}
 	// Suggested models are a subset of the live /v1/models catalog.
 	expectedModels := []string{
-		"deepseek-v4-flash",
-		"deepseek-v4-pro",
-		"gemma4:31b",
-		"glm-5.1",
-		"glm-5.2",
-		"gpt-oss:120b",
-		"gpt-oss:20b",
-		"kimi-k2.5",
-		"kimi-k2.6",
-		"kimi-k2.7-code",
-		"minimax-m3",
-		"mistral-large-3:675b",
-		"nemotron-3-nano:30b",
-		"nemotron-3-super",
-		"nemotron-3-ultra",
-		"qwen3.5:397b",
+		"deepseek-v4.1-flash",
+		"deepseek-v4-pro:0813",
+		"kimi-k3.1-pro",
+		"glm-5.3-flash",
+		"minimax-m3.1-flash",
+		"mistral-large-4",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
@@ -376,18 +366,11 @@ func TestLookupProvider_LiteLLMDetails(t *testing.T) {
 	}
 	// LiteLLM uses provider/model format for routing to backing providers.
 	expectedModels := []string{
-		"anthropic/claude-sonnet-4-6",
-		"anthropic/claude-opus-4-6",
-		"anthropic/claude-haiku-4-5",
-		"openai/gpt-4o",
-		"openai/gpt-5.4",
-		"openai/o3",
-		"vertex_ai/gemini-2.5-flash",
-		"vertex_ai/gemini-2.5-pro",
-		"bedrock/anthropic.claude-sonnet-4-6-v1",
-		"groq/llama-4-scout-17b-16e-instruct",
+		"anthropic/claude-sonnet-5-5",
+		"openai/gpt-5.5",
+		"vertex_ai/gemini-4-neon",
 		"mistral/mistral-large-latest",
-		"deepseek/deepseek-chat",
+		"deepseek/deepseek-flash",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
@@ -420,9 +403,10 @@ func TestLookupProvider_MistralDetails(t *testing.T) {
 		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
 	}
 	expectedModels := []string{
-		"codestral-latest",
 		"mistral-large-latest",
 		"mistral-small-latest",
+		"ministral-14b-latest",
+		"zai-glm-5-3",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
@@ -455,9 +439,7 @@ func TestLookupProvider_XAIDetails(t *testing.T) {
 		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
 	}
 	expectedModels := []string{
-		"grok-4.6",
-		"grok-4.5",
-		"grok-4.3",
+		"grok-4.7",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))

@@ -66,12 +66,12 @@ func TestCLIReferenceUsesSubtaskUnit(t *testing.T) {
 		{locale: "ko", term: "서브태스크"},    // allow-non-english: locale subtask term from issue 1273
 		{locale: "ru", term: "подзадач"}, // allow-non-english: locale subtask stem from issue 1273
 	}
-	flagMarkers := []string{
-		"| `--no-filter` |",
-		"| `--concurrency <n>` |",
-		"| `--timeout <minutes>` |",
-		"| `--max-tools <n>` |",
-		"| `--max-tokens <n>` |",
+	flags := []string{
+		"`--no-filter`",
+		"`--concurrency <n>`",
+		"`--timeout <minutes>`",
+		"`--max-tools <n>`",
+		"`--max-tokens <n>`",
 	}
 	leakedConcurrencyUnits := []string{
 		"file group", "file groups", "files reviewed", "file scans",
@@ -89,16 +89,16 @@ func TestCLIReferenceUsesSubtaskUnit(t *testing.T) {
 				t.Fatalf("read %s: %v", path, err)
 			}
 			body := string(raw)
-			for _, marker := range flagMarkers {
-				row, ok := firstLineContaining(body, marker)
+			for _, flag := range flags {
+				row, ok := findFlagRow(body, flag)
 				if !ok {
-					t.Errorf("%s: missing flag row %q", path, marker)
+					t.Errorf("%s: missing flag row %q", path, flag)
 					continue
 				}
 				if !strings.Contains(row, pin.term) {
 					t.Errorf("%s: row %q does not use %q", path, row, pin.term)
 				}
-				if marker == "| `--concurrency <n>` |" {
+				if flag == "`--concurrency <n>`" {
 					for _, leaked := range leakedConcurrencyUnits {
 						if strings.Contains(row, leaked) {
 							t.Errorf("%s: --concurrency still describes a file/file-group count (%q): %s", path, leaked, row)
@@ -110,9 +110,14 @@ func TestCLIReferenceUsesSubtaskUnit(t *testing.T) {
 	}
 }
 
-func firstLineContaining(body, marker string) (string, bool) {
+func findFlagRow(body, flag string) (string, bool) {
 	for line := range strings.SplitSeq(body, "\n") {
-		if strings.Contains(line, marker) {
+		row, ok := strings.CutPrefix(strings.TrimSpace(line), "|")
+		if !ok {
+			continue
+		}
+		cell, _, ok := strings.Cut(row, "|")
+		if ok && strings.TrimSpace(cell) == flag {
 			return line, true
 		}
 	}

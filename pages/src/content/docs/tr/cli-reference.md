@@ -49,9 +49,9 @@ GitHub: https://github.com/alibaba/open-code-review
 
 Her komutta kullanılabilir; alt komuttan önce veya sonra verilebilir. `ocr --color=never review` ile `ocr review --color=never` eşdeğerdir.
 
-| Seçenek | Varsayılan | İşlevi |
-| --- | --- | --- |
-| `--color <auto\|always\|never>` | `auto` | ANSI renklerinin ne zaman kullanılacağını belirler. `auto`, yalnızca stdout terminalse renklendirir; boru veya dosya yönlendirmesinde düz metin üretir. `always`, boruda da rengi korur (`\| less -R` için yararlıdır). |
+| Seçenek                         | Varsayılan | İşlevi                                                                                                                                                                                                                  |
+| ------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--color <auto\|always\|never>` | `auto`     | ANSI renklerinin ne zaman kullanılacağını belirler. `auto`, yalnızca stdout terminalse renklendirir; boru veya dosya yönlendirmesinde düz metin üretir. `always`, boruda da rengi korur (`\| less -R` için yararlıdır). |
 
 Stdout terminal olmadığında metin çıktısı düz olduğundan güvenle başka komuta aktarılabilir:
 
@@ -63,25 +63,25 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 ## Komut özeti {#command-summary}
 
-| Komut | Takma ad | İşlevi |
-| --- | --- | --- |
-| `ocr review` | `ocr r` | Kod incelemesi yapar ve yorumları üretir. |
-| `ocr scan` | `ocr s` | Git farkı gerektirmeden dosyaların tamamını tarar. |
-| `ocr rules check <file>` | — | Yola uygulanan kuralı ve kaynağını gösterir. |
-| `ocr config set <key> <value>` | — | Ayarı `~/.opencodereview/config.json` dosyasına kaydeder. |
-| `ocr config unset custom_providers.<name>` | — | Özel sağlayıcıyı siler; etkinse `provider`/`model` değerlerini temizler. |
-| `ocr config provider` | — | Etkileşimli sağlayıcı kurulumunu açar. |
-| `ocr config model` | — | Etkileşimli model seçimini açar. |
-| `ocr llm test` | — | Uç noktayı doğrulamak için küçük bir sohbet isteği gönderir. |
-| `ocr llm providers` | — | Tüm yerleşik LLM sağlayıcılarını listeler. |
-| `ocr session list` | `ocr sessions list`, `ocr session ls` | Kaydedilmiş inceleme oturumlarını listeler. |
-| `ocr session show <id>` | `ocr sessions show <id>` | Oturumu ve dosya başına kontrol noktalarını gösterir. |
-| `ocr session comments <id>` | `ocr sessions comments <id>` | Oturumdaki yorumları yazdırır. |
-| `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Bulguları yeni, süren, giderilen ve incelenmeyen olarak karşılaştırır. |
-| `ocr session export [id]` | — | Oturumu bağımsız HTML dosyasına aktarır. |
-| `ocr session rm <id>` | `ocr session delete <id>`, `ocr session remove <id>` | Kayıtlı oturumu siler. |
-| `ocr viewer` | — | Geçmiş oturumlar için yerel web arayüzünü açar (`localhost:5483`). |
-| `ocr version` | — | Sürüm, commit, platform, derleme tarihi ve GitHub adresini yazdırır. |
+| Komut                                      | Takma ad                                             | İşlevi                                                                   |
+| ------------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| `ocr review`                               | `ocr r`                                              | Kod incelemesi yapar ve yorumları üretir.                                |
+| `ocr scan`                                 | `ocr s`                                              | Git farkı gerektirmeden dosyaların tamamını tarar.                       |
+| `ocr rules check <file>`                   | —                                                    | Yola uygulanan kuralı ve kaynağını gösterir.                             |
+| `ocr config set <key> <value>`             | —                                                    | Ayarı `~/.opencodereview/config.json` dosyasına kaydeder.                |
+| `ocr config unset custom_providers.<name>` | —                                                    | Özel sağlayıcıyı siler; etkinse `provider`/`model` değerlerini temizler. |
+| `ocr config provider`                      | —                                                    | Etkileşimli sağlayıcı kurulumunu açar.                                   |
+| `ocr config model`                         | —                                                    | Etkileşimli model seçimini açar.                                         |
+| `ocr llm test`                             | —                                                    | Uç noktayı doğrulamak için küçük bir sohbet isteği gönderir.             |
+| `ocr llm providers`                        | —                                                    | Tüm yerleşik LLM sağlayıcılarını listeler.                               |
+| `ocr session list`                         | `ocr sessions list`, `ocr session ls`                | Kaydedilmiş inceleme oturumlarını listeler.                              |
+| `ocr session show <id>`                    | `ocr sessions show <id>`                             | Oturumu ve dosya başına kontrol noktalarını gösterir.                    |
+| `ocr session comments <id>`                | `ocr sessions comments <id>`                         | Oturumdaki yorumları yazdırır.                                           |
+| `ocr session compare <before> <after>`     | `ocr session diff <before> <after>`                  | Bulguları yeni, süren, giderilen ve incelenmeyen olarak karşılaştırır.   |
+| `ocr session export [id]`                  | —                                                    | Oturumu bağımsız HTML dosyasına aktarır.                                 |
+| `ocr session rm <id>`                      | `ocr session delete <id>`, `ocr session remove <id>` | Kayıtlı oturumu siler.                                                   |
+| `ocr viewer`                               | —                                                    | Geçmiş oturumlar için yerel web arayüzünü açar (`localhost:5483`).       |
+| `ocr version`                              | —                                                    | Sürüm, commit, platform, derleme tarihi ve GitHub adresini yazdırır.     |
 
 `ocr` ve `ocr -h` genel kullanımı gösterir. Her alt komut `-h` / `--help` kabul eder.
 
@@ -102,33 +102,33 @@ Seçenek verilmezse **çalışma alanı kipinde** çalışır; geçerli dizinin 
 
 ### Seçenekler {#flags}
 
-| Seçenek | Kısa | Varsayılan | Açıklama |
-| --- | --- | --- | --- |
-| `--repo <path>` | — | Geçerli dizin | Git depo kökü. |
-| `--from <ref>` | — | — | Farkın başlayacağı kaynak ref; ör. `main`. |
-| `--to <ref>` | — | — | Farkın biteceği hedef ref; ör. `feature-branch`. `merge-base(from, to)..to` hesaplanır. `--from` verilip `--to` verilmezse `HEAD` kullanılır; yalnızca commit edilmiş değişiklikler, `git diff <from>...HEAD` gibi. |
-| `--commit <sha>` | `-c` | — | Ebeveynine göre incelenecek tek commit. |
-| `--preview` | `-p` | `false` | LLM'i çağırmadan filtreyi çalıştırır; dosyaları ve dışlama nedenlerini gösterir. `--format json` desteklenir, tamamlanmış bulgu bulunmadığından `sarif` desteklenmez. |
-| `--no-filter` | — | `false` | Tüm yorumları korur, alt görev başına `REVIEW_FILTER_TASK` son işleme çağrısını atlar. Alt görev tek dosya veya ilişkili dosya grubudur. |
-| `--resume <session-id>` | — | — | Uyumlu önceki aralık, commit veya çalışma alanı incelemesine devam eder. |
-| `--format <fmt>` | `-f` | `text` | `text` (okunabilir metin), `json` (yapılandırılmış yorumlar) veya `sarif` (GitHub Code Scanning için SARIF 2.1.0). |
-| `--output <path>` | `-o` | stdout | Sonuçları UTF-8 dosyaya yazar; `-`, stdout anlamına gelir. İlk yazmada oluşturulur; başarısız çalıştırma mevcut dosyaya dokunmaz. Metin biçiminde ANSI renkleri kaldırılır. |
-| `--audience <who>` | — | `human` | `human`, ilerleme satırlarını gösterir; json/sarif biçiminde stdout ayrıştırılabilir kalsın diye stderr'e yazar. `agent`, ilerlemeyi tamamen gizler; yalnızca son özet/JSON'u yazdırır. |
-| `--background <text>` | `-b` | — | Planlama ve ana isteme eklenen gereksinim/iş bağlamı. |
-| `--background-file <path>` | `-B` | — | Bağlam olarak kullanılacak Markdown dosyası. İkisi de verilirse `--background` değerinden önceliklidir. |
-| `--exclude <patterns>` | — | — | Virgülle ayrılmış gitignore biçiminde dışlama kalıpları; `rule.json` dışlamalarıyla birleştirilir. |
-| `--concurrency <n>` | — | `8` | Aynı anda incelenen en fazla alt görev sayısı. |
-| `--timeout <minutes>` | — | `15` | LLM, araçlar ve yeniden deneme beklemeleri dahil alt görev bütçesi. `0`, görev sınırını kaldırır; istek sınırını kaldırmaz. İstek sınırı bağımsızdır: saniye cinsinden `OCR_LLM_TIMEOUT` veya sağlayıcı `timeout_sec` (varsayılan `300`). Çaba turlarıyla doğrusal ölçeklenir; low/medium/high için 15/30/45 dakika. |
-| `--effort <level>` | — | `medium` | `low`: 1, `medium`: 2, `high`: 3 tur. Fazla tur daha fazla bulgu ve orantılı maliyet sağlar. Bu çalıştırmada kayıtlı `effort` değerini geçersiz kılar. |
-| `--rule <path>` | — | — | Proje ve genel `rule.json` yerine kullanılacak özel JSON kural dosyası. |
-| `--max-tools <n>` | — | Şablon varsayılanı | Alt görev başına araç çağrısı turu sınırı. `0`, şablon varsayılanını (`100`) kullanır; 1–49 değerleri `50` yapılır. Çözümlenen pozitif değer kesin sınırdır. |
-| `--max-tokens <n>` | — | Yapılandırma veya şablon | Hem inceleme hem analiz için alt görev başına istem/girdi token sınırı; şablon varsayılanı `200000`. Kayıtlı `max_tokens` değerinden önceliklidir. Çıktı sınırını değiştirmez; bkz. `MAX_COMPLETION_TOKENS`. |
-| `--analysis` | — | Kapalı | Commit veya aralık incelemesiyle (`--commit` veya `--from`) birlikte ayrı bir davranış ve etki analizi çalıştırır. Yalnızca metin ve JSON çıktısını destekler. Çalışma alanında, önizlemede veya yarıda kalan incelemeye devam ederken kullanılmaz. Analiz, `--max-tools` değerinden bağımsız olarak 300 araştırma turu kullanabilir; bütçe tükenirse yalnızca sonucu göndermek için en fazla bir ek tur yapılır. Analizin başarısız olması veya atlanması incelemenin çıkış kodunu değiştirmez. |
-| `--analysis-max-tokens-budget <n>` | — | `0` (sınırsız) | Yalnızca analizin toplam girdi ve çıktı token sayısına esnek bir sınır koyar. İncelemeyle eşzamanlı olarak bir ek model isteği çalışabilir. JSON çıktısında `analysis_meta.usage` ve `analysis_meta.execution_status` alanlarına bakın. |
-| `--max-tokens-budget <n>` | — | `0` (sınırsız) | Toplam girdi+çıktı token sınırı. Her LLM turundan önce denetlenir. Bütçeyi aşan alt göreve bulguları göndermesi için son tur verilir ve `failed(budget)` bildirilir. Yeni görev dağıtılmaz; mevcut sonuçlar yazdırılır. |
-| `--provider <name>` | — | — | Bu çalıştırmada kullanılacak yapılandırılmış sağlayıcı; `providers` ve `custom_providers` adları kabul edilir. |
-| `--model <name>` | — | — | Çözümlenen modeli bu çalıştırma için değiştirir; ör. `claude-opus-4-6`. |
-| `--max-git-procs <n>` | — | `16` | İnceleme ve analiz genelinde eşzamanlı çalışabilecek toplam Git alt süreci sayısı. |
+| Seçenek                            | Kısa | Varsayılan               | Açıklama                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------- | ---- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--repo <path>`                    | —    | Geçerli dizin            | Git depo kökü.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--from <ref>`                     | —    | —                        | Farkın başlayacağı kaynak ref; ör. `main`.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `--to <ref>`                       | —    | —                        | Farkın biteceği hedef ref; ör. `feature-branch`. `merge-base(from, to)..to` hesaplanır. `--from` verilip `--to` verilmezse `HEAD` kullanılır; yalnızca commit edilmiş değişiklikler, `git diff <from>...HEAD` gibi.                                                                                                                                                                                                                                                                              |
+| `--commit <sha>`                   | `-c` | —                        | Ebeveynine göre incelenecek tek commit.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `--preview`                        | `-p` | `false`                  | LLM'i çağırmadan filtreyi çalıştırır; dosyaları ve dışlama nedenlerini gösterir. `--format json` desteklenir, tamamlanmış bulgu bulunmadığından `sarif` desteklenmez.                                                                                                                                                                                                                                                                                                                            |
+| `--no-filter`                      | —    | `false`                  | Tüm yorumları korur, alt görev başına `REVIEW_FILTER_TASK` son işleme çağrısını atlar. Alt görev tek dosya veya ilişkili dosya grubudur.                                                                                                                                                                                                                                                                                                                                                         |
+| `--resume <session-id>`            | —    | —                        | Uyumlu önceki aralık, commit veya çalışma alanı incelemesine devam eder.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `--format <fmt>`                   | `-f` | `text`                   | `text` (okunabilir metin), `json` (yapılandırılmış yorumlar) veya `sarif` (GitHub Code Scanning için SARIF 2.1.0).                                                                                                                                                                                                                                                                                                                                                                               |
+| `--output <path>`                  | `-o` | stdout                   | Sonuçları UTF-8 dosyaya yazar; `-`, stdout anlamına gelir. İlk yazmada oluşturulur; başarısız çalıştırma mevcut dosyaya dokunmaz. Metin biçiminde ANSI renkleri kaldırılır.                                                                                                                                                                                                                                                                                                                      |
+| `--audience <who>`                 | —    | `human`                  | `human`, ilerleme satırlarını gösterir; json/sarif biçiminde stdout ayrıştırılabilir kalsın diye stderr'e yazar. `agent`, ilerlemeyi tamamen gizler; yalnızca son özet/JSON'u yazdırır.                                                                                                                                                                                                                                                                                                          |
+| `--background <text>`              | `-b` | —                        | Planlama ve ana isteme eklenen gereksinim/iş bağlamı.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `--background-file <path>`         | `-B` | —                        | Bağlam olarak kullanılacak Markdown dosyası. İkisi de verilirse `--background` değerinden önceliklidir.                                                                                                                                                                                                                                                                                                                                                                                          |
+| `--exclude <patterns>`             | —    | —                        | Virgülle ayrılmış gitignore biçiminde dışlama kalıpları; `rule.json` dışlamalarıyla birleştirilir.                                                                                                                                                                                                                                                                                                                                                                                               |
+| `--concurrency <n>`                | —    | `8`                      | Aynı anda incelenen en fazla alt görev sayısı.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--timeout <minutes>`              | —    | `15`                     | LLM, araçlar ve yeniden deneme beklemeleri dahil alt görev bütçesi. `0`, görev sınırını kaldırır; istek sınırını kaldırmaz. İstek sınırı bağımsızdır: saniye cinsinden `OCR_LLM_TIMEOUT` veya sağlayıcı `timeout_sec` (varsayılan `300`). Çaba turlarıyla doğrusal ölçeklenir; low/medium/high için 15/30/45 dakika.                                                                                                                                                                             |
+| `--effort <level>`                 | —    | `medium`                 | `low`: 1, `medium`: 2, `high`: 3 tur. Fazla tur daha fazla bulgu ve orantılı maliyet sağlar. Bu çalıştırmada kayıtlı `effort` değerini geçersiz kılar.                                                                                                                                                                                                                                                                                                                                           |
+| `--rule <path>`                    | —    | —                        | Proje ve genel `rule.json` yerine kullanılacak özel JSON kural dosyası.                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `--max-tools <n>`                  | —    | Şablon varsayılanı       | Alt görev başına araç çağrısı turu sınırı. `0`, şablon varsayılanını (`100`) kullanır; 1–49 değerleri `50` yapılır. Çözümlenen pozitif değer kesin sınırdır.                                                                                                                                                                                                                                                                                                                                     |
+| `--max-tokens <n>`                 | —    | Yapılandırma veya şablon | Hem inceleme hem analiz için alt görev başına istem/girdi token sınırı; şablon varsayılanı `200000`. Kayıtlı `max_tokens` değerinden önceliklidir. Çıktı sınırını değiştirmez; bkz. `MAX_COMPLETION_TOKENS`.                                                                                                                                                                                                                                                                                     |
+| `--analysis`                       | —    | Kapalı                   | Commit veya aralık incelemesiyle (`--commit` veya `--from`) birlikte ayrı bir davranış ve etki analizi çalıştırır. Yalnızca metin ve JSON çıktısını destekler. Çalışma alanında, önizlemede veya yarıda kalan incelemeye devam ederken kullanılmaz. Analiz, `--max-tools` değerinden bağımsız olarak 300 araştırma turu kullanabilir; bütçe tükenirse yalnızca sonucu göndermek için en fazla bir ek tur yapılır. Analizin başarısız olması veya atlanması incelemenin çıkış kodunu değiştirmez. |
+| `--analysis-max-tokens-budget <n>` | —    | `0` (sınırsız)           | Yalnızca analizin toplam girdi ve çıktı token sayısına esnek bir sınır koyar. İncelemeyle eşzamanlı olarak bir ek model isteği çalışabilir. JSON çıktısında `analysis_meta.usage` ve `analysis_meta.execution_status` alanlarına bakın.                                                                                                                                                                                                                                                          |
+| `--max-tokens-budget <n>`          | —    | `0` (sınırsız)           | Toplam girdi+çıktı token sınırı. Her LLM turundan önce denetlenir. Bütçeyi aşan alt göreve bulguları göndermesi için son tur verilir ve `failed(budget)` bildirilir. Yeni görev dağıtılmaz; mevcut sonuçlar yazdırılır.                                                                                                                                                                                                                                                                          |
+| `--provider <name>`                | —    | —                        | Bu çalıştırmada kullanılacak yapılandırılmış sağlayıcı; `providers` ve `custom_providers` adları kabul edilir.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--model <name>`                   | —    | —                        | Çözümlenen modeli bu çalıştırma için değiştirir; ör. `claude-opus-5-5`.                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `--max-git-procs <n>`              | —    | `16`                     | İnceleme ve analiz genelinde eşzamanlı çalışabilecek toplam Git alt süreci sayısı.                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 > Kip seçenekleri birlikte kullanılamaz. Ya `--from`/`--to`, ya `--commit` verin ya da hiçbirini vermeyin (çalışma alanı). Karıştırmak hatadır. `--resume` üç kipte de çalışır ancak `--preview` ile birleşemez.
 
@@ -137,8 +137,8 @@ Seçenek verilmezse **çalışma alanı kipinde** çalışır; geçerli dizinin 
 `review` ve `scan`, `--provider` ve `--model` kabul eder. Yalnızca mevcut çağrıyı etkiler; kayıtlı yapılandırmayı değiştirmez:
 
 ```bash
-ocr review --provider anthropic --model claude-opus-4-6 --format json
-ocr scan --provider openai --model gpt-5.4 --format json
+ocr review --provider anthropic --model claude-opus-5-5 --format json
+ocr scan --provider openai-responses --model gpt-6.2-sol --format json
 ```
 
 Açık `--provider`, normal kaynak çözümlemesinden önce `providers` veya `custom_providers` girdisini seçer. Verilmezse eski kaynak sırası korunur: kayıtlı yapılandırma, eksiksiz `OCR_LLM_*` ortamı, eksiksiz Claude Code ortamı, ardından kabuk rc dosyaları. `--model`, kazanan kaynağın modelini değiştirir; sırayı değiştirmez. Eksik stratejiler birbiriyle karıştırılmadan atlanır. Seçili yerleşik sağlayıcının kimlik bilgileri desteklediği ortam değişkeninden yine alınabilir.
@@ -254,7 +254,7 @@ ocr review --format json | jq .summary   # stdout is a single JSON document
   "status": "success",
   "llm": {
     "provider": "anthropic",
-    "model": "claude-opus-4-6"
+    "model": "claude-opus-5-5"
   },
   "summary": {
     "files_reviewed": 9,
@@ -280,16 +280,16 @@ ocr review --format json | jq .summary   # stdout is a single JSON document
 
 Üst düzey alanlar:
 
-| Alan | Açıklama |
-| --- | --- |
-| `status` | `manifest` varsa son durum: `complete`, `partial`, `failed` veya `skipped`. Yoksa `success`, `completed_with_warnings` veya `completed_with_errors`. Desteklenen dosya bulunmaması da `skipped` olur. |
-| `llm` | Çözümlenen LLM kimliği. Normalleştirilmiş `model` daima bulunur; `provider` yalnızca adlandırılmış yapılandırılmış sağlayıcıda bulunur. |
-| `message` | İsteğe bağlı, okunabilir özet; ör. `"No comments generated. Looks good to me."`. |
-| `summary` | İsteğe bağlı toplamlar: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (boşsa atlanır), `cache_write_tokens` (boşsa atlanır), `elapsed`. `skipped` çalıştırmalarda yoktur. |
-| `comments` | Her zaman vardır; boş olabilir. Yorum alanları yukarıdaki örnektedir. |
-| `warnings` | Alt ajan hatalarında bulunur; etkilenen dosya ve hatayı açıklar. |
-| `session_id` | Kalıcı kaydedilen incelemelerde bulunur; uyumlu incelemeye devam etmek için `ocr review --resume <session-id>` komutuna verin. |
-| `resume` | Devam edilen çalıştırmalarda `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, `current_model` içerir. |
+| Alan         | Açıklama                                                                                                                                                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `status`     | `manifest` varsa son durum: `complete`, `partial`, `failed` veya `skipped`. Yoksa `success`, `completed_with_warnings` veya `completed_with_errors`. Desteklenen dosya bulunmaması da `skipped` olur.                          |
+| `llm`        | Çözümlenen LLM kimliği. Normalleştirilmiş `model` daima bulunur; `provider` yalnızca adlandırılmış yapılandırılmış sağlayıcıda bulunur.                                                                                        |
+| `message`    | İsteğe bağlı, okunabilir özet; ör. `"No comments generated. Looks good to me."`.                                                                                                                                               |
+| `summary`    | İsteğe bağlı toplamlar: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (boşsa atlanır), `cache_write_tokens` (boşsa atlanır), `elapsed`. `skipped` çalıştırmalarda yoktur. |
+| `comments`   | Her zaman vardır; boş olabilir. Yorum alanları yukarıdaki örnektedir.                                                                                                                                                          |
+| `warnings`   | Alt ajan hatalarında bulunur; etkilenen dosya ve hatayı açıklar.                                                                                                                                                               |
+| `session_id` | Kalıcı kaydedilen incelemelerde bulunur; uyumlu incelemeye devam etmek için `ocr review --resume <session-id>` komutuna verin.                                                                                                 |
+| `resume`     | Devam edilen çalıştırmalarda `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, `current_model` içerir.                                                                                                          |
 
 İncelemeye uygun dosya yoksa “değişiklik yok” ile “bulgu yok” ayrılabilsin diye `skipped` nesnesi döner:
 
@@ -299,7 +299,7 @@ ocr review --format json | jq .summary   # stdout is a single JSON document
   "message": "No supported files changed.",
   "llm": {
     "provider": "anthropic",
-    "model": "claude-opus-4-6"
+    "model": "claude-opus-5-5"
   },
   "comments": []
 }
@@ -307,10 +307,10 @@ ocr review --format json | jq .summary   # stdout is a single JSON document
 
 ### Çıkış kodları {#exit-codes}
 
-| Kod | Anlamı |
-| --- | --- |
+| Kod | Anlamı                                                                                                                                                                          |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0` | İnceleme tamamlandı veya atlandı; sıfır yorum ya da işlemi durdurmayan uyarılar olabilir. Yalnızca yapılandırılmış bütçe sınırından kaynaklanan kısmi inceleme de `0` döndürür. |
-| `1` | Kritik hata veya zaman aşımı, sağlayıcı hatası, yanlış yapılandırma gibi grup başına işletim hatası. CLI hatayı döndürmeden önce mevcut sonuçları yazdırır. |
+| `1` | Kritik hata veya zaman aşımı, sağlayıcı hatası, yanlış yapılandırma gibi grup başına işletim hatası. CLI hatayı döndürmeden önce mevcut sonuçları yazdırır.                     |
 
 Uyarılar metin içinde gösterilir; JSON'da `warnings` dizisine eklenir. Etkilenen dosyalar ve hata sınıfları için `manifest.coverage.failed` alanını inceleyin.
 
@@ -327,12 +327,12 @@ ocr s      [flags]   (alias)
 
 ### Seçenekler {#flags-2}
 
-| Seçenek | Kısa | Varsayılan | Açıklama |
-| --- | --- | --- | --- |
-| `--path <list>` | - | Tüm depo | Depoya göre virgülle ayrılmış dosya/dizinler; ör. `internal/agent`, `internal/llm/client.go`. Çalışma ağacına göre çözümlenir. Tam yazılan yol, yalnızca harf büyüklüğü farklı kardeşinden önceliklidir. Dosya sisteminin farklı harf büyüklüğüyle çözümlediği yol (Windows, varsayılan macOS) yine izlenen dosyaları seçer. Mevcut yola karşılık gelmeyen seçim boş tarama değil hata üretir. |
-| `--exclude <patterns>` | - | - | Virgülle ayrılmış gitignore biçiminde dışlamalar; ör. `**/generated/*,*.pb.go`. `rule.json` dışlamalarıyla birleşir. |
-| `--output <path>` | `-o` | stdout | UTF-8 dosyaya yazar; `-`, stdout demektir. İlk yazmada oluşturulur, başarısız çalıştırma mevcut dosyaya dokunmaz. Metin çıktısından ANSI renkleri kaldırılır. |
-| `--preview` | `-p` | `false` | LLM çağırmadan dosyaları listeler ve filtreler; incelenebilir/dışlanan sayıları, toplam satırları ve dosya başına nedenleri gösterir. JSON desteklenir; SARIF desteklenmez. |
+| Seçenek                | Kısa | Varsayılan | Açıklama                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------- | ---- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--path <list>`        | -    | Tüm depo   | Depoya göre virgülle ayrılmış dosya/dizinler; ör. `internal/agent`, `internal/llm/client.go`. Çalışma ağacına göre çözümlenir. Tam yazılan yol, yalnızca harf büyüklüğü farklı kardeşinden önceliklidir. Dosya sisteminin farklı harf büyüklüğüyle çözümlediği yol (Windows, varsayılan macOS) yine izlenen dosyaları seçer. Mevcut yola karşılık gelmeyen seçim boş tarama değil hata üretir. |
+| `--exclude <patterns>` | -    | -          | Virgülle ayrılmış gitignore biçiminde dışlamalar; ör. `**/generated/*,*.pb.go`. `rule.json` dışlamalarıyla birleşir.                                                                                                                                                                                                                                                                           |
+| `--output <path>`      | `-o` | stdout     | UTF-8 dosyaya yazar; `-`, stdout demektir. İlk yazmada oluşturulur, başarısız çalıştırma mevcut dosyaya dokunmaz. Metin çıktısından ANSI renkleri kaldırılır.                                                                                                                                                                                                                                  |
+| `--preview`            | `-p` | `false`    | LLM çağırmadan dosyaları listeler ve filtreler; incelenebilir/dışlanan sayıları, toplam satırları ve dosya başına nedenleri gösterir. JSON desteklenir; SARIF desteklenmez.                                                                                                                                                                                                                    |
 
 ```bash
 ocr scan --preview                              # see what would be scanned
@@ -367,12 +367,12 @@ ocr session list --branch feat/my-feature --limit 5
 ocr sessions ls --repo /path/to/repo --branch main --json
 ```
 
-| Seçenek | Varsayılan | Açıklama |
-| --- | --- | --- |
-| `--repo <path>` | Geçerli dizin | Oturumları listelenecek depo. |
-| `--json` | `false` | Özetleri JSON olarak üretir. |
-| `--limit <n>` | `20` | Listelenen oturum sınırı; `0` sınırsız. |
-| `--branch <name>` | Boş | Kayıtlı dal adı, harf büyüklüğü dahil tam eşleşen oturumlar. |
+| Seçenek           | Varsayılan    | Açıklama                                                     |
+| ----------------- | ------------- | ------------------------------------------------------------ |
+| `--repo <path>`   | Geçerli dizin | Oturumları listelenecek depo.                                |
+| `--json`          | `false`       | Özetleri JSON olarak üretir.                                 |
+| `--limit <n>`     | `20`          | Listelenen oturum sınırı; `0` sınırsız.                      |
+| `--branch <name>` | Boş           | Kayıtlı dal adı, harf büyüklüğü dahil tam eşleşen oturumlar. |
 
 Dal filtresi `--limit` öncesinde uygulanır ve yeniden eskiye sıralamayı korur. Verilmezse veya boşsa filtrelenmemiş davranış sürer. Filtre varken kayıtlı dalı olmayan oturumlar dışlanır; eşleşme yoksa metinde dala özgü mesaj, JSON'da `[]` üretilir.
 
@@ -393,10 +393,10 @@ ocr session show --repo . <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
-| Seçenek | Varsayılan | Açıklama |
-| --- | --- | --- |
-| `--repo <path>` | Tüm depolar | Aramayı mevcut depo diziniyle sınırlar. |
-| `--json` | `false` | Üst verileri ve dosya girdilerini JSON üretir. |
+| Seçenek         | Varsayılan  | Açıklama                                       |
+| --------------- | ----------- | ---------------------------------------------- |
+| `--repo <path>` | Tüm depolar | Aramayı mevcut depo diziniyle sınırlar.        |
+| `--json`        | `false`     | Üst verileri ve dosya girdilerini JSON üretir. |
 
 ### `ocr session comments` {#ocr-session-comments}
 
@@ -409,12 +409,12 @@ ocr session comments --severity high <session-id>
 ocr session comments --severity critical,high --category bug,security <session-id>
 ```
 
-| Seçenek | Varsayılan | Açıklama |
-| --- | --- | --- |
-| `--repo <path>` | Geçerli dizin | İncelenecek oturumun deposu. |
-| `--json` | `false` | Yorumları JSON dizisi olarak üretir. |
-| `--severity <list>` | Tümü | Virgülle ayrılmış önemler: `critical`, `high`, `medium`, `low`. |
-| `--category <list>` | Tümü | Virgülle ayrılmış kategoriler; ör. `bug`, `security`. |
+| Seçenek             | Varsayılan    | Açıklama                                                        |
+| ------------------- | ------------- | --------------------------------------------------------------- |
+| `--repo <path>`     | Geçerli dizin | İncelenecek oturumun deposu.                                    |
+| `--json`            | `false`       | Yorumları JSON dizisi olarak üretir.                            |
+| `--severity <list>` | Tümü          | Virgülle ayrılmış önemler: `critical`, `high`, `medium`, `low`. |
+| `--category <list>` | Tümü          | Virgülle ayrılmış kategoriler; ör. `bug`, `security`.           |
 
 ### `ocr session compare` {#ocr-session-compare}
 
@@ -430,10 +430,10 @@ ocr session compare --json <before-session-id> <after-session-id>
 
 İki oturum aynı depoya ait olmalıdır; aksi halde komut hata verir. Farklı inceleme kipleri yalnızca stderr'e uyarı yazar; JSON başka komuta aktarılabilir kalır.
 
-| Seçenek | Varsayılan | Açıklama |
-| --- | --- | --- |
-| `--repo <path>` | Geçerli dizin | Karşılaştırılacak oturumların deposu. |
-| `--json` | `false` | `new`, `persisting`, `resolved`, `not_reviewed` alanlarıyla JSON üretir. |
+| Seçenek         | Varsayılan    | Açıklama                                                                 |
+| --------------- | ------------- | ------------------------------------------------------------------------ |
+| `--repo <path>` | Geçerli dizin | Karşılaştırılacak oturumların deposu.                                    |
+| `--json`        | `false`       | `new`, `persisting`, `resolved`, `not_reviewed` alanlarıyla JSON üretir. |
 
 ### `ocr session export` {#ocr-session-export}
 
@@ -448,10 +448,10 @@ Kimlik verilmezse deponun en yeni oturumu dışa aktarılır. Başarılı `ocr r
 
 Sayfa, oturumun kaydettiği kaynak parçalarını içerir. Yayımlamadan önce dosyayı deponun kendisiyle aynı gizlilik düzeyinde değerlendirin.
 
-| Seçenek | Varsayılan | Açıklama |
-| --- | --- | --- |
-| `--repo <path>` | Geçerli dizin | Oturumu dışa aktarılacak depo. |
-| `--output <path>`, `-o` | stdout | HTML'i dosyaya yazar. |
+| Seçenek                 | Varsayılan    | Açıklama                       |
+| ----------------------- | ------------- | ------------------------------ |
+| `--repo <path>`         | Geçerli dizin | Oturumu dışa aktarılacak depo. |
+| `--output <path>`, `-o` | stdout        | HTML'i dosyaya yazar.          |
 
 ### `ocr session rm` {#ocr-session-rm}
 
@@ -469,10 +469,10 @@ Depo, dal, başlangıç zamanı, dosya ve yorum sayıları gösterilip onay iste
 
 Üst verileri ayrıştırılamayan oturum silinebilir; hiç okunamayan oturum ise bildirilir. `--repo` kullanıldığında farklı depo kaydeden veya depo kaydı olmayan oturum reddedilir; onu yalnızca kimlikle silin.
 
-| Seçenek | Varsayılan | Açıklama |
-| --- | --- | --- |
+| Seçenek         | Varsayılan  | Açıklama                 |
+| --------------- | ----------- | ------------------------ |
 | `--repo <path>` | Tüm depolar | Yalnızca bu depoda arar. |
-| `--yes`, `-y` | `false` | Onay istemini atlar. |
+| `--yes`, `-y`   | `false`     | Onay istemini atlar.     |
 
 ## `ocr rules` {#ocr-rules}
 
