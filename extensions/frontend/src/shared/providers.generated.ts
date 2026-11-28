@@ -130,7 +130,7 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     "name": "hy-tokenplan",
     "displayName": "Tencent Hunyuan Token Plan API",
     "protocol": "openai",
-    "baseUrl": "https://api.lkeap.cloud.tencent.com/plan/v3",
+    "baseUrl": "https://tokenhub.tencentmaas.com/plan/v3",
     "envVar": "TENCENT_HUNYUAN_TOKENPLAN_KEY",
     "models": [
       "hy4",

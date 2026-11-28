@@ -232,7 +232,7 @@ var registry = []Provider{
 		Name:        "hy-tokenplan",
 		DisplayName: "Tencent Hunyuan Token Plan API",
 		Protocol:    ProtocolOpenAIChatCompletions,
-		BaseURL:     "https://api.lkeap.cloud.tencent.com/plan/v3",
+		BaseURL:     "https://tokenhub.tencentmaas.com/plan/v3",
 		EnvVar:      "TENCENT_HUNYUAN_TOKENPLAN_KEY",
 		Models: []string{
 			"hy4",

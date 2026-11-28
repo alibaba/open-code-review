@@ -45,6 +45,17 @@ func TestLookupProvider_ChatGPTDetails(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_HyTokenPlanBaseURL(t *testing.T) {
+	provider, ok := LookupProvider("hy-tokenplan")
+	if !ok {
+		t.Fatal("hy-tokenplan preset not found")
+	}
+	const want = "https://tokenhub.tencentmaas.com/plan/v3"
+	if provider.BaseURL != want {
+		t.Errorf("hy-tokenplan BaseURL = %q, want %q", provider.BaseURL, want)
+	}
+}
+
 func TestLookupProvider_MiniMaxDetails(t *testing.T) {
 	tests := []struct {
 		name, wantURL, wantEnvVar string
