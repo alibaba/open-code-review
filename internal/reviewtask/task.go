@@ -93,12 +93,18 @@ func NewRunner(deps Deps) *Runner {
 			if action == llmloop.Complete {
 				content = "Task completed successfully."
 			}
-			return llmloop.ToolOutcome{Content: content, Action: action}
+			return llmloop.ToolOutcome{
+				Content:            content,
+				Action:             action,
+				RecordedSubmission: call.Function.Name == tool.CodeComment.Name() && checkpoint.Data == tool.CommentSucceed,
+			}
 		},
-		MaxRounds:            deps.Template.MaxToolRequestTimes,
-		MaxContextTokens:     deps.Template.MaxTokens,
-		MaxCompletionTokens:  deps.Template.CompletionTokenLimit(),
-		EmptyResponseMessage: "You did not successfully call any tools. Please try again or use task_done if finished.",
+		MaxRounds:                deps.Template.MaxToolRequestTimes,
+		MaxContextTokens:         deps.Template.MaxTokens,
+		MaxCompletionTokens:      deps.Template.CompletionTokenLimit(),
+		EmptyResponseMessage:     "You did not successfully call any tools. Please try again or use task_done if finished.",
+		UnfiledCompletionMessage: "Your previous response included visible text alongside task_done without submitting any findings. If that text contains findings, submit each one with code_comment and then call task_done; otherwise call task_done again with no findings text.",
+		UnfiledCompletionWarning: WarningTaskDoneWithUnfiledText,
 		Compression: llmloop.CompressionPolicy{
 			Messages:        messages,
 			SummaryTemplate: "\n\n<previous_review_summary>\n{{summary}}\n</previous_review_summary>",
@@ -141,6 +147,9 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 // grace round completes the task: by design the completion alone would look
 // like an untruncated review.
 const WarningReviewLimitReached = "review_limit_reached"
+
+// WarningTaskDoneWithUnfiledText marks tasks that finish with visible text and no code_comment submissions.
+const WarningTaskDoneWithUnfiledText = "task_done_with_unfiled_text"
 
 // recordGraceRoundLimit records which declared budget reached its grace round,
 // and the round's verdict on the task. The verdict is part of the message

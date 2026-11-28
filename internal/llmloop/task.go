@@ -19,8 +19,9 @@ const (
 )
 
 type ToolOutcome struct {
-	Content string
-	Action  ToolAction
+	Content            string
+	Action             ToolAction
+	RecordedSubmission bool
 }
 
 type ToolExecutor func(context.Context, string, llm.ToolCall, *session.TaskRecord, string) ToolOutcome
@@ -48,14 +49,16 @@ type GracePolicy struct {
 }
 
 type Task struct {
-	ToolDefs             []llm.ToolDef
-	ExecuteTool          ToolExecutor
-	MaxRounds            int
-	MaxContextTokens     int
-	MaxCompletionTokens  int
-	EmptyResponseMessage string
-	Compression          CompressionPolicy
-	Grace                GracePolicy
+	ToolDefs                 []llm.ToolDef
+	ExecuteTool              ToolExecutor
+	MaxRounds                int
+	MaxContextTokens         int
+	MaxCompletionTokens      int
+	EmptyResponseMessage     string
+	UnfiledCompletionMessage string
+	UnfiledCompletionWarning string
+	Compression              CompressionPolicy
+	Grace                    GracePolicy
 }
 
 type RunResult struct {

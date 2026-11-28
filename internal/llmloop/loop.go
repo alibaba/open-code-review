@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -302,6 +303,8 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 	toolReqCount := r.task.MaxRounds
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
+	hasSubmission := false
+	nudgedUnfiledCompletion := false
 	sessionID := uuid.NewString()
 
 	// Async compression is owned by this conversation alone; the deferred
@@ -402,6 +405,9 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		thinking := resp.ReasoningContent()
 		for _, call := range calls {
 			cp := r.executeTool(ctx, request.Tools, taskKey, call, rec, thinking)
+			if cp.RecordedSubmission {
+				hasSubmission = true
+			}
 			if cp.Action == Fail {
 				return false, StopNone, fmt.Errorf("task failed: %s", cp.Content)
 			} else if cp.Action == Complete {
@@ -428,6 +434,25 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		}
 
 		if taskCompleted {
+			hasUnfiledText := (r.task.UnfiledCompletionMessage != "" || r.task.UnfiledCompletionWarning != "") &&
+				!hasSubmission && strings.TrimSpace(content) != ""
+			if hasUnfiledText {
+				if r.task.UnfiledCompletionMessage != "" && !nudgedUnfiledCompletion && (toolReqCount > 0 || len(r.task.Grace.Tools) > 0) {
+					nudgedUnfiledCompletion = true
+					consecutiveEmptyRounds = 0
+					if nextStop := r.addNextMessage(ctx, content, calls, resp.Native(), thinking, results, &messages, taskKey, st); nextStop != StopNone {
+						stop = nextStop
+						break
+					}
+					if toolReqCount > 0 {
+						messages = append(messages, llm.NewTextMessage("user", r.task.UnfiledCompletionMessage))
+					}
+					continue
+				}
+				if r.task.UnfiledCompletionWarning != "" {
+					r.RecordWarning(r.task.UnfiledCompletionWarning, taskKey, "task completed with visible text and no findings submitted")
+				}
+			}
 			return true, StopNone, nil
 		}
 		if !hasValidResult {
@@ -465,7 +490,7 @@ func (r *Runner) runMainTask(ctx context.Context, messages []llm.Message, taskKe
 		}
 	}
 	if stop == StopMaxRounds || stop == StopTokenBudget {
-		completed, finalStop, err := r.runGraceRound(ctx, messages, taskKey, sessionID, started, stop)
+		completed, finalStop, err := r.runGraceRoundWithSubmission(ctx, messages, taskKey, sessionID, started, stop, hasSubmission)
 		if !r.task.Grace.ReportErrors {
 			return completed, finalStop, nil
 		}
@@ -493,6 +518,10 @@ func (r *Runner) tokenBudgetExceeded() bool {
 }
 
 func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, taskKey string, sessionID string, started bool, stop MainLoopStop) (bool, MainLoopStop, error) {
+	return r.runGraceRoundWithSubmission(ctx, messages, taskKey, sessionID, started, stop, false)
+}
+
+func (r *Runner) runGraceRoundWithSubmission(ctx context.Context, messages []llm.Message, taskKey string, sessionID string, started bool, stop MainLoopStop, hasSubmission bool) (bool, MainLoopStop, error) {
 	graceDefs := r.task.Grace.Tools
 	if len(graceDefs) == 0 {
 		return false, stop, nil
@@ -567,10 +596,17 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, task
 	thinking := resp.ReasoningContent()
 	for _, call := range calls {
 		checkpoint := r.executeTool(ctx, request.Tools, taskKey, call, rec, thinking)
+		if checkpoint.RecordedSubmission {
+			hasSubmission = true
+		}
 		completed = completed || checkpoint.Action == Complete
 		failed = failed || checkpoint.Action == Fail
 	}
-	return completed && !failed, stop, nil
+	done := completed && !failed
+	if done && !hasSubmission && r.task.UnfiledCompletionWarning != "" && strings.TrimSpace(resp.VisibleContent()) != "" {
+		r.RecordWarning(r.task.UnfiledCompletionWarning, taskKey, "task completed with visible text and no findings submitted")
+	}
+	return done, stop, nil
 }
 
 // addNextMessage extends the conversation with the assistant message and
