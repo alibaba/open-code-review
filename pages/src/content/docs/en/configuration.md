@@ -399,6 +399,22 @@ model's **output** cap (`MAX_COMPLETION_TOKENS`, `16384` in both templates)
 and of `--max-tokens-budget`, which caps total token use for a whole run.
 Restore the embedded default with `ocr config unset max_tokens`.
 
+### Change-set capacity limits {#change-set-capacity-limits}
+
+`--max-changeset-files` and `--max-changeset-bytes` are hard pre-flight
+limits for callers running OCR inside a fixed wall-clock window: when the
+change set that would actually dispatch strictly exceeds either value —
+already-reviewed files on a resume don't count — the run is rejected with a
+structured `OCR_CAPACITY_EXCEEDED` error **before the first model request**,
+so an oversized input can never burn the whole task window and fail late.
+The failure record carries the stage that rejected the input and
+`requested_files` / `limit_files` / `requested_bytes` / `limit_bytes`, so
+automation can pre-reject with specific diagnostics instead of parsing
+timeouts or empty reports. `0` keeps the configured or template default; the
+`MAX_CHANGESET_FILES` / `MAX_CHANGESET_BYTES` template keys default to
+unlimited. One caveat: with `--analysis`, the Analysis agent runs alongside
+the review and is not gated by the review's capacity check.
+
 ### Review effort
 
 `effort` sets how many review rounds each subtask gets: `low` = 1,

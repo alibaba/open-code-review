@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/capacity"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/diff"
@@ -154,6 +155,14 @@ type Args struct {
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
 	MaxTokensBudget int64
 
+	// MaxChangesetFiles / MaxChangesetBytes are hard pre-flight change-set
+	// limits: when the dispatchable change set strictly exceeds either, the run
+	// is rejected with a *capacity.Error before the first model request instead
+	// of burning its task window and failing late. 0 = unlimited. Mirrors
+	// scan.Args.MaxChangesetFiles / scan.Args.MaxChangesetBytes.
+	MaxChangesetFiles int
+	MaxChangesetBytes int64
+
 	// SkipFilter disables the REVIEW_FILTER_TASK even when the template
 	// defines one. Set via the --no-filter CLI flag.
 	SkipFilter bool
@@ -202,6 +211,11 @@ type Agent struct {
 	// and consumed by finalizeManifest to fill the manifest input/repository.
 	inputResolution    diff.InputResolution
 	repoRemoteIdentity string
+
+	// capErr holds the structured capacity rejection when the run was rejected
+	// by the pre-flight change-set limits, so the CLI can publish the stable
+	// OCR_CAPACITY_EXCEEDED fields in its JSON output.
+	capErr *capacity.Error
 }
 
 // ResumeInfo summarizes file-level reuse for a resumed review.
@@ -387,6 +401,36 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		return []model.LlmComment{}, nil
 	}
 
+	// Pre-flight capacity gate (#2125): reject an oversized change set before
+	// the first model request (grouping issues the first LLM call) instead of
+	// burning the whole task window and failing late. Counts cover exactly the
+	// dispatchable set — the reviewability selection above already applied and
+	// deletions (kept only for prompt context) never dispatch — so the reported
+	// requestedFiles/requestedBytes are what a run would actually have sent.
+	if capErr := a.checkChangesetCapacity(); capErr != nil {
+		telemetry.Event(ctx, "review.capacity_exceeded",
+			telemetry.AnyToAttr("stage", capErr.Stage),
+			telemetry.AnyToAttr("requested.files", capErr.RequestedFiles),
+			telemetry.AnyToAttr("limit.files", capErr.LimitFiles),
+			telemetry.AnyToAttr("requested.bytes", capErr.RequestedBytes),
+			telemetry.AnyToAttr("limit.bytes", capErr.LimitBytes))
+		// Mirror the loadDiffs failure path: record the run-level failure, then
+		// finalize so the session still ends with a failed manifest and the CLI
+		// can publish the rejection as a parseable result.
+		if b := a.session.Manifest(); b != nil {
+			_ = b.SetRunFailure(session.RunFailureInput, capErr.Error())
+		}
+		a.freezeRetryReport()
+		manifestErr := a.finalizeManifest()
+		if ferr := a.session.Finalize(); ferr != nil {
+			manifestErr = errors.Join(manifestErr, fmt.Errorf("finalize session: %w", ferr))
+		}
+		if manifestErr != nil {
+			return nil, errors.Join(capErr, manifestErr)
+		}
+		return nil, capErr
+	}
+
 	a.currentDate = time.Now().Format("2006-01-02 15:04")
 	telemetry.Event(ctx, "review.started",
 		telemetry.AnyToAttr("file.count", totalChanged),
@@ -478,6 +522,54 @@ func (a *Agent) RunManifest() *session.RunManifest {
 		return nil
 	}
 	return a.session.FinalManifest()
+}
+
+// CapacityError returns the structured capacity rejection when the run was
+// rejected by the pre-flight change-set limits (#2125), or nil otherwise. The
+// CLI publishes the stable OCR_CAPACITY_EXCEEDED fields from it without
+// parsing error strings.
+func (a *Agent) CapacityError() *capacity.Error {
+	if a == nil {
+		return nil
+	}
+	return a.capErr
+}
+
+// checkChangesetCapacity rejects the change set when configured pre-flight
+// limits are exceeded. Counts cover exactly the would-dispatch set: the
+// reviewability selection has already applied, deletions are kept only for
+// prompt context and never dispatched, and files whose checkpoints a resumed
+// run would reuse are excluded — rejecting a resume because its already-done
+// work pushes it over the limit would block the exact recovery path the limits
+// exist to protect.
+func (a *Agent) checkChangesetCapacity() *capacity.Error {
+	if a.args.MaxChangesetFiles <= 0 && a.args.MaxChangesetBytes <= 0 {
+		return nil
+	}
+	mode := a.reviewMode()
+	var files int
+	var bytes int64
+	for i := range a.diffs {
+		d := &a.diffs[i]
+		if d.IsDeleted {
+			continue
+		}
+		if _, reusable := a.args.Resume.ReusableItem(reviewItemFingerprint(mode, *d)); reusable {
+			continue
+		}
+		files++
+		bytes += int64(len(d.Diff))
+	}
+	err := capacity.Check(capacity.StageReviewChangeset, files, a.args.MaxChangesetFiles, bytes, a.args.MaxChangesetBytes)
+	if err == nil {
+		return nil
+	}
+	var capErr *capacity.Error
+	if errors.As(err, &capErr) {
+		a.capErr = capErr
+		return capErr
+	}
+	return nil
 }
 
 // ResumeInfo returns resume metadata for output. Nil means this was not a resume run.

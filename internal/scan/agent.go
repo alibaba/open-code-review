@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/alibaba/open-code-review/internal/capacity"
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -79,6 +80,13 @@ type Args struct {
 	// batches are dispatched. 0 = unlimited. Set via --max-tokens-budget
 	// or ScanTemplate.MaxTokensBudget.
 	MaxTokensBudget int64
+	// MaxChangesetFiles / MaxChangesetBytes are hard pre-flight change-set
+	// limits: when the selected scan input strictly exceeds either, the run is
+	// rejected with a *capacity.Error before the first model request. 0 =
+	// unlimited. Set via --max-changeset-files / --max-changeset-bytes or the
+	// ScanTemplate counterparts. Mirrors agent.Args.MaxChangeset*.
+	MaxChangesetFiles int
+	MaxChangesetBytes int64
 }
 
 // planEnabled / dedupEnabled / summaryEnabled report whether each optional
@@ -118,6 +126,10 @@ type Agent struct {
 	scanFingerprints map[string]string
 	projectSummary   string      // populated post-run by maybeRunProjectSummary
 	budgetExceeded   atomic.Bool // set when the aggregate token budget stops dispatch or an in-flight task
+
+	// capErr holds the structured capacity rejection when the run was rejected
+	// by the pre-flight change-set limits (#2125).
+	capErr *capacity.Error
 }
 
 // ProjectSummary returns the markdown project-level summary produced after
@@ -198,6 +210,54 @@ func (a *Agent) SessionID() string {
 // manifest scope. It exists so review and scan can share the output pipeline
 // without synthesizing a manifest for scan.
 func (a *Agent) RunManifest() *session.RunManifest { return nil }
+
+// CapacityError returns the structured capacity rejection when the run was
+// rejected by the pre-flight change-set limits (#2125), or nil otherwise. The
+// CLI publishes the stable OCR_CAPACITY_EXCEEDED fields from it without
+// parsing error strings.
+func (a *Agent) CapacityError() *capacity.Error {
+	if a == nil {
+		return nil
+	}
+	return a.capErr
+}
+
+// checkChangesetCapacity rejects the scan input when configured pre-flight
+// limits are exceeded. Counts cover the would-dispatch set: binary items never
+// dispatch and empty-content items do (only the plan phase skips them), so both
+// classes are counted accordingly. Items whose checkpoints a resumed run would
+// reuse are excluded — rejecting a resume because its already-done work pushes
+// it over the limit would block the recovery path the limits protect.
+func (a *Agent) checkChangesetCapacity() *capacity.Error {
+	if a.args.MaxChangesetFiles <= 0 && a.args.MaxChangesetBytes <= 0 {
+		return nil
+	}
+	var files int
+	var bytes int64
+	for i := range a.items {
+		it := &a.items[i]
+		if it.IsBinary {
+			continue
+		}
+		if fingerprint := a.scanItemFingerprint(*it); fingerprint != "" {
+			if _, reusable := a.args.Resume.ReusableItem(fingerprint); reusable {
+				continue
+			}
+		}
+		files++
+		bytes += int64(len(it.Content))
+	}
+	err := capacity.Check(capacity.StageScanChangeset, files, a.args.MaxChangesetFiles, bytes, a.args.MaxChangesetBytes)
+	if err == nil {
+		return nil
+	}
+	var capErr *capacity.Error
+	if errors.As(err, &capErr) {
+		a.capErr = capErr
+		return capErr
+	}
+	return nil
+}
 
 // ResumeInfo returns resume metadata for output. Nil means this was not a resume run.
 func (a *Agent) ResumeInfo() *session.ResumeInfo {
@@ -360,6 +420,22 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 			return []model.LlmComment{}, fmt.Errorf("finalize session: %w", ferr)
 		}
 		return []model.LlmComment{}, nil
+	}
+
+	// Pre-flight capacity gate (#2125): reject an oversized scan input before
+	// the first model request instead of burning the run partway. Counts cover
+	// the selected set; binary files never dispatch, mirroring estimateCost.
+	if capErr := a.checkChangesetCapacity(); capErr != nil {
+		telemetry.Event(ctx, "scan.capacity_exceeded",
+			telemetry.AnyToAttr("stage", capErr.Stage),
+			telemetry.AnyToAttr("requested.files", capErr.RequestedFiles),
+			telemetry.AnyToAttr("limit.files", capErr.LimitFiles),
+			telemetry.AnyToAttr("requested.bytes", capErr.RequestedBytes),
+			telemetry.AnyToAttr("limit.bytes", capErr.LimitBytes))
+		if ferr := a.session.Finalize(); ferr != nil {
+			return nil, errors.Join(capErr, fmt.Errorf("finalize session: %w", ferr))
+		}
+		return nil, capErr
 	}
 
 	// Pre-run cost projection so users aren't surprised by a large scan.

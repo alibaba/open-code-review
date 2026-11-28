@@ -50,6 +50,8 @@ type reviewOptions struct {
 	maxGitProcs             int
 	maxTokens               int
 	maxTokensBudget         int
+	maxChangesetFiles       int
+	maxChangesetBytes       int64
 	effort                  string
 	noFilter                bool
 	preview                 bool
@@ -196,6 +198,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return err
 	}
 	cc.Template.MaxTokens = maxTokens
+	cc.Template.MaxChangesetFiles, cc.Template.MaxChangesetBytes = resolveChangesetLimits(
+		cc.Template.MaxChangesetFiles, opts.maxChangesetFiles,
+		cc.Template.MaxChangesetBytes, opts.maxChangesetBytes)
 
 	effort, err := resolveEffort(rt.AppCfg, opts.effort)
 	if err != nil {
@@ -275,6 +280,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Resume:                resumeState,
 		SealedInput:           codeTools.resolution,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		MaxChangesetFiles:     cc.Template.MaxChangesetFiles,
+		MaxChangesetBytes:     cc.Template.MaxChangesetBytes,
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})

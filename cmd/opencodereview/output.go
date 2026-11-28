@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/capacity"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
@@ -368,6 +369,11 @@ type jsonOutput struct {
 	Resume         *agent.ResumeInfo     `json:"resume,omitempty"`
 	SessionID      string                `json:"session_id,omitempty"`
 	Manifest       *session.RunManifest  `json:"manifest,omitempty"`
+	// Error carries the structured pre-flight capacity rejection
+	// (OCR_CAPACITY_EXCEEDED) when the run was rejected by configured
+	// change-set limits before the first model request (#2125). Absent
+	// otherwise.
+	Error *capacity.Error `json:"error,omitempty"`
 	// RetryReport is the frozen LLM retry report (ocr.llm-retry-report/v1).
 	// Reuses llm.RetryReport's own field/tag definitions rather than mirroring
 	// them here, and sits last with omitempty so a first-try-success run emits
@@ -394,7 +400,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
 	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
-	retryReport *llm.RetryReport, groups []agent.FileGroupInfo, analysis ...*analysisOutput) error {
+	retryReport *llm.RetryReport, groups []agent.FileGroupInfo, capErr *capacity.Error, analysis ...*analysisOutput) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	payload := jsonOutput{
 		Status:   "success",
@@ -417,6 +423,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		Resume:         resumeInfo,
 		SessionID:      sessionID,
 		Manifest:       manifest,
+		Error:          capErr,
 		RetryReport:    retryReport,
 	}
 	payload.ToolCalls = newJSONToolCalls(toolCalls, toolFailures)
@@ -742,6 +749,9 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 			ToolCalls:   toolCallSummary,
 			SessionID:   ag.SessionID(),
 			RetryReport: retryReport,
+		}
+		if p, ok := ag.(capacityErrorProvider); ok {
+			out.Error = p.CapacityError()
 		}
 		enc := json.NewEncoder(os.Stderr)
 		enc.SetIndent("", "  ")

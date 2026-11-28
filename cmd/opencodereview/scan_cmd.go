@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/capacity"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/reviewtask"
@@ -44,6 +45,8 @@ type scanOptions struct {
 	batch                 string
 	maxTokens             int
 	maxTokensBudget       int
+	maxChangesetFiles     int
+	maxChangesetBytes     int64
 	provider              string
 	model                 string
 	resume                string
@@ -146,6 +149,14 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		// (unknown values silently fall back to "none").
 		scanTpl.BatchStrategy = opts.batch
 	}
+	// Pre-flight change-set limits: --max-changeset-files / --max-changeset-bytes
+	// override the template defaults when set (0 = unlimited).
+	if opts.maxChangesetFiles > 0 {
+		scanTpl.MaxChangesetFiles = opts.maxChangesetFiles
+	}
+	if opts.maxChangesetBytes > 0 {
+		scanTpl.MaxChangesetBytes = opts.maxChangesetBytes
+	}
 	// Token budget: --max-tokens-budget overrides the template value when set.
 	budget := scanTpl.MaxTokensBudget
 	if opts.maxTokensBudget > 0 {
@@ -223,6 +234,8 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 		GitRunner:             cc.GitRunner,
 		MaxFileSizeBytes:      scanTpl.MaxFileSizeBytes,
 		MaxTokensBudget:       budget,
+		MaxChangesetFiles:     scanTpl.MaxChangesetFiles,
+		MaxChangesetBytes:     scanTpl.MaxChangesetBytes,
 		SkipPlan:              opts.noPlan,
 		SkipDedup:             opts.noDedup,
 		SkipSummary:           opts.noSummary,
@@ -250,6 +263,14 @@ func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
+		// A pre-flight capacity rejection (#2125) is the caller's primary
+		// diagnostic: surface the structured OCR_CAPACITY_EXCEEDED record the
+		// way review's failure path does (failure usage on stderr), instead of
+		// leaving only the plain error line.
+		var capErr *capacity.Error
+		if errors.As(err, &capErr) {
+			emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, nil)
+		}
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}

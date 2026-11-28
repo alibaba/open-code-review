@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/capacity"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
@@ -75,6 +76,19 @@ func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
 		return template.ParseEffort(cfg.Effort)
 	}
 	return template.EffortDefault, nil
+}
+
+// resolveChangesetLimits applies the standard precedence for the pre-flight
+// change-set limits (#2125): a CLI flag set above 0 overrides the template
+// default; 0 = unlimited everywhere.
+func resolveChangesetLimits(tplFiles int, cliFiles int, tplBytes int64, cliBytes int64) (int, int64) {
+	if cliFiles > 0 {
+		tplFiles = cliFiles
+	}
+	if cliBytes > 0 {
+		tplBytes = cliBytes
+	}
+	return tplFiles, tplBytes
 }
 
 // previewMaxTokens resolves the per-file prompt ceiling the way a real run
@@ -800,6 +814,14 @@ type resumeInfoProvider interface {
 	ResumeInfo() *agent.ResumeInfo
 }
 
+// capacityErrorProvider is the optional capability of a ResultProvider that
+// carries a structured pre-flight capacity rejection (#2125). Kept off the
+// ResultProvider interface for the same reason as resumeInfoProvider-style
+// extras: it is a narrow, additive surface both agents do implement.
+type capacityErrorProvider interface {
+	CapacityError() *capacity.Error
+}
+
 // emitRunResult is the post-LLM-run finalization shared by `ocr review` and
 // `ocr scan`: resolves comment line numbers, records telemetry, restores
 // stdout early for agent-text audiences so the summary is visible, prints
@@ -882,10 +904,14 @@ func emitRunResult(
 		if p, ok := ag.(interface{ FileGroups() []agent.FileGroupInfo }); ok {
 			groups = p.FileGroups()
 		}
+		var capErr *capacity.Error
+		if p, ok := ag.(capacityErrorProvider); ok {
+			capErr = p.CapacityError()
+		}
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, analysis)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups, capErr, analysis)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
 	// Between the comments/warnings block and the project summary: the report is

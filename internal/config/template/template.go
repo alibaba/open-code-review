@@ -27,9 +27,14 @@ type Template struct {
 	GroupingMinFiles            int              `json:"GROUPING_MIN_FILES"`
 	GroupingBundleLineThreshold int              `json:"GROUPING_BUNDLE_LINE_THRESHOLD"`
 	MaxReviewRounds             int              `json:"MAX_REVIEW_ROUNDS"`
-	ReLocationTask              *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask            *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
-	GroupingTask                *LlmConversation `json:"GROUPING_TASK,omitempty"`
+	// MaxChangesetFiles / MaxChangesetBytes are hard pre-flight change-set
+	// limits: a review input strictly exceeding either is rejected with an
+	// OCR_CAPACITY_EXCEEDED error before the first model request. 0 = unlimited.
+	MaxChangesetFiles int              `json:"MAX_CHANGESET_FILES,omitempty"`
+	MaxChangesetBytes int64            `json:"MAX_CHANGESET_BYTES,omitempty"`
+	ReLocationTask    *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
+	ReviewFilterTask  *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	GroupingTask      *LlmConversation `json:"GROUPING_TASK,omitempty"`
 }
 
 // ScanTemplate holds the full-file scan task template configuration loaded
@@ -46,11 +51,15 @@ type ScanTemplate struct {
 	MaxFileSizeBytes      int64            `json:"MAX_FILE_SIZE_BYTES,omitempty"`
 	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD,omitempty"`
 	MaxTokensBudget       int64            `json:"MAX_TOKENS_BUDGET,omitempty"`
-	BatchStrategy         string           `json:"BATCH_STRATEGY,omitempty"`
-	BatchSize             int              `json:"BATCH_SIZE,omitempty"`
-	DedupTask             *LlmConversation `json:"DEDUP_TASK,omitempty"`
-	DedupMinComments      int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
-	ProjectSummaryTask    *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
+	// MaxChangesetFiles / MaxChangesetBytes are the scan counterparts of
+	// Template's pre-flight change-set limits (0 = unlimited).
+	MaxChangesetFiles  int              `json:"MAX_CHANGESET_FILES,omitempty"`
+	MaxChangesetBytes  int64            `json:"MAX_CHANGESET_BYTES,omitempty"`
+	BatchStrategy      string           `json:"BATCH_STRATEGY,omitempty"`
+	BatchSize          int              `json:"BATCH_SIZE,omitempty"`
+	DedupTask          *LlmConversation `json:"DEDUP_TASK,omitempty"`
+	DedupMinComments   int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
+	ProjectSummaryTask *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
 }
 
 // ReviewRounds returns the effective per-group round count, never below 1.
@@ -322,6 +331,12 @@ func (t *Template) Validate() error {
 	if t.MaxReviewRounds < 0 {
 		return fmt.Errorf("max_review_rounds must not be negative")
 	}
+	if t.MaxChangesetFiles < 0 {
+		return fmt.Errorf("max_changeset_files must not be negative")
+	}
+	if t.MaxChangesetBytes < 0 {
+		return fmt.Errorf("max_changeset_bytes must not be negative")
+	}
 	if len(t.MainTask.Messages) == 0 {
 		return fmt.Errorf("main_task.messages must not be empty")
 	}
@@ -342,6 +357,12 @@ func (t *ScanTemplate) Validate() error {
 	}
 	if t.MaxToolRequestTimes <= 0 {
 		return fmt.Errorf("scan: max_tool_request_times must be positive")
+	}
+	if t.MaxChangesetFiles < 0 {
+		return fmt.Errorf("scan: max_changeset_files must not be negative")
+	}
+	if t.MaxChangesetBytes < 0 {
+		return fmt.Errorf("scan: max_changeset_bytes must not be negative")
 	}
 	if len(t.MainTask.Messages) == 0 {
 		return fmt.Errorf("scan: main_task.messages must not be empty")
