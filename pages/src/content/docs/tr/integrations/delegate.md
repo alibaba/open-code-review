@@ -65,12 +65,12 @@ ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <p
 
 Yaygın çağrılar:
 
-| Senaryo | Komut |
-|----------|---------|
-| Çalışma alanı değişiklikleri | `ocr delegate preview` |
-| Dal karşılaştırması | `ocr delegate preview --from main --to feature` |
-| Geçerli dalı main ile karşılaştırma | `ocr delegate preview --from main` |
-| Tek commit | `ocr delegate preview -c abc123` |
+| Senaryo                             | Komut                                           |
+| ----------------------------------- | ----------------------------------------------- |
+| Çalışma alanı değişiklikleri        | `ocr delegate preview`                          |
+| Dal karşılaştırması                 | `ocr delegate preview --from main --to feature` |
+| Geçerli dalı main ile karşılaştırma | `ocr delegate preview --from main`              |
+| Tek commit                          | `ocr delegate preview -c abc123`                |
 
 ### Adım 2: Dosyaların kurallarını alın {#step-2-get-rules-for-files}
 
@@ -141,35 +141,37 @@ Bulguları önem derecesine göre sınıflandırın:
 
 ## Alt komut başvurusu {#sub-commands-reference}
 
-| Komut | Amaç |
-|---------|---------|
-| `ocr delegate preview` | İncelenebilir dosyaları ve mod/referans meta verilerini listeler |
-| `ocr delegate rule <path...>` | İnceleme kurallarını içeriklerine göre gruplandırarak çözümler |
+| Komut                         | Amaç                                                             |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `ocr delegate preview`        | İncelenebilir dosyaları ve mod/referans meta verilerini listeler |
+| `ocr delegate rule <path...>` | İnceleme kurallarını içeriklerine göre gruplandırarak çözümler   |
 
 ## Ortak seçenekler {#shared-flags}
 
 Her iki alt komut da `--from main` ifadesini `--from main --to HEAD` kısaltması olarak kabul eder. Aralık incelemesi `merge-base(from, to)..to` karşılaştırmasını yapar; hazırlanmış, hazırlanmamış ve izlenmeyen değişiklikleri kapsamaz. Çalışma alanı modu için aralık/commit seçeneklerini belirtmeyin. Aynı hedefi kullanmaları için `preview` ve `rule` komutlarına aynı aralık veya commit seçeneklerini verin. Aralık ve commit seçenekleri birlikte kullanılamaz.
 
-| Seçenek | Açıklama |
-|------|-------------|
-| `--from <ref>` | Aralık modunun kaynak referansı |
-| `--to <ref>` | Aralık modunun hedef referansı; `--from` verilmişse varsayılan `HEAD` |
-| `-c, --commit <hash>` | Tek commit modu |
-| `--repo <path>` | Depo kökü (varsayılan: geçerli çalışma dizini) |
-| `--rule <path>` | Özel rule.json yolu |
-| `--exclude <patterns>` | Virgülle ayrılmış dışlama desenleri |
-| `-b, --background <text>` | İş bağlamı |
-| `-B, --background-file <path>` | Markdown dosyasından iş bağlamı (`-b` seçeneğine göre önceliklidir) |
+| Seçenek                        | Açıklama                                                              |
+| ------------------------------ | --------------------------------------------------------------------- |
+| `--from <ref>`                 | Aralık modunun kaynak referansı                                       |
+| `--to <ref>`                   | Aralık modunun hedef referansı; `--from` verilmişse varsayılan `HEAD` |
+| `-c, --commit <hash>`          | Tek commit modu                                                       |
+| `--repo <path>`                | Depo kökü (varsayılan: geçerli çalışma dizini)                        |
+| `--rule <path>`                | Özel rule.json yolu                                                   |
+| `--exclude <patterns>`         | Virgülle ayrılmış dışlama desenleri                                   |
+| `-b, --background <text>`      | İş bağlamı                                                            |
+| `-B, --background-file <path>` | Markdown dosyasından iş bağlamı (`-b` seçeneğine göre önceliklidir)   |
 
 ## Diğer entegrasyon modlarıyla karşılaştırma {#comparison-with-other-integration-modes}
 
-| Mod | LLM'yi kim çağırır? | Kullanım alanı |
-|------|-------------------|----------|
-| [Ajan becerisi](../agent-skill/) | OCR | Ajan `ocr review` çağırır; tüm incelemeyi OCR yürütür |
-| [Komut (Claude Code)](../claude-code/) | OCR | Claude Code içinde eğik çizgi komutu; incelemeyi OCR yürütür |
-| **Görev devri modu** | Ana ajan | OCR altyapıyı sağlar; incelemeyi ajan yürütür |
+| Mod                                    | LLM'yi kim çağırır?                        | Kullanım alanı                                                 |
+| -------------------------------------- | ------------------------------------------ | -------------------------------------------------------------- |
+| [Ajan becerisi](../agent-skill/)       | OCR                                        | Ajan `ocr review` çağırır; tüm incelemeyi OCR yürütür          |
+| [Komut (Claude Code)](../claude-code/) | OCR                                        | Claude Code içinde eğik çizgi komutu; incelemeyi OCR yürütür   |
+| [Copilot CLI](../copilot-cli/)         | OCR (yerel mod) veya Copilot (görev devri) | GitHub Copilot CLI'da yerel modda veya görev devriyle inceleme |
+| **Görev devri modu**                   | Ana ajan                                   | OCR altyapıyı sağlar; incelemeyi ajan yürütür                  |
 
 ## Ayrıca bakın {#see-also}
 
 - [Ajan becerisi](../agent-skill/) — OCR, ajan adına tüm incelemeyi yürütür.
 - [Komut (Claude Code)](../claude-code/) — otomatik düzeltmeli eğik çizgi komutu biçimi.
+- [Copilot CLI](../copilot-cli/) — OCR inceleme becerilerini GitHub Copilot CLI'ya yükleme.

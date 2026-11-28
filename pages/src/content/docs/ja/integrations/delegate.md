@@ -65,12 +65,12 @@ ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <p
 
 よく使うパターン：
 
-| シナリオ | コマンド |
-|----------|---------|
-| ワークスペースの変更 | `ocr delegate preview` |
-| ブランチ比較 | `ocr delegate preview --from main --to feature` |
-| 現在のブランチを main と比較 | `ocr delegate preview --from main` |
-| 単一コミット | `ocr delegate preview -c abc123` |
+| シナリオ                     | コマンド                                        |
+| ---------------------------- | ----------------------------------------------- |
+| ワークスペースの変更         | `ocr delegate preview`                          |
+| ブランチ比較                 | `ocr delegate preview --from main --to feature` |
+| 現在のブランチを main と比較 | `ocr delegate preview --from main`              |
+| 単一コミット                 | `ocr delegate preview -c abc123`                |
 
 ### ステップ 2：ファイルのルール取得
 
@@ -87,16 +87,19 @@ ocr delegate rule [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> 
 以下の diff コマンドは外部 diff プログラム、テキスト変換、カラー出力を無効にして、プレーンテキストのパッチを取得します。
 
 **Range モード**（merge\_base あり）：
+
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit モード**：
+
 ```bash
 git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace モード**：
+
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 追跡ファイル
 cat "<path>"                     # 新規未追跡ファイル
@@ -138,35 +141,37 @@ preview の各 `(path, status)` を `reviewed` または `skipped` として記�
 
 ## サブコマンドリファレンス
 
-| コマンド | 目的 |
-|----------|------|
-| `ocr delegate preview` | レビュー可能ファイル＋mode/ref メタデータの一覧 |
-| `ocr delegate rule <path...>` | 内容別にグループ化されたレビュールールの解決 |
+| コマンド                      | 目的                                            |
+| ----------------------------- | ----------------------------------------------- |
+| `ocr delegate preview`        | レビュー可能ファイル＋mode/ref メタデータの一覧 |
+| `ocr delegate rule <path...>` | 内容別にグループ化されたレビュールールの解決    |
 
 ## 共通フラグ
 
 両サブコマンドで `--from main` は `--from main --to HEAD` の省略形です。範囲レビューは `merge-base(from, to)..to` を比較し、ステージ済み・未ステージ・未追跡の変更を含みません。範囲とコミットのフラグを省略するとワークスペースモードになります。同じターゲットを使うため、`preview` と `rule` には同じ範囲またはコミットのフラグを渡してください。範囲とコミットのフラグは併用できません。
 
-| フラグ | 説明 |
-|--------|------|
-| `--from <ref>` | Range モードのソース参照 |
-| `--to <ref>` | Range モードのターゲット参照。`--from` 指定時の既定値は `HEAD` |
-| `-c, --commit <hash>` | 単一コミットモード |
-| `--repo <path>` | リポジトリルート（デフォルト：cwd） |
-| `--rule <path>` | カスタム rule.json パス |
-| `--exclude <patterns>` | カンマ区切りの除外パターン |
-| `-b, --background <text>` | ビジネスコンテキスト |
+| フラグ                         | 説明                                                                 |
+| ------------------------------ | -------------------------------------------------------------------- |
+| `--from <ref>`                 | Range モードのソース参照                                             |
+| `--to <ref>`                   | Range モードのターゲット参照。`--from` 指定時の既定値は `HEAD`       |
+| `-c, --commit <hash>`          | 単一コミットモード                                                   |
+| `--repo <path>`                | リポジトリルート（デフォルト：cwd）                                  |
+| `--rule <path>`                | カスタム rule.json パス                                              |
+| `--exclude <patterns>`         | カンマ区切りの除外パターン                                           |
+| `-b, --background <text>`      | ビジネスコンテキスト                                                 |
 | `-B, --background-file <path>` | Markdown ファイルからビジネスコンテキストを読み込み（`-b` より優先） |
 
 ## 他の統合モードとの比較
 
-| モード | LLM を呼ぶのは？ | ユースケース |
-|--------|-----------------|-------------|
-| [Agent Skill](../agent-skill/) | OCR | Agent が `ocr review` を呼び出し、OCR が完全なレビューを駆動 |
-| [Command（Claude Code）](../claude-code/) | OCR | Claude Code のスラッシュコマンド、OCR がレビューを駆動 |
-| **デリゲーションモード** | ホストエージェント | OCR がスキャフォールディングを提供、Agent がレビューを駆動 |
+| モード                                    | LLM を呼ぶのは？                                  | ユースケース                                                    |
+| ----------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------- |
+| [Agent Skill](../agent-skill/)            | OCR                                               | Agent が `ocr review` を呼び出し、OCR が完全なレビューを駆動    |
+| [Command（Claude Code）](../claude-code/) | OCR                                               | Claude Code のスラッシュコマンド、OCR がレビューを駆動          |
+| [Copilot CLI](../copilot-cli/)            | OCR（ネイティブ）または Copilot（デリゲーション） | GitHub Copilot CLI でネイティブレビューまたは委任レビューを実行 |
+| **デリゲーションモード**                  | ホストエージェント                                | OCR がスキャフォールディングを提供、Agent がレビューを駆動      |
 
 ## 関連項目
 
 - [Agent Skill](../agent-skill/) — OCR がエージェントに代わって完全なレビューを駆動。
 - [Command（Claude Code）](../claude-code/) — スラッシュコマンド形式、自動修正付き。
+- [Copilot CLI](../copilot-cli/) — GitHub Copilot CLI に OCR のレビュー用スキルをインストールする手順。

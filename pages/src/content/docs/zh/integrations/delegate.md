@@ -65,12 +65,12 @@ ocr delegate preview [--from <ref> [--to <ref>]] [--commit <hash>] [--exclude <p
 
 常见用法：
 
-| 场景 | 命令 |
-|------|------|
-| 工作区变更 | `ocr delegate preview` |
-| 分支对比 | `ocr delegate preview --from main --to feature` |
-| 当前分支相对 main | `ocr delegate preview --from main` |
-| 单次提交 | `ocr delegate preview -c abc123` |
+| 场景              | 命令                                            |
+| ----------------- | ----------------------------------------------- |
+| 工作区变更        | `ocr delegate preview`                          |
+| 分支对比          | `ocr delegate preview --from main --to feature` |
+| 当前分支相对 main | `ocr delegate preview --from main`              |
+| 单次提交          | `ocr delegate preview -c abc123`                |
 
 ### 第 2 步：获取文件规则
 
@@ -87,16 +87,19 @@ ocr delegate rule [--from <ref> [--to <ref>]] [--commit <hash>] <path1> <path2> 
 以下 diff 命令关闭外部 diff 程序、文本转换和颜色输出，以获取纯文本补丁。
 
 **Range 模式**（有 merge\_base）：
+
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color <merge_base>..<to> -- "<path>"
 ```
 
 **Commit 模式**：
+
 ```bash
 git --no-pager show --no-ext-diff --no-textconv --no-color <commit> -- "<path>"
 ```
 
 **Workspace 模式**：
+
 ```bash
 git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"        # 已跟踪文件
 cat "<path>"                     # 新的未跟踪文件
@@ -138,35 +141,37 @@ Git 以退出码 0 结束后，分块读取并审查整个文件，再删除临�
 
 ## 子命令参考
 
-| 命令 | 用途 |
-|------|------|
-| `ocr delegate preview` | 列出可审查文件 + mode/ref 元数据 |
-| `ocr delegate rule <path...>` | 按内容分组解析审查规则 |
+| 命令                          | 用途                             |
+| ----------------------------- | -------------------------------- |
+| `ocr delegate preview`        | 列出可审查文件 + mode/ref 元数据 |
+| `ocr delegate rule <path...>` | 按内容分组解析审查规则           |
 
 ## 通用标志
 
 两个子命令都支持将 `--from main` 作为 `--from main --to HEAD` 的简写。范围审查比较 `merge-base(from, to)..to`，不包含暂存、未暂存和未跟踪改动；省略范围及提交标志则使用工作区模式。向 `preview` 和 `rule` 传入相同的范围或提交标志，以使用相同目标。范围标志与提交标志互斥。
 
-| 标志 | 描述 |
-|------|------|
-| `--from <ref>` | Range 模式的源引用 |
-| `--to <ref>` | Range 模式的目标引用；指定 `--from` 时默认取 `HEAD` |
-| `-c, --commit <hash>` | 单次提交模式 |
-| `--repo <path>` | 仓库根目录（默认：cwd） |
-| `--rule <path>` | 自定义 rule.json 路径 |
-| `--exclude <patterns>` | 逗号分隔的排除模式 |
-| `-b, --background <text>` | 业务上下文 |
-| `-B, --background-file <path>` | 从 Markdown 文件读取业务上下文（优先于 `-b`） |
+| 标志                           | 描述                                                |
+| ------------------------------ | --------------------------------------------------- |
+| `--from <ref>`                 | Range 模式的源引用                                  |
+| `--to <ref>`                   | Range 模式的目标引用；指定 `--from` 时默认取 `HEAD` |
+| `-c, --commit <hash>`          | 单次提交模式                                        |
+| `--repo <path>`                | 仓库根目录（默认：cwd）                             |
+| `--rule <path>`                | 自定义 rule.json 路径                               |
+| `--exclude <patterns>`         | 逗号分隔的排除模式                                  |
+| `-b, --background <text>`      | 业务上下文                                          |
+| `-B, --background-file <path>` | 从 Markdown 文件读取业务上下文（优先于 `-b`）       |
 
 ## 与其他集成方式的对比
 
-| 模式 | 谁调用 LLM？ | 适用场景 |
-|------|-------------|----------|
-| [Agent Skill](../agent-skill/) | OCR | Agent 调用 `ocr review`，OCR 驱动完整审查 |
-| [Command（Claude Code）](../claude-code/) | OCR | Claude Code 中的斜杠命令，OCR 驱动审查 |
-| **委托模式** | 宿主 Agent | OCR 提供脚手架，Agent 驱动审查 |
+| 模式                                      | 谁调用 LLM？                          | 适用场景                                   |
+| ----------------------------------------- | ------------------------------------- | ------------------------------------------ |
+| [Agent Skill](../agent-skill/)            | OCR                                   | Agent 调用 `ocr review`，OCR 驱动完整审查  |
+| [Command（Claude Code）](../claude-code/) | OCR                                   | Claude Code 中的斜杠命令，OCR 驱动审查     |
+| [Copilot CLI](../copilot-cli/)            | OCR（原生模式）或 Copilot（委托模式） | 在 GitHub Copilot CLI 中运行原生或委托审查 |
+| **委托模式**                              | 宿主 Agent                            | OCR 提供脚手架，Agent 驱动审查             |
 
 ## 另请参阅
 
 - [Agent Skill](../agent-skill/) — OCR 代表 Agent 驱动完整审查。
 - [Command（Claude Code）](../claude-code/) — 斜杠命令风格，含自动修复。
+- [Copilot CLI](../copilot-cli/) — 在 GitHub Copilot CLI 中安装 OCR 审查技能。
