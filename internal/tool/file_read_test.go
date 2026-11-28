@@ -558,6 +558,9 @@ func TestExecute_POSIXDualBackslashAndSlashFiles(t *testing.T) {
 				t.Errorf(`Execute(".\pkg\util.go") error = %v, want ambiguity error naming both files`, err)
 			}
 		})
+	}
+}
+
 // A minified or generated file can pack its whole content into one line, which
 // the 500-line cap counts as a single line. The tool result must still bound
 // that line's bytes and say so, instead of dropping megabytes into the
