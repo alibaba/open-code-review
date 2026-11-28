@@ -47,6 +47,7 @@ type Fact struct {
 	ReviewID           string              `json:"review_id,omitempty"`
 	Finding            string              `json:"finding,omitempty"`
 	Reason             string              `json:"reason,omitempty"`
+	ReviewReply        *ReviewReply        `json:"review_reply,omitempty"`
 	CodeHash           string              `json:"code_sha256,omitempty"`
 	Category           string              `json:"category,omitempty"`
 	Authority          string              `json:"authority,omitempty"`

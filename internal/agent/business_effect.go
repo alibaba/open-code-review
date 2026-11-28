@@ -32,9 +32,33 @@ type effectInput struct {
 	Routines            []int                            `json:"function_indices"`
 	Declaration         *int                             `json:"declaration_index,omitempty"`
 	Assertion           *knowledge.DirectCalleeAssertion `json:"direct_assertion,omitempty"`
+	Reopened            *reopenedReply                   `json:"historical_reply,omitempty"`
 	BaseFunction        *knowledge.Citation              `json:"base_function,omitempty"`
 	BaseDeclarations    []knowledge.Citation             `json:"base_declarations,omitempty"`
 	CurrentDeclarations []knowledge.Citation             `json:"current_declarations,omitempty"`
+}
+
+// Preserve exact numeric spelling, including large integers. An absent or
+// non-scalar result cannot witness a transition for this proposal.
+type effectValue string
+
+func (v *effectValue) UnmarshalJSON(raw []byte) error {
+	*v = ""
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	switch x := value.(type) {
+	case string:
+		*v = effectValue(x)
+	case json.Number:
+		*v = effectValue(x.String())
+	case bool:
+		*v = effectValue(fmt.Sprint(x))
+	}
+	return nil
 }
 
 // The source quote can span more than one line. An ambiguous location cannot
@@ -79,6 +103,17 @@ func (a *Agent) verifyBusinessEffects(ctx context.Context, group string, changes
 	}
 	for i, addition := range additions {
 		check := addition.check
+		if r := check.reopened; r != nil {
+			id := fmt.Sprintf("e-%d", len(proposals))
+			proposals = append(proposals, effectInput{ID: id, Claim: check.Reason, Path: addition.Path,
+				Line: addition.StartLine, Premise: check.SourceQuote, Reopened: r, BaseFunction: &r.submitted,
+				Routines: []int{addEvidence(&routines, r.current)}})
+			pending[i] = id
+			if previous := patches[addition.Path]; !strings.Contains(previous, r.patch) {
+				patches[addition.Path] = strings.TrimSpace(previous + "\n" + r.patch)
+			}
+			continue
+		}
 		if check.discussion != "" || check.assertion == nil && (check.SourcePath != addition.Path || check.SourceQuote == "") {
 			continue
 		}
@@ -156,6 +191,12 @@ func (a *Agent) groundedEffects(ctx context.Context, group string, proposals []e
 		Patches      map[string]string    `json:"patches"`
 	}{proposals, routines, declarations, patches})
 	instruction := businessEffectPrompt
+	if slices.ContainsFunc(proposals, func(p effectInput) bool { return p.Reopened != nil }) {
+		instruction = changedReplyEffectPrompt
+		if slices.ContainsFunc(proposals, func(p effectInput) bool { return p.Reopened == nil }) {
+			instruction += "\nFor proposals without historical_reply: " + businessEffectPrompt
+		}
+	}
 	if slices.ContainsFunc(proposals, func(p effectInput) bool { return p.Assertion != nil }) {
 		instruction += "\n" + businessAssertionPrompt
 	}
@@ -170,19 +211,24 @@ func (a *Agent) groundedEffects(ctx context.Context, group string, proposals []e
 	}
 	var result struct {
 		Checks []struct {
-			ID                    string `json:"id"`
-			Verdict               string `json:"verdict"`
-			Input                 string `json:"input"`
-			Expected              string `json:"expected"`
-			Before                string `json:"before"`
-			After                 string `json:"after"`
-			Reason                string `json:"reason"`
-			OutputPath            string `json:"output_path"`
-			OutputLine            int    `json:"output_line"`
-			Output                string `json:"output_quote"`
-			AssertionQuote        string `json:"assertion_quote"`
-			AssertionBeforePasses *bool  `json:"assertion_before_passes"`
-			AssertionAfterPasses  *bool  `json:"assertion_after_passes"`
+			ID                    string      `json:"id"`
+			Verdict               string      `json:"verdict"`
+			Input                 string      `json:"input"`
+			Expected              effectValue `json:"expected"`
+			Before                effectValue `json:"before"`
+			After                 effectValue `json:"after"`
+			Reason                string      `json:"reason"`
+			OutputPath            string      `json:"output_path"`
+			OutputLine            int         `json:"output_line"`
+			Output                string      `json:"output_quote"`
+			SubmittedQuote        string      `json:"submitted_quote"`
+			CurrentQuote          string      `json:"current_quote"`
+			BeforeWithout         effectValue `json:"before_without"`
+			AfterWithout          effectValue `json:"after_without"`
+			AllInputs             string      `json:"all_inputs"`
+			AssertionQuote        string      `json:"assertion_quote"`
+			AssertionBeforePasses *bool       `json:"assertion_before_passes"`
+			AssertionAfterPasses  *bool       `json:"assertion_after_passes"`
 		} `json:"checks"`
 	}
 	if err := json.Unmarshal([]byte(stripMarkdownFences(response)), &result); err != nil || result.Checks == nil {
@@ -197,17 +243,29 @@ func (a *Agent) groundedEffects(ctx context.Context, group string, proposals []e
 		}
 		seen[r.ID] = true
 		if r.Verdict != "confirmed" || strings.TrimSpace(r.Input) == "" || strings.TrimSpace(r.Reason) == "" || strings.TrimSpace(r.Output) == "" ||
-			strings.TrimSpace(r.Before) == "" || strings.TrimSpace(r.After) == "" || r.Before != r.Expected || r.After == r.Expected {
+			strings.TrimSpace(string(r.Before)) == "" || strings.TrimSpace(string(r.After)) == "" {
 			continue
 		}
 		i := slices.IndexFunc(proposals, func(p effectInput) bool { return p.ID == r.ID })
 		if i < 0 {
 			continue
 		}
+		history := proposals[i].Reopened
+		if history != nil && (strings.TrimSpace(r.Input) != strings.TrimSpace(history.Input) || !history.provesChange(r.SubmittedQuote, r.CurrentQuote)) {
+			continue
+		}
+		if history != nil && history.Kind == "redundancy" {
+			if strings.TrimSpace(string(r.BeforeWithout)) == "" || r.Before == r.BeforeWithout || r.After != r.AfterWithout ||
+				strings.TrimSpace(r.AllInputs) == "" || r.OutputLine < history.Operation.StartLine || r.OutputLine > history.Operation.EndLine {
+				continue
+			}
+		} else if r.Before != r.Expected || r.After == r.Expected {
+			continue
+		}
 		if assertion := proposals[i].Assertion; assertion != nil {
 			predicate, recognized := assertion.MatchedPredicate(r.AssertionQuote)
 			if r.AssertionBeforePasses == nil || !*r.AssertionBeforePasses || r.AssertionAfterPasses == nil || *r.AssertionAfterPasses ||
-				!recognized || !predicate.Distinguishes(r.Before, r.After) {
+				!recognized || !predicate.Distinguishes(string(r.Before), string(r.After)) {
 				continue
 			}
 			if selected, ok := assertion.MatchedPredicate(proposals[i].Premise); ok && selected != predicate {

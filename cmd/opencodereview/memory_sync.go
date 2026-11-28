@@ -135,6 +135,7 @@ type memorySyncReport struct {
 	Truncated         bool           `json:"truncated,omitempty"`
 	Facts             int            `json:"facts,omitempty"`
 	DiscussionSources int            `json:"discussion_sources,omitempty"`
+	ReviewReplies     int            `json:"review_replies,omitempty"`
 	Tokens            int64          `json:"tokens,omitempty"`
 	SourceKinds       map[string]int `json:"source_kinds,omitempty"`
 	Limits            []string       `json:"limits,omitempty"`
@@ -270,6 +271,7 @@ func syncKnowledge(ctx context.Context, store *knowledge.Store, tree knowledge.T
 		return resp.VisibleContent(), nil
 	})
 	discussionUpdates := result.DiscussionObservations()
+	out.ReviewReplies = result.ReviewReplies
 	if skipped != "" && budget != nil && ctx.Err() == nil {
 		// A later run with adequate room must be able to retry extraction.
 		out.Sources, out.SourceKinds, out.Facts = result.Sources, result.SourceKinds, len(refreshed)
@@ -307,7 +309,11 @@ func nextDiscussionEdit(discussions []knowledge.Discussion, now time.Time) strin
 		if stamp == "" {
 			stamp = d.CreatedAt
 		}
-		if at, err := time.Parse(time.RFC3339Nano, stamp); err == nil && at.After(now) && (next.IsZero() || at.Before(next)) {
+		at, _ := time.Parse(time.RFC3339Nano, stamp)
+		if pub, _ := time.Parse(time.RFC3339Nano, d.PublishedAt); pub.After(at) {
+			at = pub
+		}
+		if at.After(now) && (next.IsZero() || at.Before(next)) {
 			next = at
 		}
 	}
@@ -381,7 +387,7 @@ func syncReviewBase(ctx context.Context, cc *commonContext, opts reviewOptions, 
 	tree := knowledge.Tree{Repo: cc.RepoDir, Commit: base, Git: runner, Now: opts.memoryTime}
 	report, err := syncKnowledge(ctx, store, tree, cc, rt, knowledge.DiscoverOptions{Paths: paths, FocusLines: focus, AsOf: opts.memoryTime}, opts.memoryDiscussions, budget)
 	if err == nil && !report.Cached {
-		fmt.Fprintf(os.Stderr, "[ocr] Memory sync at %.12s: %d sampled sources, %d rules, %d original discussions, %d rejected, truncated=%t\n", base, report.Sources, report.Facts, report.DiscussionSources, report.Rejected, report.Truncated)
+		fmt.Fprintf(os.Stderr, "[ocr] Memory sync at %.12s: %d sampled sources, %d rules, %d original discussions, %d inline replies, %d rejected, truncated=%t\n", base, report.Sources, report.Facts, report.DiscussionSources, report.ReviewReplies, report.Rejected, report.Truncated)
 	}
 	return err
 }

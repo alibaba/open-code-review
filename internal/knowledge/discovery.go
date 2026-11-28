@@ -38,6 +38,7 @@ type DiscoverOptions struct {
 type DiscoveryResult struct {
 	Facts             []Fact         `json:"facts"`
 	DiscussionSources []Fact         `json:"discussion_sources,omitempty"`
+	ReviewReplies     int            `json:"review_replies,omitempty"`
 	Sources           int            `json:"sources"`
 	SourceKinds       map[string]int `json:"source_kinds"`
 	Truncated         bool           `json:"truncated"`
@@ -45,6 +46,7 @@ type DiscoveryResult struct {
 	Rejected          int            `json:"rejected"`
 	RejectionReasons  []string       `json:"rejection_reasons,omitempty"`
 	discussionNotices []Fact
+	reviewNotes       []Fact
 	retryLanding      bool
 }
 
@@ -54,7 +56,7 @@ func (r DiscoveryResult) Cacheable() bool { return !r.retryLanding }
 // DiscussionObservations also retains edit dates and exact-edition deadlines
 // needed to recheck records that already cite these discussions.
 func (r DiscoveryResult) DiscussionObservations() []Fact {
-	return append(slices.Clone(r.DiscussionSources), r.discussionNotices...)
+	return slices.Concat(r.DiscussionSources, r.discussionNotices, r.reviewNotes)
 }
 
 func (r *DiscoveryResult) withholdEdition(revision string, d Discussion, scopeDigest string) {

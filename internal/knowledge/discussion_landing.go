@@ -88,7 +88,7 @@ type discussionPosition struct {
 }
 
 func (p discussionPosition) valid() bool {
-	return validOID(p.revision) && p.start > 0 && p.end >= p.start && p.end-p.start < 12
+	return validOID(p.revision) && p.start > 0 && p.end >= p.start && p.end <= maxEvidenceBytes && p.end-p.start < 12
 }
 
 type gitlabRangeLine struct {
@@ -124,21 +124,22 @@ func usableLandingQuote(quote string) bool {
 		utf8.ValidString(quote) && !strings.ContainsRune(quote, 0) && !discoveryCredential.MatchString(quote)
 }
 
-func githubDiscussionPosition(rev string, start, end int, hunk string) discussionPosition {
+func githubDiscussionPosition(rev string, start, end int, hunk string) (discussionPosition, bool) {
 	if start == 0 {
 		start = end
 	}
 	p := discussionPosition{revision: rev, start: start, end: end}
 	if !p.valid() || len(hunk) > 64<<10 {
-		return discussionPosition{}
+		return discussionPosition{}, false
 	}
-	hunks := diff.ParseHunks(hunk)
-	if len(hunks) != 1 || hunks[0].NewStart > start {
-		return discussionPosition{}
+	hunks := diff.ParseHunks(strings.TrimRight(hunk, "\r\n"))
+	if len(hunks) != 1 || hunks[0].NewStart <= 0 || hunks[0].NewStart > start {
+		return discussionPosition{}, false
 	}
-	n := hunks[0].NewStart
+	h := hunks[0]
+	n := h.NewStart
 	var lines []string
-	for _, line := range hunks[0].Lines {
+	for _, line := range h.Lines {
 		if line.Type == diff.HunkDeleted {
 			continue
 		}
@@ -148,10 +149,19 @@ func githubDiscussionPosition(rev string, start, end int, hunk string) discussio
 		n++
 	}
 	p.hunkQuote = strings.Join(lines, "\n")
-	if len(lines) != end-start+1 || !usableLandingQuote(p.hunkQuote) {
-		return discussionPosition{}
+	if len(lines) == end-start+1 && usableLandingQuote(p.hunkQuote) {
+		return p, true
 	}
-	return p
+	// GitHub can report an outdated line beyond the truncated hunk. The hunk's
+	// final displayed addition still needs exact verification in the original blob.
+	if start == end && n <= end && end-h.NewStart < h.NewCount && len(h.Lines) != 0 {
+		last := h.Lines[len(h.Lines)-1]
+		if last.Type == diff.HunkAdded && usableLandingQuote(last.Content) {
+			p.start, p.end, p.hunkQuote = n-1, n-1, last.Content
+			return p, false
+		}
+	}
+	return discussionPosition{}, false
 }
 
 type discussionMerge struct {

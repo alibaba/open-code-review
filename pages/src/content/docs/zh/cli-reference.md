@@ -533,6 +533,18 @@ ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
 
 OCR 会读取相关代码、配置、测试、历史版本和提交说明。添加 `--memory-discussions <URL或文件>` 可以纳入 GitHub PR、GitLab MR 或本地 JSON 导出的评审讨论。在线读取使用本机已登录的 `gh` 或 `glab`。本地文件是一个 JSON 数组，每条讨论包含 `id`、`body`，可附带 `path`、`revision`、`url` 和 RFC3339 格式的 `created_at`、`updated_at`、`expires_at`。
 
+在同一个 GitHub PR 推送新代码后，可以在含有相关提交的本地仓库运行以下命令，把行内回复带入下一轮评审。
+
+```bash
+ocr review --from main --to HEAD --memory-db "$DB" --memory-sync --memory-discussions "$PR_URL"
+```
+
+OCR 会将回复关联到原评论，并记录 GitHub 提供的回复公开提交时的代码版本。如果下一轮又对这些代码提出意见，OCR 会核对回复中的理由在当前代码上是否成立，再决定撤回意见或删去其中有误的部分。再次运行上面的命令可以读入新回复。只想复用已导入的回复时，用 `--memory-db "$DB" --review-id "$PR_URL"`。同时提供多个讨论来源或只评审上次推送以来的增量时，请明确传入当前 PR 的 `--review-id`。
+
+如果能在 Go、Python 或 JavaScript 函数里定位到原来讨论的操作，而函数的实现改了，OCR 也可以主动回查原意见。它会对照回复时的源码和本次改动，由独立核验确认当时的解释成立、现在的改动确实使原问题出现，再发表意见。
+
+从本地 JSON 导入时，给原评论和回复填写相同的 `review_id` 和 `path`，并为两者分别填写 `published_at`、`published_revision` 和 `updated_at`。原评论还需提供 `original_revision`、改动后代码的 `start_line`、`end_line` 和对应原文 `source_quote`。回复的 `reply_to` 填原评论的 `id`。评审时用 `--review-id` 选择这组讨论。如果导出数据缺少回复时的提交号，仍可用于提取业务知识。
+
 如果改动位于 Python 模块的顶层函数中，OCR 还会从基线版本里寻找通过相对导入直接调用这个函数的其他模块。例如，订单创建代码可以说明计算结果怎样写入订单。如果仅凭调用处还不能确定实际影响，评审可以在基线和待评审代码中查找字段定义、使用位置或测试。它会核实这次调用和最终结果，再在改动的函数上提出意见。单独运行 `memory sync` 时，可以用 `--at 路径:行号` 指定函数内的一行来查找调用方。
 
 squash 合并会改变提交号。对于改动后代码一侧的行内评论，OCR 会向托管平台核实合并状态，并检查原始代码在合并版本和本次版本中是否都能唯一定位。核验成功后，记录保留原评审提交、源码行、合并提交和时间，历史评审从合并时刻起可以使用这项依据。

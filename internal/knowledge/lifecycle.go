@@ -206,15 +206,18 @@ func (r *rechecker) ancestor(revision string) bool {
 // A shared database can already contain observations mined from the proposal.
 // User-supplied decisions are scoped separately and may refer to an earlier push.
 func (t Tree) CheckReview(ctx context.Context, base string, facts []Fact) ([]Checked, error) {
-	if base != t.Commit {
+	if base != t.Commit || t.ProposalRepliesOnly {
 		accepted := t
 		accepted.Commit, accepted.Workspace = base, false
 		origin := newRechecker(ctx, accepted)
 		kept := make([]Fact, 0, len(facts))
 		for _, f := range facts {
+			if t.ProposalRepliesOnly && f.ReviewID != "" && (f.ReviewReply == nil || f.ReviewReply.ReplyTo != "" && origin.ancestor(f.Revision)) {
+				continue
+			}
 			if f.Origin != "discovery" && !f.schema() || origin.ancestor(f.Revision) {
 				kept = append(kept, f)
-			} else if f.schema() && validOID(base) && origin.checkSchema(Checked{Fact: f}).Status == StatusVerified {
+			} else if base != t.Commit && f.schema() && validOID(base) && origin.checkSchema(Checked{Fact: f}).Status == StatusVerified {
 				// An explicit mapping may have been recorded on the proposal.
 				// Admit it only if the same property already held at the base.
 				kept = append(kept, f)
@@ -227,6 +230,7 @@ func (t Tree) CheckReview(ctx context.Context, base string, facts []Fact) ([]Che
 
 func (t Tree) Check(ctx context.Context, facts []Fact) ([]Checked, error) {
 	r := newRechecker(ctx, t)
+	facts = r.joinReviewReplies(facts)
 	editions := r.discussionEditions(facts)
 	positions := make(map[string]int)
 	result := make([]Checked, 0, len(facts))
@@ -436,6 +440,9 @@ func (r *rechecker) checkSchema(c Checked) Checked {
 }
 
 func (r *rechecker) checkDecision(c Checked) Checked {
+	if c.ReviewReply != nil {
+		return r.checkReviewReply(c)
+	}
 	switch {
 	case c.ReviewID == "" || c.Finding == "" || c.Reason == "":
 		c.Detail = "decision lacks a review identifier, finding or rationale"
@@ -663,6 +670,10 @@ func normalizedText(s string) string {
 
 func conflictKey(f Fact) string {
 	switch {
+	case f.ReviewReply != nil:
+		// A question, correction and acknowledgment in one thread are not
+		// mutually exclusive decisions. Their content still needs verification.
+		return ""
 	case f.IsDecision() && f.ReviewID != "" && f.Finding != "":
 		return "decision\x00" + f.ReviewID + "\x00" + normalizedText(f.Finding)
 	case f.schema():

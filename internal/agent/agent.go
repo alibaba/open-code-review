@@ -1645,7 +1645,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		return false, lastStop, nil
 	}
 	if completed {
-		g.business = selectBusinessContext(a.args.Knowledge, g.Diffs)
+		g.business = a.reviewBusinessContext(a.args.Knowledge, g.Diffs)
 		if len(g.business.rules) > 0 {
 			a.verifyBusinessFindings(ctx, g, rule, concatenatedDiffs)
 		}

@@ -257,6 +257,14 @@ func (t Tree) discoverySources(ctx context.Context, opts DiscoverOptions, result
 	if err != nil {
 		return nil, err
 	}
+	// Replies are private to their review. Their submission commit may be on
+	// the proposal even when repository-wide discovery runs at its base.
+	result.reviewNotes = reviewNotes(opts, cutoff)
+	for _, f := range result.reviewNotes {
+		if f.ReviewReply.ReplyTo != "" && f.DiscussionBody != "" {
+			result.ReviewReplies++
+		}
+	}
 	result.DiscussionSources, err = t.directDiscussionSources(reader, opts, discussions, result)
 	if err != nil {
 		return nil, err
@@ -658,6 +666,11 @@ func (t Tree) discoveryDiscussions(ctx context.Context, opts DiscoverOptions, re
 			result.limit("withheld discussions edited after the cutoff")
 			continue
 		}
+		editedAt, _ := time.Parse(time.RFC3339Nano, d.UpdatedAt)
+		if published, _ := time.Parse(time.RFC3339Nano, d.PublishedAt); !editedAt.IsZero() && published.After(editedAt) {
+			// An inline draft may have been edited before its review was submitted.
+			d.UpdatedAt = published.UTC().Format(time.RFC3339Nano)
+		}
 		if d.Revision != "" && !r.ancestor(d.Revision) {
 			var landed bool
 			if d.remote != nil && opts.allowed(d.Path) && discoveryKind(d.Path) != "documentation" && !discoveryCredential.MatchString(d.Body) {
@@ -738,5 +751,8 @@ func discussionTime(d Discussion) time.Time {
 		stamp = d.CreatedAt
 	}
 	when, _ := time.Parse(time.RFC3339, stamp) // validateDiscussions already checked nonempty timestamps.
+	if published, _ := time.Parse(time.RFC3339Nano, d.PublishedAt); published.After(when) {
+		return published
+	}
 	return when
 }

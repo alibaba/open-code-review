@@ -29,6 +29,9 @@ type Tree struct {
 	AllowPath func(string) bool
 	Paths     []string
 	Now       time.Time
+	// A discussion URL can supply historical examples from another, already
+	// merged PR. Without an explicit review ID, use only replies on the proposal.
+	ProposalRepliesOnly bool
 }
 
 func validOID(s string) bool {

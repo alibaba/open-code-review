@@ -338,6 +338,21 @@ func TestSquashedDiscussionOriginalLandedAndCurrentEvidence(t *testing.T) {
 	}
 }
 
+func TestGitHubTruncatedHunkUsesDisplayedRightSideLine(t *testing.T) {
+	revision := strings.Repeat("a", 40)
+	const quote = "    return item.ready()"
+	const hunk = "@@ -10,6 +40,8 @@\n def process(item):\n-    check_old(item)\n-    return False\n+    check(item)\n+" + quote + "\n"
+	for _, tc := range []struct {
+		reported, wantLine int
+		exact              bool
+	}{{42, 42, true}, {46, 42, false}, {48, 0, false}} {
+		position, exact := githubDiscussionPosition(revision, 0, tc.reported, hunk)
+		if position.start != tc.wantLine || position.end != tc.wantLine || exact != tc.exact || tc.wantLine != 0 && position.hunkQuote != quote {
+			t.Errorf("reported line %d gave position %+v, exact=%t", tc.reported, position, exact)
+		}
+	}
+}
+
 func TestGitLabDiscussionRangeRequiresConsistentNewSideLines(t *testing.T) {
 	rev := strings.Repeat("a", 40)
 	for _, tc := range []struct {

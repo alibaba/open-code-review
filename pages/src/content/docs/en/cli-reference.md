@@ -600,6 +600,18 @@ ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
 
 OCR samples committed code, configuration, nearby tests, commit messages and earlier file versions at the comparison base. Changed paths and hunk locations help it find relevant code. The proposed implementation is reviewed against that knowledge. Add `--memory-discussions <url-or-file>` to ingest review feedback. GitHub pull requests and GitLab merge requests use the signed-in `gh` or `glab` CLI for a repository remote. Other workflows can supply a JSON array of objects with a stable `id`, a `body`, and optional `path`, `revision`, `url`, `created_at`, `updated_at` and `expires_at`. Use RFC3339 timestamps.
 
+To use inline replies when reviewing the next push to a GitHub PR, run this from a checkout containing both revisions:
+
+```bash
+ocr review --from main --to HEAD --memory-db "$DB" --memory-sync --memory-discussions "$PR_URL"
+```
+
+OCR links a reply to the original inline comment and records the commit on which GitHub says the reply was submitted. When a later finding concerns those lines, OCR checks the explanation against the current code before withdrawing or editing the finding. Import new replies with the same command. To reuse imported replies without fetching them again, pass `--memory-db "$DB" --review-id "$PR_URL"`. Set the review ID explicitly when supplying multiple discussion sources or reviewing just the changes since a previous push.
+
+When OCR can locate the same operation in a Go, Python or JavaScript function, a change to that function can also prompt it to revisit the original concern without a new draft finding. It compares the code at submission with the current patch and independently verifies that the earlier explanation held then and the changed implementation makes the concern actionable now.
+
+For a local JSON export, give the parent and reply the same `review_id` and `path`, with `published_at`, `published_revision` and `updated_at` for each note. Include the parent's `original_revision`, right-side `start_line`, `end_line` and exact `source_quote`. Set the reply's `reply_to` to the parent's `id` and use `--review-id` with that export's review ID. Ordinary discussion exports remain usable as source material when the submission commit is unknown.
+
 When a changed line belongs to a top-level Python function, OCR can also follow a relative import from another module in the comparison base to find a direct call. The caller shows how the application uses the result, for example when writing an order. If the caller leaves an effect unclear, review can look up a field, consumer or test in the base and reviewed code. It rechecks the call and its observable result before adding a finding in the changed function. Standalone discovery can use the same caller search with `--at path:line`.
 
 After a squash merge, OCR can recover a right-side inline comment when the hosting service confirms the merge and the quoted lines identify one location in both the landed file and the selected revision. The record keeps the original review revision, source lines, merge revision and merge time. Historical reviews use this evidence from the merge time onward.

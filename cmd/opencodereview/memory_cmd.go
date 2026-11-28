@@ -141,6 +141,9 @@ func newMemoryCommand() *cobra.Command {
 				ids[f.ID] = true
 			}
 			checked = slices.DeleteFunc(checked, func(c knowledge.Checked) bool {
+				if c.ReviewReply != nil {
+					return !strings.Contains(strings.ToLower(c.Finding+"\n"+c.Reason+"\n"+c.Scope), strings.ToLower(search))
+				}
 				if c.Category == knowledge.CategoryDiscussionSource {
 					return !c.MatchesDiscussionSearch(search)
 				}
@@ -173,14 +176,21 @@ func reviewMemory(ctx context.Context, cc *commonContext, opts reviewOptions, co
 		return nil, err
 	}
 	defer s.Close()
-	facts, err := s.ListAt(ctx, opts.reviewID, "", opts.memoryTime)
+	review := opts.reviewID
+	if review == "" && len(opts.memoryDiscussions) == 1 {
+		review = knowledge.DiscussionReviewID(opts.memoryDiscussions[0])
+	}
+	facts, err := s.ListAt(ctx, review, "", opts.memoryTime)
 	if err != nil {
 		return nil, err
 	}
 	tree := reviewMemoryTree(cc, opts, code)
+	tree.ProposalRepliesOnly = opts.reviewID == "" && review != ""
 	if cc.FileFilter != nil {
 		facts = slices.DeleteFunc(facts, func(f knowledge.Fact) bool {
-			return cc.FileFilter.IsUserExcluded(f.Scope) || slices.ContainsFunc(f.EvidencePaths(), cc.FileFilter.IsUserExcluded)
+			// Resolve note editions first, including edits that moved out of the
+			// selected files. The tree checks the current root and reply scopes.
+			return f.ReviewReply == nil && (cc.FileFilter.IsUserExcluded(f.Scope) || slices.ContainsFunc(f.EvidencePaths(), cc.FileFilter.IsUserExcluded))
 		})
 	}
 	checked, err := tree.CheckReview(ctx, code.resolution.ResolvedBase, facts)

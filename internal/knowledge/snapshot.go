@@ -233,6 +233,17 @@ func (f Fact) promptRecord() contextRecord {
 	rec := f.contextRecord()
 	rec.SourceHash, rec.CodeHash, rec.Origin = "", "", ""
 	rec.Feedback, rec.Supersedes, rec.ScopeWitnesses = nil, nil, nil
+	if f.ReviewReply != nil {
+		note := *f.ReviewReply
+		note.Change = nil // Only the group verifying this operation needs both function bodies.
+		rec.ReviewReply = &note
+		rec.Origin = f.Origin
+		rec.Finding, rec.Reason = shortText(f.Finding, 1400), shortText(f.Reason, 1100)
+		if len(f.Citations) > 0 {
+			rec.Citations = []Citation{compactCitation(f.Citations[0], 600)}
+		}
+		return rec
+	}
 	if f.Category == CategoryDiscussionSource {
 		rec.Citations = nil
 		if f.contextStatus == StatusDiscussionSource {

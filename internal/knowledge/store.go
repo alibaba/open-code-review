@@ -225,7 +225,7 @@ func (s *Store) save(ctx context.Context, key string, facts []Fact, report []Che
 		if err != nil {
 			return err
 		}
-		if f.Category == CategoryDiscussionSource {
+		if f.Category == CategoryDiscussionSource || f.ReviewReply != nil {
 			_, err = tx.ExecContext(ctx, "INSERT INTO discussion_edits(fact_row,revision,body) VALUES(?,?,?) ON CONFLICT DO NOTHING", rowid, f.Revision, string(body))
 			if err != nil {
 				return err
@@ -278,6 +278,9 @@ func mapCitations(f Fact, project func(Citation) Citation) Fact {
 }
 
 func stableFactID(f Fact) (string, error) {
+	if f.ReviewReply != nil {
+		return reviewNoteID(f.ReviewID, f.ReviewReply.ID), nil
+	}
 	if ref := f.discussionRef(); ref != "" {
 		// One externally addressable source across edits, even when several
 		// edits were imported while the accepted Git tree stayed identical.
@@ -305,6 +308,9 @@ func stableFactID(f Fact) (string, error) {
 
 func searchText(f Fact) string {
 	terms := []string{f.Scope, f.Source, f.Property, f.Keyword, string(f.Value), f.Finding, f.Reason, f.Category, f.Claim, f.Subject, f.Predicate}
+	if f.ReviewReply != nil {
+		terms = append(terms, f.DiscussionBody)
+	}
 	terms = append(terms, f.Identifiers...)
 	f.eachCitation(func(c Citation) { terms = append(terms, c.Path, c.Anchor, c.Reference, c.Quote) })
 	for _, cond := range f.Conditions {
@@ -417,6 +423,9 @@ func (s *Store) list(ctx context.Context, tx *sql.Tx, review, search, id string,
 	if id != "" {
 		query += " AND id=?"
 		args = append(args, id)
+	} else if canonical := DiscussionReviewID(review); canonical != "" && canonical != review {
+		query += " AND (review='' OR review=? OR review=?)"
+		args = append(args, review, canonical)
 	} else {
 		query += " AND (review='' OR review=?)"
 		args = append(args, review)
@@ -661,6 +670,14 @@ func (s *Store) Feedback(ctx context.Context, tree Tree, id string, input Feedba
 		facts = slices.DeleteFunc(facts, func(f Fact) bool { return !r.ancestor(f.Revision) })
 		if len(facts) == 0 {
 			return Checked{}, fmt.Errorf("no observation of memory %q at this revision", id)
+		}
+		// A reply only has a meaning in the thread that contains its finding.
+		if f := facts[0]; f.ReviewReply != nil && f.ReviewReply.ReplyTo != "" {
+			root, err := s.list(ctx, tx, f.ReviewID, "", reviewNoteID(f.ReviewID, f.ReviewReply.ReplyTo), tree.Now)
+			if err != nil {
+				return Checked{}, err
+			}
+			facts = append(facts, root...)
 		}
 		// Checking just a derived fact would miss a correction, expiry or
 		// rejection recorded against the original discussion.

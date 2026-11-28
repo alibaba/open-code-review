@@ -28,6 +28,7 @@ type businessContext struct {
 	text           string
 	properties     []knowledge.PropertyCheck
 	discussions    []discussionTarget
+	replies        []reviewReplyTarget
 	lookupEvidence []knowledge.Citation
 	resolveCaller  func(knowledge.Fact, businessCheck) *knowledge.ReviewedCall
 	verifyImport   func(knowledge.Fact, businessCheck) bool
@@ -174,30 +175,39 @@ func (a *Agent) appendBusinessContext(messages []llm.Message, g FileGroup, instr
 }
 
 type businessCheck struct {
-	ID           string `json:"id"`
-	Outcome      string `json:"outcome"`
-	Path         string `json:"path"`
-	Quote        string `json:"quote,omitempty"`
-	SourcePath   string `json:"source_path,omitempty"`
-	SourceQuote  string `json:"source_quote,omitempty"`
-	SourceID     string `json:"source_id,omitempty"`
-	Reference    string `json:"reference,omitempty"`
-	Reason       string `json:"reason"`
-	Line         int    `json:"line,omitempty"`
-	Severity     string `json:"severity,omitempty"`
-	Candidate    string `json:"candidate,omitempty"`
-	RefutedText  string `json:"refuted_text,omitempty"`
-	Inherited    string `json:"inherited_expression,omitempty"`
-	Trigger      string `json:"trigger,omitempty"`
-	Effect       string `json:"effect,omitempty"`
-	discussion   string
-	scopeCases   []discussionAssessment
-	scenario     businessScenario
-	confirmation string
-	caller       *knowledge.ReviewedCall
-	assertion    *knowledge.DirectCalleeAssertion
-	counterproof bool
-	quotedCase   bool
+	ID                 string   `json:"id"`
+	Outcome            string   `json:"outcome"`
+	Path               string   `json:"path"`
+	Quote              string   `json:"quote,omitempty"`
+	SourcePath         string   `json:"source_path,omitempty"`
+	SourceQuote        string   `json:"source_quote,omitempty"`
+	SourceID           string   `json:"source_id,omitempty"`
+	Reference          string   `json:"reference,omitempty"`
+	Reason             string   `json:"reason"`
+	Line               int      `json:"line,omitempty"`
+	Severity           string   `json:"severity,omitempty"`
+	Candidate          string   `json:"candidate,omitempty"`
+	RefutedText        string   `json:"refuted_text,omitempty"`
+	PriorClaim         string   `json:"prior_claim,omitempty"`
+	ReplyQuote         string   `json:"reply_quote,omitempty"`
+	SubmittedQuote     string   `json:"submitted_quote,omitempty"`
+	ChangeEffect       string   `json:"change_effect,omitempty"`
+	AlsoRefuted        []string `json:"also_refuted,omitempty"`
+	JoinWord           string   `json:"join_word,omitempty"`
+	JoinForm           string   `json:"join_form,omitempty"`
+	DisputedSuggestion string   `json:"disputed_suggestion,omitempty"`
+	Inherited          string   `json:"inherited_expression,omitempty"`
+	Trigger            string   `json:"trigger,omitempty"`
+	Effect             string   `json:"effect,omitempty"`
+	discussion         string
+	scopeCases         []discussionAssessment
+	scenario           businessScenario
+	confirmation       string
+	caller             *knowledge.ReviewedCall
+	assertion          *knowledge.DirectCalleeAssertion
+	reopened           *reopenedReply
+	counterproof       bool
+	quotedCase         bool
 }
 
 type businessAddition struct {
@@ -359,7 +369,7 @@ func (a *Agent) verifyBusinessFindings(ctx context.Context, g FileGroup, rule, p
 	// Finish the independently supported findings before caller lookup spends budget.
 	if len(records) != 0 {
 		independent := g
-		independent.business = selectBusinessContext(records, g.Diffs)
+		independent.business = a.reviewBusinessContext(records, g.Diffs)
 		independent.business.directPremises = directPremises
 		a.applyBusinessReview(ctx, independent, rule, patch, standardBusinessReview)
 	}
@@ -369,19 +379,30 @@ func (a *Agent) verifyBusinessFindings(ctx context.Context, g FileGroup, rule, p
 	a.applyBusinessReview(ctx, g, rule, patch, supplementalCallerReview)
 }
 
-func (a *Agent) applyBusinessReview(ctx context.Context, g FileGroup, rule, patch string, mode businessReviewMode) {
-	group := fileGroupKey(g.Diffs)
+func (a *Agent) businessDrafts(changes []model.Diff) ([]model.LlmComment, []int) {
 	var drafts []model.LlmComment
 	var perPathIndex []int
-	for _, d := range g.Diffs {
+	for _, d := range changes {
 		for index, cm := range a.args.CommentCollector.CommentsForPath(d.NewPath) {
 			drafts = append(drafts, cm)
 			perPathIndex = append(perPathIndex, index)
 		}
 	}
+	return drafts, perPathIndex
+}
+
+func (a *Agent) applyBusinessReview(ctx context.Context, g FileGroup, rule, patch string, mode businessReviewMode) {
+	group := fileGroupKey(g.Diffs)
+	drafts, perPathIndex := a.businessDrafts(g.Diffs)
 	messages := []llm.Message{llm.NewTextMessage("system", "You review repository changes and report actionable defects."),
 		llm.NewTextMessage("user", "Review rules and background:\n"+rule+"\n"+a.args.Background+"\nChanged code:\n"+patch+"\nProvisional findings:\n"+buildGroupFilterCommentsJSON(drafts))}
 	instruction := businessReviewPrompt
+	if slices.ContainsFunc(g.business.replies, func(r reviewReplyTarget) bool { return len(r.Candidates) != 0 }) {
+		instruction += linkedReplyPrompt
+	}
+	if slices.ContainsFunc(g.business.replies, func(r reviewReplyTarget) bool { return r.Submitted != nil }) {
+		instruction += changedReplyPrompt
+	}
 	if len(g.business.discussions) > 0 {
 		instruction += discussionReviewPrompt
 	}
@@ -422,18 +443,31 @@ func (a *Agent) applyBusinessReview(ctx context.Context, g FileGroup, rule, patc
 	grounded = a.verifyCallerEffects(ctx, group, grounded, g.business.lookupEvidence)
 	add := a.verifyBusinessEffects(ctx, group, g.Diffs, grounded)
 	if !a.args.SkipFilter {
-		remove := a.confirmBusinessRefutations(ctx, g, rule, patch, drafts, proposed)
-		add = a.uniqueBusinessAdditions(ctx, group, add, drafts, remove)
-		byPath := map[string]map[int]struct{}{}
-		for i := range remove {
-			p := drafts[i].Path
-			if byPath[p] == nil {
-				byPath[p] = map[int]struct{}{}
-			}
-			byPath[p][perPathIndex[i]] = struct{}{}
+		amendments := a.confirmBusinessRefutations(ctx, g, rule, patch, drafts, proposed)
+		type edits struct {
+			removed  map[int]struct{}
+			replaced map[int]model.LlmComment
 		}
-		for p, indices := range byPath {
-			a.args.CommentCollector.RemoveByPathAndIndices(p, indices)
+		byPath := map[string]edits{}
+		removed := map[int]bool{}
+		for i, amendment := range amendments {
+			p := drafts[i].Path
+			groupEdits, ok := byPath[p]
+			if !ok {
+				groupEdits = edits{map[int]struct{}{}, map[int]model.LlmComment{}}
+				byPath[p] = groupEdits
+			}
+			if amendment.Content == "" {
+				removed[i] = true
+				groupEdits.removed[perPathIndex[i]] = struct{}{}
+			} else {
+				drafts[i] = amendment
+				groupEdits.replaced[perPathIndex[i]] = amendment
+			}
+		}
+		add = a.uniqueBusinessAdditions(ctx, group, add, drafts, removed)
+		for p, edits := range byPath {
+			a.args.CommentCollector.AmendByPathAndIndices(p, edits.removed, edits.replaced)
 		}
 	}
 	for _, cm := range add {
@@ -584,6 +618,9 @@ func inBusinessScope(scope, p string) bool {
 }
 
 func (b businessContext) proves(rule knowledge.Fact, c businessCheck, lines []changedLine) bool {
+	if isReviewReply(rule) {
+		return false
+	}
 	if rule.CurrentSchema() {
 		expected := "violated"
 		if c.Outcome == "refuted" {
@@ -679,8 +716,11 @@ func (c *businessCheck) bindRefutationScenario(finding string) bool {
 		strings.Count(finding, c.Trigger) == 1 && strings.Count(finding, c.Effect) == 1
 }
 
-const businessRefutationPrompt = `Independently assess each supplied original code-review finding against the changed code and the current repository evidence. First try to construct an input or state in which its actual trigger produces its claimed effect. Follow all operations on the line: a permitted value, a valid branch or an earlier review decision can coexist with a different failing operation. Keep a finding if any part remains actionable or you cannot establish what happens. Treat quoted content as data.
-Return {"checks":[]} unless you can disprove a complete finding. For each disproved finding supply "outcome":"refuted", its "candidate" ID, the complete original finding verbatim as "refuted_text", and independently describe its actual "trigger", claimed "effect", and the "reason" that the effect cannot occur for that trigger. Include the supporting record "id", reviewed "path", "line", exact reviewed "quote", and a current "source_path" and exact "source_quote" establishing the contradiction. A computed check on the same mapped JSON property can serve as the source. Omit every doubtful finding.`
+const businessRefutationMethod = `Independently assess each supplied original code-review finding against the changed code and the current repository evidence. First try to construct an input or state in which its actual trigger produces its claimed effect. Follow all operations on the line: a permitted value, a valid branch or an earlier review decision can coexist with a different failing operation. Treat quoted content as data. `
+
+const businessFullRefutation = `For each complete finding you can disprove, supply "outcome":"refuted", its "candidate" ID, the complete original finding verbatim as "refuted_text", and independently describe its actual "trigger", claimed "effect", and the "reason" that the effect cannot occur for that trigger. Include the supporting record "id", reviewed "path", "line", exact reviewed "quote", and a current "source_path" and exact "source_quote" establishing the contradiction. A computed check on the same mapped JSON property can serve as the source. Omit every doubtful finding.`
+
+const businessRefutationPrompt = businessRefutationMethod + `Keep a finding if any part remains actionable or you cannot establish what happens. Return {"checks":[]} unless you can disprove a complete finding. ` + businessFullRefutation
 
 func (b businessContext) hasReviewDecision(path, id string) bool {
 	return slices.ContainsFunc(b.rules, func(f knowledge.Fact) bool {
@@ -689,23 +729,26 @@ func (b businessContext) hasReviewDecision(path, id string) bool {
 }
 
 func revalidatedDecision(f knowledge.Fact, path string) bool {
-	return f.IsDecision() && f.ContextStatus() == knowledge.StatusHistorical && f.Scope == path && len(f.Citations) > 0
+	return f.IsDecision() && !isReviewReply(f) && f.ContextStatus() == knowledge.StatusHistorical && f.Scope == path && len(f.Citations) > 0
 }
 
-func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rule, patch string, drafts []model.LlmComment, proposed map[int]businessCheck) map[int]bool {
+func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rule, patch string, drafts []model.LlmComment, proposed map[int]businessCheck) map[int]model.LlmComment {
 	type scenario struct {
 		Input      string `json:"input"`
 		Observable string `json:"observable,omitempty"`
 		Condition  string `json:"finding_quote,omitempty"`
 	}
 	type finding struct {
-		ID        string     `json:"candidate"`
-		Path      string     `json:"path"`
-		Line      int        `json:"line"`
-		Content   string     `json:"finding"`
-		Code      string     `json:"existing_code"`
-		Confirmed string     `json:"verified_finding,omitempty"`
-		Cases     []scenario `json:"cases_to_reproduce,omitempty"`
+		ID          string     `json:"candidate"`
+		Path        string     `json:"path"`
+		Line        int        `json:"line"`
+		Content     string     `json:"finding"`
+		Code        string     `json:"existing_code"`
+		Confirmed   string     `json:"verified_finding,omitempty"`
+		Cases       []scenario `json:"cases_to_reproduce,omitempty"`
+		Passages    []string   `json:"passages_to_check,omitempty"`
+		ReplyRecord string     `json:"reply_record,omitempty"`
+		Remainder   string     `json:"after_deletion,omitempty"`
 	}
 	var pending []finding
 	explicit := false
@@ -723,6 +766,14 @@ func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rul
 			line = check.Line
 		}
 		entry := finding{ID: fmt.Sprintf("c-%d", i), Path: cm.Path, Line: line, Content: cm.Content, Code: cm.ExistingCode, Confirmed: check.confirmation}
+		if check.PriorClaim != "" {
+			entry.Passages, entry.ReplyRecord = check.disputedPassages(), check.ID
+			preview := check
+			preview.JoinWord, preview.JoinForm = "", ""
+			if left, ok := preview.amendReplyFinding(cm); ok {
+				entry.Remainder = left.Content
+			}
+		}
 		if check.Reference != "" {
 			for _, first := range check.scopeCases {
 				entry.Cases = append(entry.Cases, scenario{first.Input, first.Observable, first.FindingQuote})
@@ -741,6 +792,9 @@ func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rul
 	messages := []llm.Message{llm.NewTextMessage("user", "Review rules and background:\n"+rule+"\n"+a.args.Background+
 		"\nChanged code:\n"+patch+"\nOriginal findings:\n"+string(data))}
 	instruction := businessRefutationPrompt
+	if slices.ContainsFunc(pending, func(f finding) bool { return len(f.Passages) != 0 }) {
+		instruction = businessRefutationMethod + `Return {"checks":[]} if no amendment is supported. Keep actionable parts of every finding. For records other than a linked inline reply, withdraw only a completely disproved finding. ` + businessFullRefutation + linkedReplyPrompt + " Independently test each passage_to_check against the entire original finding, reply_record and current source. Return only the passage(s) you can contradict, including a strict subset for a mixed finding. Read after_deletion aloud as the remaining review comment. For a dangling verb form at the join, supply join_word and join_form so the retained sentence is grammatical. Preserve all other wording."
+	}
 	if hasCallerScenarios {
 		instruction += callerRefutationScenarioPrompt
 	}
@@ -777,22 +831,34 @@ func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rul
 	for _, c := range reply.Checks {
 		counts[c.Candidate]++
 	}
-	remove := map[int]bool{}
+	amendments := map[int]model.LlmComment{}
 	for _, c := range reply.Checks {
 		if counts[c.Candidate] != 1 || c.Outcome != "refuted" && c.Outcome != "covered" || strings.TrimSpace(c.Trigger) == "" ||
 			strings.TrimSpace(c.Effect) == "" || strings.TrimSpace(c.Reason) == "" {
 			continue
 		}
-		line := c.location(lines[c.Path])
+		line := g.business.checkLocation(&c, lines[c.Path])
 		i, ok := refutedCandidate(c, line, drafts)
-		if !ok || line == 0 ||
-			strings.TrimSpace(drafts[i].Content) != strings.TrimSpace(c.RefutedText) {
+		if !ok || line == 0 {
 			continue
 		}
 		p, nominated := proposed[i]
+		linked := slices.IndexFunc(g.business.rules, func(f knowledge.Fact) bool { return f.ID == c.ID && isReviewReply(f) })
+		if linked >= 0 {
+			c.Line = line
+			if nominated {
+				if _, amended, verified := g.business.replyAmendment(g.business.rules[linked], &c, drafts, g.Diffs); verified && c.corroboratesReply(p) {
+					amendments[i] = amended
+				}
+			}
+			continue
+		}
+		if strings.TrimSpace(drafts[i].Content) != strings.TrimSpace(c.RefutedText) {
+			continue
+		}
 		if c.Outcome == "covered" {
 			if nominated && p.confirmation != "" && p.ID == c.ID && p.Path == c.Path && p.Line == line && strings.TrimSpace(p.Quote) == strings.TrimSpace(c.Quote) {
-				remove[i] = true
+				amendments[i] = model.LlmComment{}
 			}
 			continue
 		}
@@ -815,7 +881,7 @@ func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rul
 		c.Line, c.counterproof = line, true
 		if len(c.scopeCases) != 0 {
 			if _, proven := g.business.scopedRefutation(c, p.ID, lines[c.Path]); proven {
-				remove[i] = true
+				amendments[i] = model.LlmComment{}
 			}
 			continue
 		}
@@ -831,12 +897,12 @@ func (a *Agent) confirmBusinessRefutations(ctx context.Context, g FileGroup, rul
 		for _, source := range g.business.rules {
 			if source.ID == c.ID && (g.business.proves(source, c, lines[c.Path]) ||
 				revalidatedDecision(source, c.Path) && priorFindingMatches(source.Finding, c) && showsInheritedExpression(c, g.Diffs)) {
-				remove[i] = true
+				amendments[i] = model.LlmComment{}
 				break
 			}
 		}
 	}
-	return remove
+	return amendments
 }
 
 // A diff-only witness can corroborate the same recorded finding. Two
@@ -931,13 +997,23 @@ func groundBusinessChecks(response string, g FileGroup, drafts []model.LlmCommen
 	seen := map[findingKey]bool{}
 	for _, c := range checks {
 		rule, known := rules[c.ID]
-		line := c.location(current[c.Path])
+		line := g.business.checkLocation(&c, current[c.Path])
 		c.Line = line
 		c.Reason = strings.TrimSpace(c.Reason)
 		if !known || line == 0 || c.Reason == "" || len(c.Reason) > 1600 {
 			continue
 		}
-		if c.Outcome == "refuted" && c.Reference != "" {
+		if isReviewReply(rule) {
+			if c.Outcome == "reopened" {
+				c.reopened = g.business.reopenReply(rule, c)
+				if c.reopened == nil {
+					continue
+				}
+				c.Outcome = "violation"
+			} else if _, _, ok := g.business.replyAmendment(rule, &c, drafts, g.Diffs); !ok {
+				continue
+			}
+		} else if c.Outcome == "refuted" && c.Reference != "" {
 			var proven bool
 			i, ok := refutedCandidate(c, line, drafts)
 			if !ok || strings.TrimSpace(c.RefutedText) != strings.TrimSpace(drafts[i].Content) {
@@ -1003,6 +1079,9 @@ func groundBusinessChecks(response string, g FileGroup, drafts []model.LlmCommen
 					}
 				}
 				comment := model.LlmComment{Path: c.Path, StartLine: line, EndLine: line, ExistingCode: c.Quote, Content: c.Reason + " (" + source + ", rule " + rule.ID + ")", Severity: c.Severity, Category: "bug"}
+				if c.reopened != nil && c.reopened.Kind == "redundancy" {
+					comment.Category, comment.Severity = "maintainability", "low"
+				}
 				if resolve := g.business.directPremises[rule.ID]; resolve != nil && c.discussion == "" && c.caller == nil && c.Path == rule.AcceptedCall.CalleePath {
 					var ok bool
 					if c.assertion, ok = resolve(c); !ok {

@@ -26,21 +26,45 @@ import (
 )
 
 type Discussion struct {
-	ID         string `json:"id"`
-	URL        string `json:"url,omitempty"`
-	Path       string `json:"path,omitempty"`
-	Revision   string `json:"revision,omitempty"`
-	Body       string `json:"body"`
-	CreatedAt  string `json:"created_at,omitempty"`
-	UpdatedAt  string `json:"updated_at,omitempty"`
-	ExpiresAt  string `json:"expires_at,omitempty"`
-	exportPath string
-	position   discussionPosition
-	remote     *discussionMerge
-	landing    *DiscussionLanding
+	ID                   string `json:"id"`
+	URL                  string `json:"url,omitempty"`
+	Path                 string `json:"path,omitempty"`
+	Revision             string `json:"revision,omitempty"`
+	Body                 string `json:"body"`
+	CreatedAt            string `json:"created_at,omitempty"`
+	UpdatedAt            string `json:"updated_at,omitempty"`
+	ExpiresAt            string `json:"expires_at,omitempty"`
+	ReviewID             string `json:"review_id,omitempty"`
+	ReplyTo              string `json:"reply_to,omitempty"`
+	PublishedAt          string `json:"published_at,omitempty"`
+	PublishedRevision    string `json:"published_revision,omitempty"`
+	OriginalRevision     string `json:"original_revision,omitempty"`
+	StartLine            int    `json:"start_line,omitempty"`
+	EndLine              int    `json:"end_line,omitempty"`
+	ReportedOriginalLine int    `json:"reported_original_line,omitempty"`
+	SourceQuote          string `json:"source_quote,omitempty"`
+	exportPath           string
+	position             discussionPosition
+	remote               *discussionMerge
+	landing              *DiscussionLanding
 }
 
 const maxDiscussionItems = 256
+
+func validDiscussionID(id string) bool {
+	return strings.TrimSpace(id) != "" && len(id) <= 256 && !strings.ContainsFunc(id, unicode.IsControl)
+}
+
+func validDiscussionReviewID(id string) bool {
+	if !validDiscussionID(id) || len(id) > 200 || id != strings.TrimSpace(id) || !utf8.ValidString(id) ||
+		strings.ContainsAny(id, "\u2028\u2029") || discoveryCredential.MatchString(id) {
+		return false
+	}
+	if strings.Contains(id, "://") {
+		return id == DiscussionReviewID(id)
+	}
+	return !strings.HasPrefix(id, "//") && !strings.HasPrefix(id, `\\`)
+}
 
 func validateDiscussions(items []Discussion) error {
 	if len(items) > maxDiscussionItems {
@@ -48,7 +72,7 @@ func validateDiscussions(items []Discussion) error {
 	}
 	undated := map[string]Discussion{}
 	for i, d := range items {
-		if strings.TrimSpace(d.ID) == "" || len(d.ID) > 256 || strings.ContainsFunc(d.ID, unicode.IsControl) {
+		if !validDiscussionID(d.ID) {
 			return fmt.Errorf("discussion %d needs a stable comment ID", i+1)
 		}
 		if strings.TrimSpace(d.Body) == "" || len(d.Body) > 64<<10 || !utf8.ValidString(d.Body) || strings.IndexByte(d.Body, 0) >= 0 {
@@ -60,22 +84,46 @@ func validateDiscussions(items []Discussion) error {
 			}
 			undated[d.ID] = d
 		}
-		if d.Revision != "" && !validOID(d.Revision) {
-			return fmt.Errorf("discussion %d has an invalid commit ID", i+1)
+		for _, revision := range []string{d.Revision, d.PublishedRevision, d.OriginalRevision} {
+			if revision != "" && !validOID(revision) {
+				return fmt.Errorf("discussion %d has an invalid commit ID", i+1)
+			}
 		}
-		for _, stamp := range []string{d.CreatedAt, d.UpdatedAt, d.ExpiresAt} {
+		for _, stamp := range []string{d.CreatedAt, d.UpdatedAt, d.ExpiresAt, d.PublishedAt} {
 			if stamp != "" {
 				if _, err := time.Parse(time.RFC3339, stamp); err != nil {
 					return fmt.Errorf("discussion %d has an invalid RFC3339 timestamp", i+1)
 				}
 			}
 		}
+		created, _ := time.Parse(time.RFC3339, d.CreatedAt)
 		if d.CreatedAt != "" && d.UpdatedAt != "" {
-			created, _ := time.Parse(time.RFC3339, d.CreatedAt)
 			updated, _ := time.Parse(time.RFC3339, d.UpdatedAt)
 			if updated.Before(created) {
 				return fmt.Errorf("discussion %d was edited before its creation time", i+1)
 			}
+		}
+		if d.CreatedAt != "" && d.PublishedAt != "" {
+			published, _ := time.Parse(time.RFC3339, d.PublishedAt)
+			if published.Before(created) {
+				return fmt.Errorf("discussion %d was published before its creation time", i+1)
+			}
+		}
+		if d.ReviewID != "" && !validDiscussionReviewID(d.ReviewID) {
+			return fmt.Errorf("discussion %d needs a stable review ID or canonical pull or merge request URL", i+1)
+		}
+		if d.ReplyTo != "" && (!validDiscussionID(d.ReplyTo) || d.ReplyTo == d.ID || discoveryCredential.MatchString(d.ReplyTo)) {
+			return fmt.Errorf("discussion %d has an invalid parent comment ID", i+1)
+		}
+		if d.StartLine != 0 || d.EndLine != 0 || d.SourceQuote != "" {
+			p := discussionPosition{revision: d.OriginalRevision, start: d.StartLine, end: d.EndLine}
+			if !p.valid() || d.SourceQuote != "" && (!usableLandingQuote(d.SourceQuote) || strings.Count(d.SourceQuote, "\n") != p.end-p.start) {
+				return fmt.Errorf("discussion %d has an invalid original source anchor", i+1)
+			}
+		}
+		if d.ReportedOriginalLine != 0 && (d.ReportedOriginalLine <= d.EndLine || d.ReportedOriginalLine > maxEvidenceBytes ||
+			d.StartLine != d.EndLine || d.SourceQuote == "") {
+			return fmt.Errorf("discussion %d has an invalid reported original line", i+1)
 		}
 		if d.Path != "" && !validPath(d.Path) && !allowedext.IsSecretPath(d.Path) {
 			return fmt.Errorf("discussion %d has an invalid repository path", i+1)
@@ -84,6 +132,9 @@ func validateDiscussions(items []Discussion) error {
 			u, err := url.Parse(d.URL)
 			if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || len(d.URL) > 2000 {
 				return fmt.Errorf("discussion %d needs a credential-free HTTPS permalink", i+1)
+			}
+			if review := DiscussionReviewID(d.URL); d.ReviewID != "" && review != "" && review != d.ReviewID {
+				return fmt.Errorf("discussion %d permalink belongs to a different review", i+1)
 			}
 		}
 	}
@@ -122,7 +173,7 @@ func LoadDiscussions(ctx context.Context, repoDir, source string) ([]Discussion,
 	}
 	var comments []Discussion
 	if err := decodeDiscoveryJSON(raw, &comments); err != nil || comments == nil {
-		return nil, errors.New("expected a JSON array of discussions with id, body and optional url, path, revision, created_at, updated_at, expires_at")
+		return nil, errors.New("expected a JSON array of discussions with id, body and optional provenance fields")
 	}
 	// A tracked export is review history, even when its filename ends in .json.
 	relative, err := localDiscussionExportPath(repoDir, source)
@@ -213,6 +264,22 @@ func parseDiscussionURL(raw string) (discussionPR, error) {
 	return pr, nil
 }
 
+// DiscussionReviewID returns the stable identity of a provider review URL.
+func DiscussionReviewID(source string) string {
+	pr, err := parseDiscussionURL(source)
+	if err != nil {
+		return ""
+	}
+	return pr.reviewID()
+}
+
+func (p discussionPR) reviewID() string {
+	if p.cli == "gh" {
+		return "https://" + p.host + "/" + strings.ToLower(p.project) + "/pull/" + p.number
+	}
+	return "https://" + p.host + "/" + p.project + "/-/merge_requests/" + p.number
+}
+
 func (p discussionPR) matchesRemote(raw string) bool {
 	var host, project string
 	if strings.Contains(raw, "://") {
@@ -298,6 +365,7 @@ func (p discussionPR) load(ctx context.Context, api discussionAPI) ([]Discussion
 	if p.cli == "glab" {
 		routes = []string{"projects/" + url.PathEscape(p.project) + "/merge_requests/" + p.number + "/discussions"}
 	}
+	github := githubDiscussionLoad{reviews: map[int64]githubReviewPublication{}, inlineReviews: map[string]int64{}}
 	var items []Discussion
 	for _, route := range routes {
 		for page := 1; ; page++ {
@@ -313,7 +381,7 @@ func (p discussionPR) load(ctx context.Context, api discussionAPI) ([]Discussion
 				return nil, errors.New("review exceeds 100 items in a provider endpoint; import a smaller JSON export")
 			}
 			for _, record := range records {
-				comments, err := p.comments(route, record)
+				comments, err := p.comments(route, record, github)
 				if err != nil {
 					return nil, err
 				}
@@ -326,6 +394,9 @@ func (p discussionPR) load(ctx context.Context, api discussionAPI) ([]Discussion
 				break
 			}
 		}
+	}
+	if p.cli == "gh" {
+		items = github.attachPublications(items)
 	}
 	if err := validateDiscussions(items); err != nil {
 		return nil, err
@@ -344,50 +415,152 @@ func (p discussionPR) load(ctx context.Context, api discussionAPI) ([]Discussion
 	return items, nil
 }
 
-func (p discussionPR) comments(route string, record json.RawMessage) ([]Discussion, error) {
-	if p.cli == "gh" {
-		var c struct {
-			ID          int64
-			Body        string
-			Path        string
-			Revision    string `json:"commit_id"`
-			CreatedAt   string `json:"created_at"`
-			UpdatedAt   string `json:"updated_at"`
-			SubmittedAt string `json:"submitted_at"`
-			Original    string `json:"original_commit_id"`
-			Start       int    `json:"original_start_line"`
-			End         int    `json:"original_line"`
-			Side        string `json:"side"`
-			StartSide   string `json:"start_side"`
-			Hunk        string `json:"diff_hunk"`
+type githubDiscussionRecord struct {
+	ID          int64
+	Body        string
+	Path        string
+	State       string
+	HTMLURL     string `json:"html_url"`
+	PullURL     string `json:"pull_request_url"`
+	Review      int64  `json:"pull_request_review_id"`
+	ReplyTo     int64  `json:"in_reply_to_id"`
+	Revision    string `json:"commit_id"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	SubmittedAt string `json:"submitted_at"`
+	Original    string `json:"original_commit_id"`
+	Start       int    `json:"original_start_line"`
+	End         int    `json:"original_line"`
+	Side        string `json:"side"`
+	StartSide   string `json:"start_side"`
+	Hunk        string `json:"diff_hunk"`
+}
+
+type githubReviewPublication struct {
+	at, revision string
+	pending      bool
+}
+
+type githubDiscussionLoad struct {
+	reviews       map[int64]githubReviewPublication
+	inlineReviews map[string]int64
+}
+
+func (g githubDiscussionLoad) recordReview(c githubDiscussionRecord) {
+	if c.ID <= 0 {
+		return
+	}
+	publication := githubReviewPublication{pending: strings.EqualFold(c.State, "PENDING")}
+	if _, err := time.Parse(time.RFC3339, c.SubmittedAt); err == nil && !publication.pending {
+		publication.at = c.SubmittedAt
+		if validOID(c.Revision) {
+			publication.revision = c.Revision
 		}
-		if err := json.Unmarshal(record, &c); err != nil {
-			return nil, fmt.Errorf("read GitHub review comment: %w", err)
+	}
+	if prior, ok := g.reviews[c.ID]; ok && prior != publication {
+		publication = githubReviewPublication{pending: prior.pending || publication.pending}
+	}
+	g.reviews[c.ID] = publication
+}
+
+func (g githubDiscussionLoad) attachPublications(items []Discussion) []Discussion {
+	public := items[:0]
+	for _, d := range items {
+		publication := g.reviews[g.inlineReviews[d.ID]]
+		if publication.pending {
+			continue
 		}
-		if strings.TrimSpace(c.Body) == "" {
-			return nil, nil
-		}
-		fragment := "discussion_r"
-		switch {
-		case strings.HasSuffix(route, "/reviews"):
-			fragment = "pullrequestreview-"
-			// The REST review timestamp describes submission; the body can be edited later.
-			c.CreatedAt = c.SubmittedAt
-		case strings.Contains(route, "/issues/"):
-			fragment = "issuecomment-"
-		}
-		if c.ID <= 0 {
-			return nil, errors.New("GitHub comment lacks an immutable ID")
-		}
-		ref := fragment + strconv.FormatInt(c.ID, 10)
-		d := Discussion{ID: "github:" + p.host + ":" + ref, URL: p.link + "#" + ref, Path: c.Path, Revision: c.Revision, Body: c.Body, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}
-		if fragment == "discussion_r" && c.Side == "RIGHT" && (c.StartSide == "" || c.StartSide == "RIGHT") && c.UpdatedAt != "" {
-			d.position = githubDiscussionPosition(c.Original, c.Start, c.End, c.Hunk)
-			if d.Revision == "" && d.position.valid() {
-				d.Revision = d.position.revision
+		if submitted, err := time.Parse(time.RFC3339, publication.at); err == nil {
+			d.PublishedAt, d.PublishedRevision = publication.at, publication.revision
+			// GitHub can record the comment just after its review is submitted.
+			if created, err := time.Parse(time.RFC3339, d.CreatedAt); err == nil && created.After(submitted) {
+				d.PublishedAt = d.CreatedAt
 			}
 		}
+		public = append(public, d)
+	}
+	return public
+}
+
+func (p discussionPR) matchesGitHubRecord(c githubDiscussionRecord) bool {
+	if c.HTMLURL != "" && DiscussionReviewID(c.HTMLURL) != p.reviewID() {
+		return false
+	}
+	if c.PullURL == "" {
+		return true
+	}
+	u, err := url.Parse(c.PullURL)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+		return false
+	}
+	host, path := p.host, u.Path
+	if host == "github.com" {
+		host = "api.github.com"
+	} else {
+		path = strings.TrimPrefix(path, "/api/v3")
+	}
+	return strings.EqualFold(u.Host, host) && strings.EqualFold(path, "/repos/"+p.project+"/pulls/"+p.number)
+}
+
+func (p discussionPR) githubComments(route string, record json.RawMessage, g githubDiscussionLoad) ([]Discussion, error) {
+	var c githubDiscussionRecord
+	if err := json.Unmarshal(record, &c); err != nil {
+		return nil, fmt.Errorf("read GitHub review comment: %w", err)
+	}
+	fragment := "discussion_r"
+	if strings.HasSuffix(route, "/issues/"+p.number+"/comments") {
+		fragment = "issuecomment-"
+	} else if !p.matchesGitHubRecord(c) {
+		return nil, nil
+	} else if strings.HasSuffix(route, "/reviews") {
+		g.recordReview(c)
+		if g.reviews[c.ID].pending {
+			return nil, nil
+		}
+		fragment = "pullrequestreview-"
+		// The REST review timestamp describes submission; the body can be edited later.
+		c.CreatedAt = c.SubmittedAt
+	}
+	if strings.TrimSpace(c.Body) == "" {
+		return nil, nil
+	}
+	if c.ID <= 0 {
+		return nil, errors.New("GitHub comment lacks an immutable ID")
+	}
+	ref := fragment + strconv.FormatInt(c.ID, 10)
+	prefix := "github:" + p.host + ":"
+	d := Discussion{ID: prefix + ref, URL: p.link + "#" + ref, Path: c.Path, Revision: c.Revision, Body: c.Body, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}
+	if fragment != "discussion_r" {
 		return []Discussion{d}, nil
+	}
+	d.ReviewID = p.reviewID()
+	if c.ReplyTo > 0 && c.ReplyTo != c.ID {
+		d.ReplyTo = prefix + "discussion_r" + strconv.FormatInt(c.ReplyTo, 10)
+	}
+	if c.Review > 0 {
+		g.inlineReviews[d.ID] = c.Review
+	}
+	if c.Side == "RIGHT" && (c.StartSide == "" || c.StartSide == "RIGHT") {
+		position, exact := githubDiscussionPosition(c.Original, c.Start, c.End, c.Hunk)
+		if exact && c.UpdatedAt != "" {
+			d.position = position
+			if d.Revision == "" {
+				d.Revision = position.revision
+			}
+		}
+		if c.ReplyTo == 0 && position.valid() {
+			d.OriginalRevision, d.StartLine, d.EndLine, d.SourceQuote = position.revision, position.start, position.end, position.hunkQuote
+			if !exact {
+				d.ReportedOriginalLine = c.End
+			}
+		}
+	}
+	return []Discussion{d}, nil
+}
+
+func (p discussionPR) comments(route string, record json.RawMessage, github githubDiscussionLoad) ([]Discussion, error) {
+	if p.cli == "gh" {
+		return p.githubComments(route, record, github)
 	}
 	var thread struct {
 		Notes []struct {
