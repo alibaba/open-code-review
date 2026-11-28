@@ -16,7 +16,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (selection.go) — drop binaries, secret paths,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -62,7 +62,7 @@ flowchart TD
 Неотслеживаемые файлы читаются с диска и считаются целиком добавленными, чтобы
 их можно было проверить до коммита.
 
-## Пятиступенчатый фильтр файлов
+## Шестиступенчатый фильтр файлов
 
 После загрузки diff каждый файл проходит через функцию
 [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
@@ -70,6 +70,7 @@ flowchart TD
 
 ```
 binary          — файл является бинарным
+secret_exclude  — путь совпадает со встроенным шаблоном секретов (.env, id_rsa, …)
 user_exclude    — совпадение с шаблоном из списка `exclude`
 unsupported_ext — расширение отсутствует в supported_file_types.json
 default_path    — совпадение со встроенным шаблоном исключения тестовых файлов
@@ -85,12 +86,15 @@ default_path    — совпадение со встроенным шаблон�
 Проверки выполняются в таком порядке:
 
 1. `binary` — бинарные файлы отбрасываются первыми.
-2. `user_exclude` — значение `exclude` вашего проекта всегда имеет приоритет.
-3. `user_include` — если у фильтра есть шаблоны включения **и** файл совпадает
+2. `secret_exclude` — один из путей совпадает со встроенной защитой
+   **секретных путей** (`.env`, `id_rsa`, `.netrc`, …). Как и
+   `provider_directory`, вернуть файл правилом `include` нельзя.
+3. `user_exclude` — значение `exclude` вашего проекта всегда имеет приоритет.
+4. `user_include` — если у фильтра есть шаблоны включения **и** файл совпадает
    с одним из них, он сразу сохраняется (возвращается пустое значение), минуя
    расположенные ниже проверки `unsupported_ext` и `default_path`.
-4. `unsupported_ext` фильтрует по списку допустимых расширений.
-5. `default_path` — последняя проверка: она сопоставляет встроенные шаблоны
+5. `unsupported_ext` фильтрует по списку допустимых расширений.
+6. `default_path` — последняя проверка: она сопоставляет встроенные шаблоны
    исключения **тестовых файлов** (`**/*_test.go`,
    `**/*.test.{js,jsx,ts,tsx}`, `**/__tests__/**`, `**/*_test.py`,
    `**/*_spec.rb`, `**/*.test.ets`, …). Каждый шаблон начинается с `**/`.
@@ -224,6 +228,16 @@ loop up to MAX_TOOL_REQUEST_TIMES (default 100):
 | 60 % от MAX_TOKENS | `tokenSoftThreshold` | Запускает **асинхронное** фоновое сжатие; текущий цикл продолжает выполняться. |
 | 80 % от MAX_TOKENS | `tokenWarningThreshold` | Выполняет сжатие **синхронно** перед отправкой следующего запроса. |
 
+До выбора активных раундов OCR резервирует место для текста сводки: не больше
+настроенного лимита вывода, 20% контекстного окна и остатка после учёта
+фиксированного промпта и обрамления. Некоторые провайдеры включают токены
+рассуждений в лимит вывода. Если в самом запросе на сжатие остаётся место до
+порога 80%, OCR может увеличить бюджет генерации в пределах настроенного лимита,
+попросив модель уложить текст сводки в резерв. Размер пересобранного диалога
+по-прежнему проверяется. Ограничения отдельного диалога не
+зависят от совокупного бюджета `--max-tokens-budget`; установка этого бюджета
+в ноль не отключает сжатие контекста.
+
 ### Три зоны
 
 ```mermaid
@@ -239,30 +253,24 @@ flowchart LR
 
 «Раунд» — это одно сообщение ассистента и следующие за ним сообщения с
 результатами инструментов. `partitionMessages` обходит раунды с конца,
-сохраняя столько, сколько помещается в
-`(0.80 × MAX_TOKENS) - reservedTokens`. Всё более старое содержимое образует
-**зону сжатия**.
+сохраняя как можно больше раундов, пока их число токенов строго меньше
+`(0.80 × MAX_TOKENS) - reservedTokens`. Резерв включает первые два сообщения
+(в том числе предыдущие сводки), резерв для текста новой сводки и её обрамление.
+Всё более старое содержимое образует **зону сжатия**. Если зона сжатия пуста,
+диалог остаётся без изменений; пока исходный диалог ниже порога
+предупреждения, фоновое сжатие не сворачивает в сводку все раунды после
+фиксированного префикса.
 
 Зона сжатия преобразуется в XML и передаётся модели с промптом
 `MEMORY_COMPRESSION_TASK`; возвращённая сводка добавляется к исходному
 сообщению пользователя внутри тегов `<previous_review_summary>`.
 
-После сжатия: `messages = frozen[2] + compressed_user_msg + active`.
-
-```go
-// compression.go
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-    part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-    contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-    // … call MEMORY_COMPRESSION_TASK …
-    rebuilt[1] = llm.NewTextMessage(role, currentText+
-        "\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-    for i := part.compressEnd; i < len(msgs); i++ {
-        rebuilt = append(rebuilt, msgs[i])
-    }
-    return rebuilt, nil
-}
-```
+После сжатия: `messages = system + (original_user + summary) + active`.
+Пересобранный диалог проверяется по той же локальной оценке токенов и должен
+быть меньше исходного. Отсутствие шаблона сжатия, пустая сводка или результат,
+который не уменьшает объём, оставляют исходную историю без изменений.
+Непригодный шаблон сводки или превышение лимита после пересборки приводят к
+ошибке, при этом ни одно исходное сообщение не удаляется.
 
 ### Асинхронное и синхронное сжатие
 
@@ -271,7 +279,11 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 токенов готовая сводка подставляется функцией `tryApplyPendingCompression`.
 Если до завершения асинхронной задачи доля токенов пересекает порог
 предупреждения, цикл приостанавливается и запускает `runCompression`
-синхронно, гарантируя, что следующий запрос поместится в контекст.
+синхронно. Сообщения, добавленные после создания фонового снимка, сохраняются
+при применении сводки. Если диалог по-прежнему не удаётся уменьшить строго
+ниже локального порога предупреждения, цикл останавливается с
+`StopCompression`, а не молча отбрасывает несжатую историю. Эта оценка не
+гарантирует соответствия фактической ёмкости контекстного окна провайдера.
 
 ## Конвейер обработки комментариев
 

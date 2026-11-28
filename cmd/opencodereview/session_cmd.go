@@ -35,12 +35,13 @@ var sessionCmd = &cobra.Command{
 var sessionListRepoDir string
 var sessionListJSON bool
 var sessionListLimit int
+var sessionListBranch string
 
 var sessionListCmd = &cobra.Command{
 	Use:     "list [flags]",
 	Aliases: []string{"ls"},
 	Short:   "List recent review sessions for the current repo",
-	Long:    "List review sessions previously persisted to ~/.opencodereview/sessions/.\nThe session id printed here can be passed to 'ocr review --resume <id>'.",
+	Long:    "List review sessions previously persisted to ~/.opencodereview/sessions/.\nA session id printed here can be passed to 'ocr review --resume <id>' or 'ocr scan --resume <id>' when its mode matches.",
 	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSessionList()
@@ -133,7 +134,7 @@ var sessionRmCmd = &cobra.Command{
 	Long: "Delete a persisted review session from ~/.opencodereview/sessions/.\n\n" +
 		"The id is enough on its own, so this works from anywhere; --repo only narrows\n" +
 		"the search. An id saved for more than one repository is listed, not guessed at.\n\n" +
-		"The file cannot be recovered, so this confirms first unless --yes is given.",
+		"Any attached Analysis report, evidence and logs are also deleted. This confirms first unless --yes is given.",
 	Example: "  ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b\n" +
 		"  ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --yes\n" +
 		"  ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b --repo ~/work/my-project",
@@ -201,6 +202,7 @@ func init() {
 	sessionListCmd.Flags().StringVar(&sessionListRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "emit JSON instead of a table")
 	sessionListCmd.Flags().IntVar(&sessionListLimit, "limit", 20, "cap the number of listed sessions (0 = unlimited)")
+	sessionListCmd.Flags().StringVar(&sessionListBranch, "branch", "", "only list sessions recorded on this branch")
 
 	sessionShowCmd.Flags().StringVar(&sessionShowRepoDir, "repo", "", "only look for the session under this repository (default: every repository)")
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "emit JSON instead of a table")
@@ -278,6 +280,15 @@ func runSessionList() error {
 	if err != nil {
 		return fmt.Errorf("list sessions: %w", err)
 	}
+	if sessionListBranch != "" {
+		filtered := make([]session.Summary, 0, len(summaries))
+		for _, summary := range summaries {
+			if summary.GitBranch == sessionListBranch {
+				filtered = append(filtered, summary)
+			}
+		}
+		summaries = filtered
+	}
 	if sessionListLimit > 0 && len(summaries) > sessionListLimit {
 		summaries = summaries[:sessionListLimit]
 	}
@@ -289,6 +300,10 @@ func runSessionList() error {
 	}
 
 	if len(summaries) == 0 {
+		if sessionListBranch != "" {
+			fmt.Printf("No sessions found for %s on branch %s\n", resolvedRepo, sessionListBranch)
+			return nil
+		}
 		fmt.Printf("No sessions found for %s\n", resolvedRepo)
 		return nil
 	}
@@ -402,7 +417,11 @@ func runSessionCompare(beforeID, afterID string) error {
 	if err != nil {
 		return fmt.Errorf("load session %q: %w", afterID, err)
 	}
-	if beforeSummary.RepoDir != afterSummary.RepoDir {
+	// Not an exact string compare: the two sessions may have been recorded from
+	// different spellings of this one directory (`C:\repo` from a resolved path,
+	// `C:/repo` from --repo), and splitting a repository across its own spellings
+	// is what made compare refuse the pair it was asked about.
+	if !session.SameRepoPath(beforeSummary.RepoDir, afterSummary.RepoDir) {
 		return fmt.Errorf("sessions belong to different repositories: %s was recorded in %s, %s in %s",
 			beforeID, beforeSummary.RepoDir, afterID, afterSummary.RepoDir)
 	}
@@ -509,7 +528,7 @@ func filterComments(comments []model.LlmComment, severities, categories string) 
 
 func parseFilterSet(s string) map[string]bool {
 	set := map[string]bool{}
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		part = strings.ToLower(strings.TrimSpace(part))
 		if part != "" {
 			set[part] = true
@@ -559,6 +578,7 @@ func runSessionRmAnywhere(cmd *cobra.Command, sessionID string) error {
 		} else {
 			fmt.Fprintf(cmd.OutOrStdout(), "Delete session %s? (its metadata could not be read)\n", sessionID)
 		}
+		warnAnalysisDeletion(cmd, loc.Path)
 		ok, err := confirmDeletion(cmd)
 		if err != nil {
 			return err
@@ -620,6 +640,7 @@ func runSessionRm(cmd *cobra.Command, sessionID string) error {
 		} else {
 			fmt.Fprintf(cmd.OutOrStdout(), "Delete session %s? (its metadata could not be read)\n", sessionID)
 		}
+		warnAnalysisDeletion(cmd, summary.FilePath)
 		ok, err := confirmDeletion(cmd)
 		if err != nil {
 			return err
@@ -638,6 +659,12 @@ func runSessionRm(cmd *cobra.Command, sessionID string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %s\n", sessionID)
 	return nil
+}
+
+func warnAnalysisDeletion(cmd *cobra.Command, path string) {
+	if _, err := os.Lstat(filepath.Join(strings.TrimSuffix(path, ".jsonl"), "analysis")); err == nil {
+		fmt.Fprintln(cmd.OutOrStdout(), "  This also deletes the Analysis report, evidence, and logs.")
+	}
 }
 
 // confirmDeletion reads a yes/no answer; a non-interactive stdin answers no.
@@ -692,6 +719,9 @@ func printSessionDetail(w io.Writer, s *session.Summary, items []session.ItemDet
 		fmt.Fprintf(w, "  Model:     %s\n", s.Model)
 	}
 	fmt.Fprintf(w, "  Mode:      %s\n", displayMode(s.ReviewMode))
+	if s.Analysis != nil && s.Analysis.Enabled {
+		fmt.Fprintf(w, "  Analysis:  %s\n", filepath.Join(strings.TrimSuffix(s.FilePath, ".jsonl"), "analysis"))
+	}
 	if r := describeRange(*s); r != "" && r != "-" {
 		fmt.Fprintf(w, "  Range:     %s\n", r)
 	}

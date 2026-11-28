@@ -43,17 +43,17 @@ copilot plugin install alibaba/open-code-review:plugins/open-code-review
 проекта** (закоммитьте его, чтобы навык был доступен всей команде):
 
 ```bash
-mkdir -p .github/skills/open-code-review
-curl -o .github/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p .github/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C .github/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 **На уровне пользователя** (доступен в каждом проекте на компьютере):
 
 ```bash
-mkdir -p ~/.copilot/skills/open-code-review
-curl -o ~/.copilot/skills/open-code-review/SKILL.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/skills/open-code-review/SKILL.md
+mkdir -p ~/.copilot/skills
+curl -fsSL https://github.com/alibaba/open-code-review/archive/refs/heads/main.tar.gz |
+  tar -xz -C ~/.copilot/skills --strip-components=2 open-code-review-main/skills/open-code-review
 ```
 
 Copilot CLI также обнаруживает `.agents/skills/` и `.claude/skills/` в проекте;
@@ -70,14 +70,14 @@ Copilot выберет навык по его описанию:
 
 ```
 /open-code-review
-/open-code-review review this PR against main
+/open-code-review 42
 /open-code-review focus on race conditions in commit abc123
 ```
 
 | Вы говорите | Что запускает навык |
 | --- | --- |
 | «проверь мои изменения» | `ocr review --audience agent` (индексированные, неиндексированные и неотслеживаемые изменения) |
-| «проверь этот PR» | `ocr review --from main --to <branch>` |
+| `42` | `python3 "$SKILL_DIR/scripts/review_pr.py" 42` |
 | «проверь коммит abc123» | `ocr review --commit abc123` |
 
 Навык управляет `ocr` с собственной настроенной моделью и сообщает замечания,

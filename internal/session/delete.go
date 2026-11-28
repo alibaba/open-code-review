@@ -59,7 +59,7 @@ func CheckSessionRepo(repoDir, sessionID string) error {
 			ErrSessionUnverifiable, sessionID,
 		)
 	}
-	if !sameRepoPath(recorded, repoDir) {
+	if !SameRepoPath(recorded, repoDir) {
 		return fmt.Errorf("%w: %s was recorded for %s", ErrSessionOtherRepo, sessionID, recorded)
 	}
 	return nil
@@ -87,10 +87,35 @@ func DeleteSession(repoDir, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil {
+	if err := removeReport(path); err != nil {
 		return fmt.Errorf("delete session %q: %w", sessionID, err)
 	}
 	return nil
+}
+
+func removeReport(path string) error {
+	if _, err := os.Lstat(path); err != nil {
+		return err
+	}
+	directory := strings.TrimSuffix(path, ".jsonl")
+	info, err := os.Lstat(directory)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if info != nil && info.IsDir() {
+		root, err := os.OpenRoot(filepath.Dir(directory))
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		if err := root.RemoveAll(filepath.Join(filepath.Base(directory), "analysis")); err != nil {
+			return err
+		}
+		if err := os.Remove(directory); err != nil {
+			return err
+		}
+	}
+	return os.Remove(path)
 }
 
 // recordedRepoDir returns the working directory a session recorded, and whether it had one.
@@ -109,8 +134,17 @@ func recordedRepoDir(path string) (string, bool) {
 	return cwd, true
 }
 
-// sameRepoPath reports whether two repository paths name the same directory.
-func sameRepoPath(a, b string) bool {
+// SameRepoPath reports whether two repository paths name the same directory.
+//
+// A session records whichever spelling the caller used: `C:\repo` arrives from a
+// resolved Windows path, `C:/repo` from a `--repo` flag or Git's forward-slash
+// form, and a trailing separator is its own spelling again. An exact string
+// compare therefore splits one repository across two names, which is what made
+// `session compare` refuse two sessions of the repository it was run in. Clean
+// settles separators and dot segments; `os.SameFile` covers the rest — symlinks,
+// bind mounts, and the case-insensitive filesystems where `A-B` and `a-b` are
+// one directory.
+func SameRepoPath(a, b string) bool {
 	ca, cb := filepath.Clean(a), filepath.Clean(b)
 	if ca == cb {
 		return true
@@ -197,7 +231,7 @@ func DeleteSessionAt(loc Location) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil {
+	if err := removeReport(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("%w: %s", ErrSessionNotFound, loc.SessionID)
 		}

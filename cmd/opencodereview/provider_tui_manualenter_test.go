@@ -22,6 +22,23 @@ func TestHandleManualFormEnter_Steps(t *testing.T) {
 		if got.manualStep != manualStepURL {
 			t.Errorf("empty URL should stay on URL step, got %d", got.manualStep)
 		}
+		if got.formError != manualURLRequiredError {
+			t.Errorf("formError = %q, want %q", got.formError, manualURLRequiredError)
+		}
+	})
+
+	t.Run("URL without a scheme stays and explains why", func(t *testing.T) {
+		m := newProviderTUI(&Config{}, "")
+		m.manualStep = manualStepURL
+		m.manualURLInput.SetValue("api.example.com/v1")
+		out, _ := m.handleManualFormEnter()
+		got := out.(providerTUIModel)
+		if got.manualStep != manualStepURL {
+			t.Errorf("invalid URL should stay on URL step, got %d", got.manualStep)
+		}
+		if got.formError == "" {
+			t.Error("invalid URL should set formError")
+		}
 	})
 
 	t.Run("URL non-empty advances to protocol", func(t *testing.T) {
@@ -32,6 +49,23 @@ func TestHandleManualFormEnter_Steps(t *testing.T) {
 		got := out.(providerTUIModel)
 		if got.manualStep != manualStepProtocol {
 			t.Errorf("manualStep = %d, want manualStepProtocol", got.manualStep)
+		}
+		if got.formError != "" {
+			t.Errorf("formError = %q, want empty", got.formError)
+		}
+	})
+
+	t.Run("URL is trimmed and a localhost endpoint is accepted", func(t *testing.T) {
+		m := newProviderTUI(&Config{}, "")
+		m.manualStep = manualStepURL
+		m.manualURLInput.SetValue("  http://localhost:8000/v1  ")
+		out, _ := m.handleManualFormEnter()
+		got := out.(providerTUIModel)
+		if got.manualStep != manualStepProtocol {
+			t.Fatalf("manualStep = %d, want manualStepProtocol; formError = %q", got.manualStep, got.formError)
+		}
+		if want := "http://localhost:8000/v1"; got.manualURLInput.Value() != want {
+			t.Errorf("URL = %q, want %q", got.manualURLInput.Value(), want)
 		}
 	})
 

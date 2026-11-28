@@ -93,7 +93,11 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 The main command. Resolves a Git diff, groups the changed files
 semantically, dispatches one sub-agent per group, collects review
-comments, and prints them.
+comments, and prints them. Final `review` and `scan` reports list findings
+from least to most severe in text, JSON, and SARIF: `low`, `medium`, `high`,
+then `critical`. Findings whose reported severity is missing or unrecognized
+come before `low`. Ties keep their collection order, which can vary between
+parallel runs.
 
 ### Synopsis
 
@@ -127,11 +131,13 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per subtask. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. A resolved positive value sets the cap exactly. |
-| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
-| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Checked before every LLM round: a subtask already over budget gets one final round to submit findings and is reported as `failed(budget)`, no further subtasks are dispatched, and partial results are still published. |
+| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per subtask in both Review and Analysis; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
+| `--analysis` | — | off | Run a separate Behavior/Impact analysis alongside a commit or range review (`--commit` or `--from`, text or JSON only). Omit this flag for workspace reviews of uncommitted changes. Not compatible with preview or resume. Analysis has 300 investigation rounds, independent of `--max-tools`, plus at most one submission-only round if the budget is exhausted. A failed or skipped analysis does not change the Review exit status. |
+| `--analysis-max-tokens-budget <n>` | — | `0` (unlimited) | Set a soft limit on total input and output tokens for Analysis only. One additional model request can run concurrently with Review. Inspect `analysis_meta.usage` and `analysis_meta.execution_status` in JSON. |
+| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Checked before every LLM round: a subtask already over budget gets one final round to submit findings and is reported as `failed(budget)`, no further subtasks are dispatched, and the CLI emits available results. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
-| `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
+| `--max-git-procs <n>` | — | `16` | Maximum number of concurrent Git subprocesses across Review and Analysis combined. |
 
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
@@ -199,6 +205,22 @@ ocr review -c abc123
 
 Reviews the diff produced by `git show abc123` (i.e., the changes that
 single commit introduced).
+
+Commit and range reviews omit changed paths matched by the root `.gitignore`
+in the target commit (`--commit` or the resolved `--to`), not the working tree.
+Analysis uses the same rule for its change list. An ignored file can still be
+read as context; use `--exclude` to prevent Analysis from reading it.
+
+With `--analysis`, one session ID opens a single report with Review and Analysis
+tabs in `ocr viewer`. The Analysis tab shows the investigation's execution status,
+changed files in scope (not files read), model assessment, and cited evidence.
+Select a numbered reference in the text to read its evidence, or expand
+**Evidence** to browse both cited and uncited observations.
+Expand **Conversations** to inspect each recorded Analysis request, its model
+response, and tool calls and results. This trace stays out of HTML exports.
+Its Markdown, result metadata, evidence, and execution trace live under
+`~/.opencodereview/sessions/<encoded-repo>/<session-id>/analysis/`. Evidence and
+logs can contain source text. An unfinished run may have no final status.
 
 ### Resuming interrupted reviews
 
@@ -359,12 +381,12 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 
 | Code | Meaning |
 |---|---|
-| `0` | Review completed (possibly with zero comments, possibly with non-fatal warnings). |
-| `1` | Fatal error — bad flags, can't resolve LLM endpoint, all per-group sub-agents failed, etc. The error text is printed to stderr. |
+| `0` | Review completed or was skipped (possibly with zero comments or non-fatal warnings). A partial review caused only by configured budget limits also exits `0`. |
+| `1` | Fatal error, or an operational per-group failure such as a timeout, provider error, or bad configuration. The CLI emits available results before returning the error. |
 
-Non-fatal warnings (a single sub-agent failed, a file exceeded the token
-threshold, etc.) are printed inline; in JSON mode they're added to the
-`warnings` array.
+Warnings are printed inline; in JSON mode they're added to the `warnings`
+array. Inspect `manifest.coverage.failed` for the affected files and their
+failure classifications.
 
 ## `ocr scan`
 
@@ -419,6 +441,8 @@ Sub-commands:
 ocr session list
 ocr session list --limit 50
 ocr session list --json
+ocr session list --branch feat/my-feature --limit 5
+ocr sessions ls --repo /path/to/repo --branch main --json
 ```
 
 | Flag | Default | Description |
@@ -426,6 +450,17 @@ ocr session list --json
 | `--repo <path>` | current dir | Repository whose sessions should be listed. |
 | `--json` | `false` | Emit session summaries as JSON. |
 | `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
+| `--branch <name>` | empty | Only list sessions whose saved branch name matches exactly, including case. |
+
+Branch filtering runs before `--limit` and preserves newest-first ordering.
+Omitting `--branch` or passing an empty value keeps the unfiltered behavior.
+When filtering, sessions without a recorded branch are excluded; no matches
+produce a branch-specific message in text mode or `[]` in JSON mode.
+
+The filter uses saved session metadata, so a deleted branch remains searchable
+without checking out that branch. The repository directory selected by `--repo`
+must still exist, but it need not remain a Git checkout. Filtering does not change
+the checks required to resume a session.
 
 ### `ocr session show`
 
@@ -525,7 +560,8 @@ treat the file with the same care as the repository itself before publishing it.
 
 ### `ocr session rm`
 
-Deletes one persisted session from `~/.opencodereview/sessions/`.
+Deletes one persisted session from `~/.opencodereview/sessions/`, including its
+attached Analysis report, evidence and logs if present.
 
 ```bash
 ocr session rm 9f2c1b4a-7e35-4d61-b2f0-6c8a41d9e72b

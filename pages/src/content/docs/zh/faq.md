@@ -100,6 +100,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | 原因 | 修复 |
 |---|---|
 | `binary` | 无需处理——二进制文件无可评审文本。 |
+| `secret_exclude` | 无需操作——`.env`、`id_rsa`、`.netrc` 等凭据路径永远不可评审，即使被 `include` 匹配也是如此。 |
 | `user_exclude` | 从你的 `exclude` 列表移除该模式。 |
 | `unsupported_ext` | 把扩展名加入你的 `include` 列表以绕过白名单门。 |
 | `default_path` | 把文件加入 `include`——那会覆盖内置测试文件排除模式。 |
@@ -192,11 +193,12 @@ OCR 跳过该文件并继续——JSON 模式下你也会在 `warnings` 中看�
 - 模型完全不支持原生工具调用（本地模型常见）——见
   ["No tool calls parsed"（本地模型 / Ollama）](#no-tool-calls-parsed-本地模型-ollama)。
 
-### 一些子 agent 失败；运行仍以 0 退出
+### 一些子 agent 失败；为什么运行以非零码退出？
 
-有意为之。OCR 隔离 per-file 失败，使一个有问题的文件不会拖垮 20 文件的评审。只要*有*
-成功的，聚合退出码就是 `0`；仅当完全失败（零成功子 agent）才非零退出。查看 JSON
-模式的 `warnings` 数组或文本模式的 stderr，看哪些文件失败了。
+OCR 会隔离 per-group 失败，并继续发布已完成分组的发现。但 timeout、provider 错误、
+配置错误等操作性失败仍会使命令以非零码退出，即使其他分组已成功，这样 CI 才能发现
+覆盖不完整。仅由已配置预算限制导致的部分评审仍为成功退出。可在 JSON 模式下查看
+`manifest.coverage.failed` 和 `warnings`，或查看文本摘要，以了解哪些分组失败以及能否恢复。
 
 ### CI 运行比本地慢得多
 

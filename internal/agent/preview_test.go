@@ -195,6 +195,55 @@ func TestWhyExcluded_DefaultPathFilter(t *testing.T) {
 			},
 			expected: ExcludeNone,
 		},
+		{
+			name: "rust integration test excluded by default path",
+			diff: model.Diff{
+				NewPath: "tests/integration.rs",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "rust tests.rs module excluded by default path",
+			diff: model.Diff{
+				NewPath: "crates/core/src/tests.rs",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "rust _tests.rs file excluded by default path",
+			diff: model.Diff{
+				NewPath: "crates/core/src/parser_tests.rs",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "rust benchmark file excluded by default path",
+			diff: model.Diff{
+				NewPath: "benches/throughput.rs",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "cpp gtest file excluded by default path",
+			diff: model.Diff{
+				NewPath: "absl/strings/str_cat_test.cc",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "c file in tests directory excluded by default path",
+			diff: model.Diff{
+				NewPath: "tests/unit/test_list.c",
+			},
+			expected: ExcludeDefaultPath,
+		},
+		{
+			name: "cpp contest source kept",
+			diff: model.Diff{
+				NewPath: "src/contest.cc",
+			},
+			expected: ExcludeNone,
+		},
 	}
 
 	for _, tt := range tests {

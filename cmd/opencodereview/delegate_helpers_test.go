@@ -5,8 +5,15 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
+
+func TestDelegateHelpIncludesBackgroundFileExample(t *testing.T) {
+	if !strings.Contains(delegateCmd.Example, "ocr delegate rule --background-file") {
+		t.Error("delegate help does not show how to pass a background file to rule")
+	}
+}
 
 func TestValidateDelegateOptions(t *testing.T) {
 	cases := []struct {

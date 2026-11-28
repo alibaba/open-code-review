@@ -217,29 +217,49 @@ func TestTaskOwnCompressionAndEmptyResponse(t *testing.T) {
 }
 
 func TestTaskModelErrors(t *testing.T) {
-	for _, grace := range []bool{false, true} {
-		t.Run(strconv.FormatBool(grace), func(t *testing.T) {
+	unavailable := errors.New("model unavailable")
+	for _, fixture := range []struct {
+		name         string
+		maxRounds    int
+		tokenBudget  int64
+		reportErrors bool
+		stop         MainLoopStop
+		wantErr      error
+	}{
+		{"main request", 1, 1, true, StopNone, unavailable},
+		{"round limit", 1, 0, false, StopMaxRounds, nil},
+		{"round limit error", 1, 0, true, StopMaxRounds, unavailable},
+		{"token limit", 5, 1, true, StopTokenBudget, unavailable},
+		{"best effort final submission", 5, 1, false, StopTokenBudget, nil},
+		{"cancelled final submission", 5, 1, true, StopTokenBudget, context.Canceled},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 			task := testTask()
-			task.MaxRounds = 1
+			task.MaxRounds = fixture.maxRounds
+			task.Grace.ReportErrors = fixture.reportErrors
+			requestErr := unavailable
 			requests := 0
 			client := taskClient(func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
 				requests++
-				if grace && requests == 1 {
+				if fixture.stop != StopNone && requests == 1 {
 					return testTaskResponse("read_test_data", `{}`), nil
 				}
-				return nil, errors.New("model unavailable")
+				if fixture.wantErr == context.Canceled {
+					cancel()
+					requestErr = ctx.Err()
+				}
+				return nil, requestErr
 			})
 			history := session.New(t.TempDir(), "main", "fake", session.SessionOptions{})
-			runner := NewRunner(Deps{LLMClient: client, Session: history}, task)
-			result, err := runner.Run(context.Background(), taskMessages(), "data")
-			if result.Completed || (err == nil) != grace {
+			runner := NewRunner(Deps{LLMClient: client, Session: history, MaxTokensBudget: fixture.tokenBudget}, task)
+			result, err := runner.Run(ctx, taskMessages(), "data")
+			if result.Completed || !errors.Is(err, fixture.wantErr) || result.StopReason != fixture.stop {
 				t.Fatalf("Run = %+v, %v", result, err)
 			}
-			if grace && result.StopReason != StopMaxRounds {
-				t.Fatalf("grace stop = %v", result.StopReason)
-			}
 			records := history.GetOrCreateFileSession("data").TaskRecords[session.MainTask]
-			if records[len(records)-1].Error != "model unavailable" {
+			if records[len(records)-1].Error != requestErr.Error() {
 				t.Fatal("model failure was not recorded")
 			}
 		})

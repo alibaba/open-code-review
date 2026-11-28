@@ -83,7 +83,7 @@ func (p *Parser) parseSlash(ctx context.Context, text string, st *State) (Result
 				p.clearPending(st)
 				return RejectResult("missing value for --path", "Example: /scan --path internal/agent"), nil
 			}
-			for _, part := range strings.Split(value, ",") {
+			for part := range strings.SplitSeq(value, ",") {
 				if part = strings.TrimSpace(part); part != "" {
 					s.paths = append(s.paths, part)
 				}

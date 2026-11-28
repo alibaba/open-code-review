@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -28,10 +29,8 @@ func OpenLocalFile(root, path string) (string, *os.File, error) {
 		if strings.ContainsAny(path, `\:`) {
 			return "", nil, fmt.Errorf("invalid local file path")
 		}
-		for _, part := range strings.Split(path, "/") {
-			if part == ".." {
-				return "", nil, fmt.Errorf("invalid local file path")
-			}
+		if slices.Contains(strings.Split(path, "/"), "..") {
+			return "", nil, fmt.Errorf("invalid local file path")
 		}
 	}
 	base, err := filepath.EvalSymlinks(root)

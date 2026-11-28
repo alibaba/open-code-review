@@ -53,7 +53,10 @@ Output review spec for host-agent delegation (no LLM required).`,
   ocr delegate rule internal/agent/agent.go internal/llm/client.go
 
   # Get rules at HEAD for the same range
-  ocr delegate rule --from main internal/agent/agent.go`,
+  ocr delegate rule --from main internal/agent/agent.go
+
+  # Get rules with review background from a file
+  ocr delegate rule --background-file ./docs/requirements.md internal/agent/agent.go`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()

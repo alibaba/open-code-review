@@ -43,8 +43,9 @@ type CompressionPolicy struct {
 }
 
 type GracePolicy struct {
-	Messages []llm.Message
-	Tools    []llm.ToolDef
+	Messages     []llm.Message
+	Tools        []llm.ToolDef
+	ReportErrors bool
 }
 
 type Task struct {

@@ -47,14 +47,27 @@ OCR은 **네 겹의 우선순위 사슬**로 규칙을 해석합니다. 파일 �
 
 서로 독립적인 필드 세 개가 있습니다.
 
-- `include` — 선택. 내장 기본 제외 패턴(아래에서 설명하는 테스트 파일 제외)을
-  _건너뛰는_ glob 패턴입니다. 화이트리스트가 아닙니다. 어떤 `include` 패턴에도
-  걸리지 않은 파일도 `unsupported_ext`와 `default_path` 검사를 계속 거치며 리뷰될 수
-  있습니다.
+- `include` — 선택. 내장 기본 제외 패턴(아래에서 설명하는 테스트 파일 제외)과
+  **확장자 허용 목록**을 _건너뛰는_ glob 패턴입니다. 화이트리스트가 아닙니다. 어떤
+  `include` 패턴에도 걸리지 않은 파일도 `unsupported_ext`와 `default_path` 검사를
+  계속 거치며 리뷰될 수 있습니다.
 - `exclude` — 선택. OCR이 리뷰하면 _안 되는_ 파일의 glob 패턴입니다. 사용자 설정 필터 안에서
   가장 높은 우선순위를 가집니다.
 - `rules` — `{path, rule}` 항목의 배열이며 **선언 순서대로** 평가합니다. 파일에
   처음 일치하는 `path`가 그 파일을 리뷰할 때 OCR이 모델에 보낼 프롬프트를 정합니다.
+
+`include`는 내장 허용 목록에 없는 확장자를 리뷰 대상으로 만드는 방법이기도 합니다.
+예를 들어 코드와 함께 변경되는 Markdown 계약 문서가 그렇습니다:
+
+```json
+{
+  "include": ["**/*.md"]
+}
+```
+
+패턴에 일치하는 파일은 `unsupported_ext` 게이트를 건너뛰고, 패턴 밖의 파일은
+평소의 검사를 그대로 받습니다. `rules[].path`는 파일 포함 필터가 아니라 그
+파일에 어떤 규칙 텍스트를 적용할지 고르는 필드입니다.
 
 각 `rules` 항목은 세 번째 선택 필드도 받습니다.
 
@@ -195,6 +208,13 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/*Test.java`
 - `**/*Tests.java`
 - `**/*_test.rs`
+- `**/*_tests.rs`
+- `**/tests.rs`
+- `**/tests/**/*.rs`
+- `**/benches/**/*.rs`
+- `**/*_{test,tests,unittest,benchmark}.{c,cc,cpp,cxx}`
+- `**/{test,tests,unittests}/**/*.{c,h,cc,cpp,cxx,hpp,hxx}`
+- `**/{bench,benchmarks}/**/*.{c,h,cc,cpp,cxx,hpp,hxx}`
 - `**/oh_modules/**`
 - `**/*.test.ets`
 - `**/test/**/*.jl`
@@ -264,7 +284,8 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 `include` 규칙으로 되돌릴 수 있는 것은 후자뿐입니다.
 
 위 패턴 중 하나에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
-넣으세요. `include`가 기본 경로 관문을 덮어씁니다.
+넣으세요. `include`가 기본 경로 관문(확장자가 내장 허용 목록에 없다면
+`unsupported_ext` 관문도)을 덮어씁니다.
 
 ## 파일별 규칙 해석 {#rule-resolution-per-file}
 
@@ -285,6 +306,8 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/build.gradle`                               | `build_gradle.md` — Gradle 의존성.                                               |
 | `**/package.json`                               | `package_json.md` — NPM 의존성 / 스크립트.                                       |
 | `**/Cargo.toml`                                 | `cargo_toml.md` — Rust 매니페스트.                                               |
+| `**/Move.toml` | `move_toml.md` — Move 패키지 매니페스트. |
+| `**/*.move` | `move.md` — Move 소스 코드. |
 | `**/composer.json`                              | `composer_json.md` — Composer 의존성, 오토로딩, 스크립트, 플러그인, 패키지 설정. |
 | `**/*.{json,json5,jsonc}`                       | `json.md` — 일반 JSON(`.json5`와 `.jsonc`도 포함). |
 | `.github/workflows/**/*.{yaml,yml}`             | `github_workflows.md` — GitHub Actions 워크플로 YAML.                            |
@@ -301,7 +324,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.erb`                                      | `erb.md` — ERB 템플릿(SSTI / XSS / 이스케이프 / 공백 및 출력 구조). |
 | `**/*.ets`                                      | `arkts.md` — ArkTS / HarmonyOS.                                                  |
 | `**/*.astro`                                    | `astro.md` — Astro 컴포넌트와 아일랜드.                                          |
-| `**/*.{ts,js,tsx,jsx,mjs,cjs}`                  | `ts_js_tsx_jsx.md`                                                               |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs,mts,cts}`          | `ts_js_tsx_jsx.md`                                                               |
 | `**/*.{kt,kts}`                                 | `kotlin.md`                                                                      |
 | `**/*.scala`                                    | `scala.md` |
 | `**/*.{fs,fsi,fsx}`                             | `fsharp.md` — F# 구현, 시그니처, 스크립트 파일.                                  |
@@ -309,7 +332,10 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.rs`                                       | `rust.md`                                                                        |
 | `**/*.{cpp,cc,cxx,hpp,hxx}`                     | `cpp.md`                                                                         |
 | `**/*.c`                                        | `c.md`                                                                           |
+| `**/*.{cu,cuh}`                                 | `cuda_hip.md` — CUDA 커널 및 헤더.                                               |
+| `**/*.hip`                                      | `cuda_hip.md` — HIP(AMD ROCm) 커널.                                              |
 | `**/*.{py,pyi,ipynb}`                           | `python.md` — Python 소스.                                                       |
+| `**/*.{rb,rake}`, `**/*.gemspec`, `**/{Gemfile,Rakefile}` | `ruby.md` — Ruby 소스, Rake 작업, gemspec, Gemfile, Rakefile. |
 | `**/*.{php,phtml}`                              | `php.md` — PHP 소스와 PHP 템플릿.                                                |
 | `**/*.proto`                                    | `protobuf.md` — Protocol Buffers 통신 호환성.                                    |
 | `**/*.po`                                       | `po.md` — gettext 번역 원본 카탈로그.                                            |
@@ -320,6 +346,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.R`                                        | `r.md`                                                                           |
 | `**/*.{tf,tofu,hcl,tfvars}`                     | `terraform.md` — Terraform / HCL.                                                |
 | `**/*.bicep`                                    | `bicep.md` — Bicep(Azure) 템플릿.                                                |
+| `**/*.dhall` | `dhall.md` — Dhall 설정 언어. |
 | `**/*.nix`                          | `nix.md` — Nix 식과 flake.                                                         |
 | `**/*.{hs,lhs}`                     | `haskell.md` — Haskell 소스.                                                       |
 | `**/*.{nim,nims,nimble}`            | `nim.md` — Nim 소스와 패키지 매니페스트.                                                    |
@@ -343,6 +370,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 | `**/*.{glsl,hlsl,wgsl,metal}`                   | `shader.md` — GLSL, HLSL, WGSL 및 Metal 셰이더.                                  |
 | `**/*.{ps1,psm1,psd1}`                          | `powershell.md` — PowerShell 스크립트, 모듈 및 데이터/매니페스트 파일.           |
 | `**/*.{clj,cljs,cljc,edn}`                      | `clojure.md` — Clojure / ClojureScript 소스 코드 및 EDN 데이터. |
+| `**/*.sql`                                      | `sql.md` — SQL 마이그레이션 및 쿼리. |
 | _(대체값)_                                      | `default.md`                                                                     |
 
 해석된 규칙 본문은 plan과 main 작업 프롬프트에서 `{{system_rule}}` 자리에 들어갑니다.

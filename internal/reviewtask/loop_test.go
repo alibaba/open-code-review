@@ -431,8 +431,8 @@ func TestRunMainTask_UncompressibleContextStopsWithCompression(t *testing.T) {
 	if stop != StopCompression {
 		t.Fatalf("stop = %v, want StopCompression", stop)
 	}
-	if client.calls != 2 {
-		t.Fatalf("LLM calls = %d, want one main call and one compression call", client.calls)
+	if client.calls != 1 {
+		t.Fatalf("LLM calls = %d, want one main call without an unusable compression request", client.calls)
 	}
 }
 

@@ -19,7 +19,7 @@ func (provider *Provider) ResolveCommitComparison(ctx context.Context) (InputRes
 		return InputResolution{}, fmt.Errorf("read commit %s: %w", head, err)
 	}
 	resolution := InputResolution{ResolvedHead: head, BaseIsEmpty: true}
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if line == "" {
 			break
 		}
