@@ -182,7 +182,11 @@ func TestChatGPTPromptCacheAffinityHeaders(t *testing.T) {
 	}
 
 	t.Run("context session key populates routing headers across rounds", func(t *testing.T) {
-		var seen [][]string
+		type headerTurn struct {
+			hasUnderscore bool
+			hyphen        string
+		}
+		var seen []headerTurn
 		var gotBody map[string]any
 		c := newRoutedClient(t, ClientConfig{
 			URL:               chatgptauth.Resource,
@@ -190,7 +194,11 @@ func TestChatGPTPromptCacheAffinityHeaders(t *testing.T) {
 			RequiresStreaming: true,
 			SessionKey:        "fallback-client-key",
 		}, func(w http.ResponseWriter, r *http.Request) {
-			seen = append(seen, []string{r.Header.Get("session_id"), r.Header.Get("session-id")})
+			_, hasUnderscore := r.Header[http.CanonicalHeaderKey("session_id")]
+			seen = append(seen, headerTurn{
+				hasUnderscore: hasUnderscore,
+				hyphen:        r.Header.Get("session-id"),
+			})
 			_ = json.NewDecoder(r.Body).Decode(&gotBody)
 			okSSE(w)
 		})
@@ -208,9 +216,12 @@ func TestChatGPTPromptCacheAffinityHeaders(t *testing.T) {
 		if len(seen) != 2 {
 			t.Fatalf("requests = %d, want 2", len(seen))
 		}
-		for i, pair := range seen {
-			if pair[0] != "task-affinity-key" || pair[1] != "task-affinity-key" {
-				t.Errorf("turn %d headers = %q, want [task-affinity-key task-affinity-key]", i+1, pair)
+		for i, turn := range seen {
+			if turn.hasUnderscore {
+				t.Errorf("turn %d unexpectedly sent session_id header", i+1)
+			}
+			if turn.hyphen != "task-affinity-key" {
+				t.Errorf("turn %d session-id = %q, want %q", i+1, turn.hyphen, "task-affinity-key")
 			}
 		}
 		if got := gotBody["prompt_cache_key"]; got != "subtask-uuid-1" {
@@ -242,14 +253,15 @@ func TestChatGPTPromptCacheAffinityHeaders(t *testing.T) {
 	})
 
 	t.Run("request SessionID is used when context carries no key", func(t *testing.T) {
-		var gotUnderscore, gotHyphen string
+		var hasUnderscore bool
+		var gotHyphen string
 		c := newRoutedClient(t, ClientConfig{
 			URL:               chatgptauth.Resource,
 			ChatGPTPlan:       true,
 			RequiresStreaming: true,
 			SessionKey:        "fallback-client-key",
 		}, func(w http.ResponseWriter, r *http.Request) {
-			gotUnderscore = r.Header.Get("session_id")
+			_, hasUnderscore = r.Header[http.CanonicalHeaderKey("session_id")]
 			gotHyphen = r.Header.Get("session-id")
 			okSSE(w)
 		})
@@ -261,20 +273,24 @@ func TestChatGPTPromptCacheAffinityHeaders(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("CompletionsWithCtx: %v", err)
 		}
-		if gotUnderscore != "conv-only-id" || gotHyphen != "conv-only-id" {
-			t.Errorf("headers = (%q, %q), want (%q, %q)", gotUnderscore, gotHyphen, "conv-only-id", "conv-only-id")
+		if hasUnderscore {
+			t.Errorf("unexpected automatic session_id header")
+		}
+		if gotHyphen != "conv-only-id" {
+			t.Errorf("session-id = %q, want %q", gotHyphen, "conv-only-id")
 		}
 	})
 
 	t.Run("client SessionKey serves as fallback when both context and request keys are empty", func(t *testing.T) {
-		var gotUnderscore, gotHyphen string
+		var hasUnderscore bool
+		var gotHyphen string
 		c := newRoutedClient(t, ClientConfig{
 			URL:               chatgptauth.Resource,
 			ChatGPTPlan:       true,
 			RequiresStreaming: true,
 			SessionKey:        "fallback-client-key",
 		}, func(w http.ResponseWriter, r *http.Request) {
-			gotUnderscore = r.Header.Get("session_id")
+			_, hasUnderscore = r.Header[http.CanonicalHeaderKey("session_id")]
 			gotHyphen = r.Header.Get("session-id")
 			okSSE(w)
 		})
@@ -285,8 +301,11 @@ func TestChatGPTPromptCacheAffinityHeaders(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("CompletionsWithCtx: %v", err)
 		}
-		if gotUnderscore != "fallback-client-key" || gotHyphen != "fallback-client-key" {
-			t.Errorf("headers = (%q, %q), want fallback-client-key", gotUnderscore, gotHyphen)
+		if hasUnderscore {
+			t.Errorf("unexpected automatic session_id header")
+		}
+		if gotHyphen != "fallback-client-key" {
+			t.Errorf("session-id = %q, want %q", gotHyphen, "fallback-client-key")
 		}
 	})
 
