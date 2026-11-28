@@ -313,6 +313,16 @@ ocr scan --max-tokens 400000
 
 실행별 플래그가 `max_tokens`보다 우선하고, 둘 다 없으면 OCR은 내장 작업 템플릿 기본값을 사용합니다. 이 상한은 모델의 **출력** 상한(`MAX_COMPLETION_TOKENS`, 두 템플릿 모두 `16384`)이나 실행 전체 토큰 사용량을 제한하는 `--max-tokens-budget`과는 별개입니다. `ocr config unset max_tokens`로 내장 기본값을 복원합니다.
 
+### 변경 세트 용량 한도 {#change-set-capacity-limits}
+
+`--max-changeset-files`와 `--max-changeset-bytes`는 하드 사전 검사 한도입니다. 리뷰할 변경
+세트가 설정된 한도 중 하나를 엄격하게 초과하면 첫 모델 요청 전에 실행이 거부되고, 구조화된
+`OCR_CAPACITY_EXCEEDED` 오류가 반환됩니다. 실패 레코드에는 거부 단계와 `requested_files` /
+`limit_files` / `requested_bytes` / `limit_bytes`가 담깁니다. `0`은 구성되었거나 템플릿의 기본값을 사용함을 뜻합니다. `MAX_CHANGESET_FILES` /
+`MAX_CHANGESET_BYTES` 템플릿 키의 기본값은 무제한이며, 0보다 큰 CLI 플래그가 이를 덮어씁니다.
+재개 실행에서 이미 완료된 파일은 세지 않습니다. 참고로 `--analysis` 사용 시 Analysis 에이전트는
+리뷰와 병렬로 실행되며 리뷰의 용량 검사를 따르지 않습니다.
+
 ### 리뷰 강도 (effort) {#review-effort}
 
 `effort`는 서브태스크마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1라운드, `medium`(기본값) = 2라운드, `high` = 3라운드입니다. 라운드가 늘어나면 더 많은 문제를 찾지만 비용도 그만큼 늘어납니다.

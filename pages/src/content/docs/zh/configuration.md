@@ -364,6 +364,16 @@ ocr scan --max-tokens 120000
 输出预算。它同样与限制单次运行总 token 用量的 `--max-tokens-budget` 相互独立。
 可以用 `ocr config unset max_tokens` 恢复为内置默认值。
 
+### 变更集容量上限 {#change-set-capacity-limits}
+
+`--max-changeset-files` 与 `--max-changeset-bytes` 是硬性预检上限：当待评审的变更集严格
+超过任一上限时，运行会在发出第一个模型请求之前被拒绝，并返回结构化的
+`OCR_CAPACITY_EXCEEDED` 错误，避免超大规模输入耗尽整个任务窗口后才失败。失败记录带有
+拒绝阶段以及 `requested_files` / `limit_files` / `requested_bytes` / `limit_bytes` 字段；
+`0` 表示沿用已配置或模板默认值；`MAX_CHANGESET_FILES` / `MAX_CHANGESET_BYTES`
+模板键默认不设上限，大于 0 的 CLI 参数会覆盖它。恢复运行时已完成的文件不计入。
+另注：使用 `--analysis` 时，Analysis 代理与评审并行运行，不受评审容量预检的约束。
+
 ### 评审投入档位（effort）
 
 `effort` 决定每个子任务要跑几轮 main 循环：`low` = 1 轮，`medium` = 2 轮（默认），

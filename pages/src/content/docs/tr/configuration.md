@@ -276,6 +276,19 @@ ocr scan --max-tokens 400000
 
 Komut seçeneği kayıtlı `max_tokens` değerinden önceliklidir. İkisi de yoksa gömülü görev şablonu varsayılanı kullanılır. Bu sınır, modelin **çıktı** sınırından (iki şablonda da `MAX_COMPLETION_TOKENS = 16384`) ve tüm çalıştırmanın toplam token kullanımını sınırlayan `--max-tokens-budget` değerinden bağımsızdır. Gömülü varsayılana dönmek için `ocr config unset max_tokens` kullanın.
 
+### Değişiklik kümesi kapasite sınırları {#change-set-capacity-limits}
+
+`--max-changeset-files` ve `--max-changeset-bytes` sert ön kontrol sınırlarıdır: incelenecek
+değişiklik kümesi ayarlı sınırlardan birini kesin olarak aştığında çalıştırma, ilk model
+isteğinden önce yapılandırılmış bir `OCR_CAPACITY_EXCEEDED` hatasıyla reddedilir; böylece
+aşırı büyük girdi tüm görev penceresini yakıp geç kalmış bir hatayla bitmez. Hata kaydı,
+reddeden aşama ile birlikte `requested_files` / `limit_files` / `requested_bytes` /
+`limit_bytes` alanlarını taşır; `0`, yapılandırılmış veya şablon varsayılanını kullanmak demektir; `MAX_CHANGESET_FILES` /
+`MAX_CHANGESET_BYTES` şablon anahtarlarının varsayılanı sınırsızdır ve 0'dan büyük bir CLI
+bayrağı bunları geçersiz kılar. Devam eden bir çalıştırmada zaten tamamlanmış dosyalar sayılmaz.
+Not: `--analysis` ile Analysis ajanı incelemeyle paralel çalışır ve incelemenin kapasite
+kontrolüne tabi değildir.
+
 ### İnceleme çabası {#review-effort}
 
 `effort`, alt görev başına inceleme turu sayısını belirler: `low` = 1, `medium` (varsayılan) = 2, `high` = 3. Daha fazla tur daha fazla sorun bulabilir; maliyeti de orantılı artırır.

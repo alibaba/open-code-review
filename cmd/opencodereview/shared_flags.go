@@ -162,6 +162,12 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.maxTokensBudget < 0 {
 		return fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
 	}
+	if opts.maxChangesetFiles < 0 {
+		return fmt.Errorf("--max-changeset-files must be a non-negative integer (0 means use the configured or template default)")
+	}
+	if opts.maxChangesetBytes < 0 {
+		return fmt.Errorf("--max-changeset-bytes must be a non-negative integer (0 means use the configured or template default)")
+	}
 	if opts.effort != "" {
 		if _, err := template.ParseEffort(opts.effort); err != nil {
 			return fmt.Errorf("--effort: %w", err)
@@ -194,6 +200,12 @@ func validateScanOptions(opts *scanOptions) error {
 	if opts.maxTokensBudget < 0 {
 		return fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
 	}
+	if opts.maxChangesetFiles < 0 {
+		return fmt.Errorf("--max-changeset-files must be a non-negative integer (0 means use the configured or template default)")
+	}
+	if opts.maxChangesetBytes < 0 {
+		return fmt.Errorf("--max-changeset-bytes must be a non-negative integer (0 means use the configured or template default)")
+	}
 	return nil
 }
 
@@ -208,6 +220,15 @@ func validateDelegateOptions(opts *delegateOptions) error {
 	return nil
 }
 
+// addChangesetFlags registers the pre-flight change-set capacity limits
+// (--max-changeset-files / --max-changeset-bytes). A change set strictly
+// exceeding either configured limit is rejected with a structured
+// OCR_CAPACITY_EXCEEDED error before the first model request; 0 = unlimited.
+func addChangesetFlags(cmd *cobra.Command, files *int, bytes *int64) {
+	cmd.Flags().IntVar(files, "max-changeset-files", 0, "reject the run before the first model request when more than this many would-dispatch files would be reviewed (0 = use the configured or template default)")
+	cmd.Flags().Int64Var(bytes, "max-changeset-bytes", 0, "reject the run before the first model request when the reviewable payload exceeds this many bytes (0 = use the configured or template default)")
+}
+
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
 func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addRuleFlag(cmd, &opts.rulePath)
@@ -219,6 +240,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addOutputPathFlag(cmd, &opts.outputPath)
 	addConcurrencyFlags(cmd, &opts.concurrency, &opts.concurrentTaskTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxTokensBudget)
+	addChangesetFlags(cmd, &opts.maxChangesetFiles, &opts.maxChangesetBytes)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
@@ -244,6 +266,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(&opts.maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
 	cmd.Flags().IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage; checked before every LLM round and at dispatch (0 = unlimited)")
+	addChangesetFlags(cmd, &opts.maxChangesetFiles, &opts.maxChangesetBytes)
 	cmd.Flags().StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the scan")
 	cmd.Flags().BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be scanned without running the LLM")
 	cmd.Flags().BoolVar(&opts.noPlan, "no-plan", false, "skip the per-file PLAN_TASK pre-pass")

@@ -394,6 +394,17 @@ OCR は組み込みのタスクテンプレートのデフォルト値を使用�
 実行全体のトークン使用量を制限する `--max-tokens-budget` とも独立しています。
 組み込みのデフォルトに戻すには `ocr config unset max_tokens` を実行してください。
 
+### 変更セット容量の上限 {#change-set-capacity-limits}
+
+`--max-changeset-files` と `--max-changeset-bytes` はハードな事前チェック上限です。レビュー
+対象の変更セットがいずれかの上限を厳密に超えると、最初のモデルリクエストの前に実行が
+拒否され、構造化された `OCR_CAPACITY_EXCEEDED` エラーが返されます。これにより、大きすぎる
+入力がタスク時間を使い切ってから失敗するのを防げます。失敗レコードには拒否したステージと
+`requested_files` / `limit_files` / `requested_bytes` / `limit_bytes` が含まれます。`0` は設定済みまたはテンプレートの既定値を使うことを意味します。`MAX_CHANGESET_FILES` /
+`MAX_CHANGESET_BYTES` テンプレート キーの既定は無制限で、0 より大きい CLI フラグが上書きします。
+再開実行で既に完了済みのファイルはカウントしません。なお `--analysis` を付けると、Analysis
+エージェントはレビューと並行して動作し、レビューの容量チェックには従いません。
+
 ### レビューの労力プリセット（effort）
 
 `effort` は、サブタスクごとに main ループを何ラウンド実行するかを決めます:

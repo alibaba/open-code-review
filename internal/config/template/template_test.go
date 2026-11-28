@@ -567,3 +567,51 @@ func TestPlanRequired(t *testing.T) {
 		})
 	}
 }
+
+func TestValidate_ChangesetLimitsRejectedWhenNegative(t *testing.T) {
+	t.Run("review template", func(t *testing.T) {
+		tpl, err := LoadDefault()
+		if err != nil {
+			t.Fatalf("LoadDefault: %v", err)
+		}
+		if err := tpl.Validate(); err != nil {
+			t.Fatalf("default template must validate: %v", err)
+		}
+		if tpl.MaxChangesetFiles != 0 || tpl.MaxChangesetBytes != 0 {
+			t.Errorf("defaults must be unlimited (0/0), got %d/%d", tpl.MaxChangesetFiles, tpl.MaxChangesetBytes)
+		}
+		negative := *tpl
+		negative.MaxChangesetFiles = -1
+		if err := negative.Validate(); err == nil {
+			t.Error("negative MAX_CHANGESET_FILES must fail validation")
+		}
+		negativeBytes := *tpl
+		negativeBytes.MaxChangesetBytes = -1
+		if err := negativeBytes.Validate(); err == nil {
+			t.Error("negative MAX_CHANGESET_BYTES must fail validation")
+		}
+	})
+
+	t.Run("scan template", func(t *testing.T) {
+		tpl, err := LoadScanDefault()
+		if err != nil {
+			t.Fatalf("LoadScanDefault: %v", err)
+		}
+		if err := tpl.Validate(); err != nil {
+			t.Fatalf("default scan template must validate: %v", err)
+		}
+		if tpl.MaxChangesetFiles != 0 || tpl.MaxChangesetBytes != 0 {
+			t.Errorf("scan defaults must be unlimited (0/0), got %d/%d", tpl.MaxChangesetFiles, tpl.MaxChangesetBytes)
+		}
+		negative := *tpl
+		negative.MaxChangesetFiles = -1
+		if err := negative.Validate(); err == nil {
+			t.Error("scan negative MAX_CHANGESET_FILES must fail validation")
+		}
+		negativeBytes := *tpl
+		negativeBytes.MaxChangesetBytes = -1
+		if err := negativeBytes.Validate(); err == nil {
+			t.Error("scan negative MAX_CHANGESET_BYTES must fail validation")
+		}
+	})
+}
