@@ -145,7 +145,7 @@ func (s *ResumeState) validateInputIdentity(id RunIdentity) error {
 	if m.Execution.RuleConfigSHA256 != id.RuleConfigSHA256 {
 		// The digest is one aggregate, so it can only be attributed to a layer,
 		// never to a specific rule or pattern.
-		return fmt.Errorf("resume rejected: review rule identity changed — either a rule text layer (custom, project, global or system) or the include/exclude file filter differs from session %q; %s", s.SessionID, resumeHint)
+		return fmt.Errorf("resume rejected: review rule identity changed — a rule layer, file filter or verified memory differs from session %q; %s", s.SessionID, resumeHint)
 	}
 	return nil
 }

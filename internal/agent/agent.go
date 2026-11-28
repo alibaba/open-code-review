@@ -26,6 +26,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/knowledge"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -53,6 +54,9 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
+	Knowledge       knowledge.Snapshot
+	KnowledgeTree   *knowledge.Tree
+	KnowledgeUsage  *llm.UsageInfo
 	AnalysisEnabled bool
 	// RepoDir is the root of the git repository.
 	RepoDir string
@@ -256,6 +260,7 @@ func New(args Args) *Agent {
 		NewRequestMeta:  a.newRequestMeta,
 		MaxTokensBudget: args.MaxTokensBudget,
 	})
+	a.runner.RecordUsage(args.KnowledgeUsage)
 	return a
 }
 
@@ -1087,6 +1092,11 @@ func (a *Agent) sourceArtifactSHA256() string {
 // digest. Rule order is significant (first match wins) and never sorted.
 func (a *Agent) ruleConfigSHA256() string {
 	var fields []string
+	if identity := a.args.Knowledge.Identity(); identity != "" {
+		// A saved single-pass withdrawal has not received the independent
+		// reassessment required by the current review.
+		fields = append(fields, "review-knowledge-v18", identity)
+	}
 	if cc, ok := a.args.SystemRule.(interface{ CanonicalConfig() []string }); ok {
 		fields = append(fields, cc.CanonicalConfig()...)
 	}
@@ -1634,6 +1644,12 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 	if lastStop != nil {
 		return false, lastStop, nil
 	}
+	if completed {
+		g.business = a.reviewBusinessContext(a.args.Knowledge, g.Diffs)
+		if len(g.business.rules) > 0 {
+			a.verifyBusinessFindings(ctx, g, rule, concatenatedDiffs)
+		}
+	}
 	return completed, nil, nil
 }
 
@@ -1816,7 +1832,6 @@ func (a *Agent) resolveGroupSystemRule(diffs []model.Diff) string {
 	return sb.String()
 }
 
-// executeGroupPlanPhase runs the plan phase for a file group.
 func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concatenatedDiffs, changeFiles, rule string) (string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "plan.execute")
 	defer span.End()

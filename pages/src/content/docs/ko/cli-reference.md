@@ -549,6 +549,19 @@ id만으로 충분하므로 어느 디렉터리에서든 실행할 수 있습니
 | `--repo <path>` | 모든 저장소 | 이 저장소 아래에서만 세션을 찾습니다. |
 | `--yes`, `-y` | `false` | 확인 프롬프트를 건너뜁니다. |
 
+## `ocr memory` {#ocr-memory}
+
+업무 규칙과 그 출처, 적용 범위, 유효 조건을 로컬 SQLite 데이터베이스에 보관합니다. 데이터베이스는 검토할 저장소 밖에 둡니다.
+
+```bash
+ocr review --from main --to HEAD --memory-db ../review.sqlite --memory-sync --memory-discussions ../reviews.json
+ocr memory list --ref HEAD --memory-db ../review.sqlite
+```
+
+`--memory-sync`는 비교 기준 커밋의 코드, 테스트, 설정, 커밋 기록에서 규칙을 추출합니다. `--memory-discussions`에는 GitHub PR이나 GitLab MR 주소 또는 내보낸 JSON 파일을 지정할 수 있습니다. 과거 시점의 리뷰를 재현하려면 `--memory-as-of`에 RFC3339 시각을 지정합니다.
+
+일반 리뷰가 끝나면 변경한 코드와 근거가 되는 구현을 따라가며 실제 업무 결과를 검증합니다. 사람이 내린 판단은 `memory feedback`으로 사유와 함께 기록합니다. 기존 규칙을 대체하려면 `--action replace --replacement <id>`를 사용합니다. 같은 PR의 의견을 철회할 때에도 그 사유가 현재 변경에 적용되는지 다시 확인합니다.
+
 ## `ocr rules` {#ocr-rules}
 
 규칙을 들여다보는 명령입니다. 하위 명령은 하나뿐입니다:

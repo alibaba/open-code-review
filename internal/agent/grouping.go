@@ -28,8 +28,9 @@ const smallChangeSetLabel = "small change set"
 
 // FileGroup is a set of semantically related diffs to be reviewed in one LLM call.
 type FileGroup struct {
-	Label string
-	Diffs []model.Diff
+	Label    string
+	Diffs    []model.Diff
+	business businessContext
 }
 
 // FileGroupInfo is the exported, JSON-friendly representation of a file group.

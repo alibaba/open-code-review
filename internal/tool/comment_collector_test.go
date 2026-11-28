@@ -4,6 +4,7 @@
 package tool
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -151,6 +152,19 @@ func TestCommentCollector_RemoveByPathAndIndices_NoMatch(t *testing.T) {
 	c.RemoveByPathAndIndices("b.go", map[int]struct{}{0: {}})
 	if len(c.Comments()) != 1 {
 		t.Error("remove from non-matching path should be no-op")
+	}
+}
+
+func TestCommentCollectorAmendsOriginalPathIndices(t *testing.T) {
+	c := NewCommentCollector()
+	for _, item := range []model.LlmComment{cm("a.go", "remove"), cm("b.go", "keep"), cm("a.go", "replace"), cm("a.go", "keep")} {
+		c.Add(item)
+	}
+	replacement := cm("a.go", "retained recommendation")
+	c.AmendByPathAndIndices("a.go", map[int]struct{}{0: {}}, map[int]model.LlmComment{1: replacement})
+	want := []model.LlmComment{cm("b.go", "keep"), replacement, cm("a.go", "keep")}
+	if got := c.Comments(); !slices.Equal(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
 

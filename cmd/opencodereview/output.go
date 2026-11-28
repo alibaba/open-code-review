@@ -478,6 +478,8 @@ var retryStages = []struct {
 	{session.MemoryCompressionTask, "Context compaction"},
 	{session.ReLocationTask, "Comment re-location"},
 	{session.ReviewFilterTask, "Comment filtering"},
+	{session.BusinessReviewTask, "Business rule verification"},
+	{session.BusinessRefutationTask, "Finding reassessment"},
 	{session.GroupingTask, "File grouping"},
 }
 

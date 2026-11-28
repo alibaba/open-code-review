@@ -535,6 +535,19 @@ CI ジョブで確認を省略するには `--yes`（`-y`）を渡してくだ�
 | `--repo <path>` | すべてのリポジトリ | このリポジトリの下だけでセッションを探します。 |
 | `--yes`、`-y` | `false` | 確認プロンプトを省略します。 |
 
+## `ocr memory`
+
+ローカルの SQLite データベースに業務ルール、その出典、適用範囲、有効条件を保存します。データベースは対象リポジトリの外に置きます。
+
+```bash
+ocr review --from main --to HEAD --memory-db ../review.sqlite --memory-sync --memory-discussions ../reviews.json
+ocr memory list --ref HEAD --memory-db ../review.sqlite
+```
+
+`--memory-sync` は比較元のコード、テスト、設定、コミット履歴からルールを抽出します。`--memory-discussions` には GitHub PR や GitLab MR の URL、またはエクスポートした JSON を指定できます。過去の時点を再現するには `--memory-as-of` で RFC3339 の日時を指定します。
+
+通常のレビューの後、変更したコードと参照先の実装を使って業務上の結果を確認します。人の判断は `memory feedback` で理由とともに記録できます。古いルールの置き換えには `--action replace --replacement <id>` を使います。同じ PR の指摘を撤回する際も、現在の変更にその判断が当てはまるかを改めて確認します。
+
 ## `ocr rules`
 
 ルールの自己確認です。サブコマンドは 1 つだけです:

@@ -474,6 +474,46 @@ Depo, dal, başlangıç zamanı, dosya ve yorum sayıları gösterilip onay iste
 | `--repo <path>` | Tüm depolar | Yalnızca bu depoda arar. |
 | `--yes`, `-y` | `false` | Onay istemini atlar. |
 
+## `ocr memory` {#ocr-memory}
+
+OCR, önerilen değişikliği incelerken karşılaştırmanın başlangıç sürümündeki iş kurallarından yararlanabilir. `DB` değişkenine çalışma dizininin dışında tutulan güvenilir bir SQLite dosyasının mutlak yolunu verin.
+
+```bash
+ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
+```
+
+`sync` koddaki örüntüleri, yapılandırmayı, yakın testleri, önceki dosya sürümlerini ve commit mesajlarını inceler. Her aday kuralın kaynağını, kapsamını ve geçerlilik koşullarını saklar. `--memory-discussions` ile bir GitHub PR bağlantısı, GitLab MR bağlantısı veya dışa aktarılmış bir JSON dosyası ekleyebilirsiniz. Bağlantılar için ilgili depoda oturum açmış bir `gh` veya `glab` istemcisi gerekir. Geçmiş bir incelemeyi yeniden çalıştırırken `memory sync --as-of` ve `review --memory-as-of` için aynı RFC3339 zamanını kullanın.
+
+Değişen satır bir Python modülünde üst düzey bir işlevin içindeyse OCR, karşılaştırmanın başlangıç sürümünde bu işlevi göreli içe aktarma yoluyla doğrudan çağıran diğer modülleri de arar. Örneğin sipariş oluşturma kodu, hesaplanan tutarın siparişe nasıl kaydedildiğini gösterebilir. Etki çağrıdan anlaşılamıyorsa OCR, başlangıç sürümünde ve incelenen kodda alan tanımını, değeri kullanan kodu veya ilgili testleri arayabilir. Değişen işlev için bulgu eklemeden önce çağrıyı ve gözlemlenebilir sonucunu doğrular. Ayrı bir `memory sync` çalıştırmasında aynı aramayı `--at yol:satır` ile başlatabilirsiniz.
+
+Squash ile birleştirilen bir istekte OCR, değişikliğin sağ tarafındaki satır yorumunu barındırma hizmetinden doğrular. Alıntılanan kodun hem birleştirme sürümünde hem de incelenen sürümde tek bir yerde bulunması gerekir. Kayıt, yorumun yazıldığı commit ve kaynak satırlarıyla birlikte birleştirme commit'ini ve zamanını saklar. Geçmiş incelemeler bu kaydı birleştirme anından itibaren kullanabilir.
+
+### Açık kısıtlar ve inceleme kararları {#explicit-constraints-and-decisions}
+
+```bash
+ocr memory learn contracts/payment.json --scope src/payments --memory-db "$DB"
+ocr memory list --search refund --memory-db "$DB"
+ocr memory feedback "$RULE_ID" --action confirm --reason "Matches the settlement contract" --memory-db "$DB"
+```
+
+`learn`, JSON Schema özelliklerinin doğrudan `const` ve `enum` kısıtlarını belirtilen dosya veya dizinle ilişkilendirir. Belirli bir inceleme için alınan kararı, gerekçesini ve kaynak satırlarını `memory decide --review-id <id> --evidence-lines <ilk-son>` ile kaydedin. Sonraki incelemelerde aynı kimliği kullanın. Hatalı bir kuralı `feedback --action reject` ile reddedebilir, `--action replace --replacement <id>` ile başka bir kuralla değiştirebilirsiniz.
+
+### İncelemede kuralların kullanımı {#how-review-uses-knowledge}
+
+Bir değişiklik temel sürümde geçerli olan kuralı etkilediğinde ajan eski davranışı ve yeni sürümde hâlâ bulunan kaynak satırlarını görür. Bu sayede hangi çağrıların veya testlerin eski davranışa bağlı olduğunu inceleyebilir. Bir bulgunun geri çekilmesi önerildiğinde veya aynı incelemede dosya için geçerli bir insan kararı bulunduğunda bağımsız bir değerlendirme bulgunun koşullarını ve sonucunu güncel kanıtla karşılaştırır. Kanıt yetersizse bulgu korunur.
+
+Yinelenen bulgu bir ifadenin bu değişiklikle eklendiğini öne sürüyorsa değerlendirme tek satırlık bir değişikliğin iki tarafını gösterebilir. OCR eski satırı, yeni satırı ve ilgili ifadeyi karşılaştırır. Yalnızca bu kanıta dayanarak bir bulguyu geri çekmek için önceki kararda aynı bulgunun kaydedilmiş olması gerekir. Farklı sözcüklerle ifade edilen bulgular bağımsız ve güncel kaynaklarla değerlendirilebilir.
+
+İçe aktarılan inceleme tartışması bir kurulumun hangi davranışı kullandığını belirtiyorsa OCR, tarihli kararın özgün metnini değişen kodun giriş noktasıyla karşılaştırır. Aynı girdi için beklenen sonucu, önceki sonucu ve yeni sonucu inceler. OCR, ancak kararın bu değişiklik için geçerli olduğunu doğruladığında ve hem kararı hem de güncel uygulamayı gösterebildiğinde buna dayanan bir bulgu ekler.
+
+Bir depo dosyasına bağlı tarihli tartışmanın metni, model ondan kural çıkaramadığında da korunur. Anlaşmada bir işlevin adı geçiyorsa OCR güncel tanımını bulabilir ve davranışı açıklayan birkaç ardışık satırı gösterebilir. Ayrıca giriş noktasının hangi yapılandırmayı yüklediğini denetleyebilir. Kanıt ilk yorumdaki belirsizliği giderdiğinde, bağımsız değerlendirme yorumun tamamını inceler ve geri çekilmesine veya doğrulanmış bir bulguyla değiştirilmesine karar verir. Olağan inceleme aynı satırlarda aynı hatayı zaten saptamışsa OCR iki bulguyu karşılaştırır ve ilkini korur.
+
+Çıkarılan bir bulgu değişen dosyadaki iki ayrı işleve dayanıyorsa OCR bildirilen girdi için döndürülen veya kaydedilen değeri denetler. Örneğin faturalama yüzdesi için son hesapta hangi tutarın payda olarak kullanıldığına bakar. İşlevlerin tam tanımları kesin olarak bulunamazsa OCR bir uyarı kaydeder ve olağan incelemenin sonucunu korur. Dışa aktarılan bir kararın bitiş tarihi RFC3339 biçiminde `expires_at` alanıyla verilebilir.
+
+Bir anlaşma giriş noktasını adlandırırken hesaplama başka bir dosyada yer alabilir. OCR değişen çağrının yerel içe aktarımını çözümleyebildiğinde aynı girdinin değişiklikten önceki ve sonraki sonucunu denetler. Bulgu hem anlaşmanın hem de uygulamanın kaynağını gösterir. Olağan bir bulgu geri çekilmeden önce özgün koşulu ve gözlemlenebilir sonucu ayrıca incelenir.
+
+Ajan önce normal kod incelemesini tamamlar. Ardından ilgili kuralları ve güncel kaynak satırlarını kullanarak eksik bir iş kuralı ihlalini arar ve mevcut bulguların dayanaklarını sınar. Bir bulgunun geri çekilmesi için aynı konumdaki iddianın güncel kanıtla çelişmesi gerekir. `--no-filter` mevcut bulguları korur. Bir istisnanın koşulu değişirse önceki incelemenin gerekçesi geçerliliğini yitirir.
+
 ## `ocr rules` {#ocr-rules}
 
 Kuralları incelemek içindir; tek alt komutu vardır:

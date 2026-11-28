@@ -18,6 +18,7 @@ Usage:
 Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
+  memory       Manage versioned repository evidence for review
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
@@ -69,6 +70,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | Command | Alias | What it does |
 |---|---|---|
 | `ocr review` | `ocr r` | Run a code review and emit comments. |
+| `ocr memory` | — | Discover repository knowledge, inspect citations, and maintain review decisions. |
 | `ocr scan` | `ocr s` | Scan complete files without requiring a Git diff. |
 | `ocr rules check <file>` | — | Show which rule applies to a given file path and where it came from. |
 | `ocr config set <key> <value>` | — | Persist a config value to `~/.opencodereview/config.json`. |
@@ -143,6 +145,8 @@ staged + unstaged + untracked changes in the current directory's repo.
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
 > `--resume` works with range, commit, and workspace reviews and cannot be
 > combined with `--preview`.
+
+Use `--memory-db <path>` to consult a knowledge database and `--memory-sync` to refresh it from the comparison base before review. Add `--review-id <id>` for feedback specific to this PR, MR or local review. See [review memory](#ocr-memory).
 
 ### Per-run LLM selection
 
@@ -585,6 +589,93 @@ different repository, or none, is refused: delete it by id alone.
 |---|---|---|
 | `--repo <path>` | every repository | Only look for the session under this repository. |
 | `--yes`, `-y` | `false` | Skip the confirmation prompt. |
+
+## `ocr memory`
+
+Use a trusted SQLite database outside the checkout. Set `DB` to its absolute path. To learn what the accepted codebase says and check a proposed change in a local checkout or CI, run:
+
+```bash
+ocr review --from main --to HEAD --memory-db "$DB" --memory-sync
+```
+
+OCR samples committed code, configuration, nearby tests, commit messages and earlier file versions at the comparison base. Changed paths and hunk locations help it find relevant code. The proposed implementation is reviewed against that knowledge. Add `--memory-discussions <url-or-file>` to ingest review feedback. GitHub pull requests and GitLab merge requests use the signed-in `gh` or `glab` CLI for a repository remote. Other workflows can supply a JSON array of objects with a stable `id`, a `body`, and optional `path`, `revision`, `url`, `created_at`, `updated_at` and `expires_at`. Use RFC3339 timestamps.
+
+To use inline replies when reviewing the next push to a GitHub PR, run this from a checkout containing both revisions:
+
+```bash
+ocr review --from main --to HEAD --memory-db "$DB" --memory-sync --memory-discussions "$PR_URL"
+```
+
+OCR links a reply to the original inline comment and records the commit on which GitHub says the reply was submitted. When a later finding concerns those lines, OCR checks the explanation against the current code before withdrawing or editing the finding. Import new replies with the same command. To reuse imported replies without fetching them again, pass `--memory-db "$DB" --review-id "$PR_URL"`. Set the review ID explicitly when supplying multiple discussion sources or reviewing just the changes since a previous push.
+
+When OCR can locate the same operation in a Go, Python or JavaScript function, a change to that function can also prompt it to revisit the original concern without a new draft finding. It compares the code at submission with the current patch and independently verifies that the earlier explanation held then and the changed implementation makes the concern actionable now.
+
+For a local JSON export, give the parent and reply the same `review_id` and `path`, with `published_at`, `published_revision` and `updated_at` for each note. Include the parent's `original_revision`, right-side `start_line`, `end_line` and exact `source_quote`. Set the reply's `reply_to` to the parent's `id` and use `--review-id` with that export's review ID. Ordinary discussion exports remain usable as source material when the submission commit is unknown.
+
+When a changed line belongs to a top-level Python function, OCR can also follow a relative import from another module in the comparison base to find a direct call. The caller shows how the application uses the result, for example when writing an order. If the caller leaves an effect unclear, review can look up a field, consumer or test in the base and reviewed code. It rechecks the call and its observable result before adding a finding in the changed function. Standalone discovery can use the same caller search with `--at path:line`.
+
+After a squash merge, OCR can recover a right-side inline comment when the hosting service confirms the merge and the quoted lines identify one location in both the landed file and the selected revision. The record keeps the original review revision, source lines, merge revision and merge time. Historical reviews use this evidence from the merge time onward.
+
+To curate a database separately, run discovery on a chosen commit and provide the resulting database read-only to review jobs:
+
+```bash
+ocr memory sync --ref main --scope src/payments --memory-db "$DB" \
+  --discussions review-notes.json
+ocr memory list --search refund --memory-db "$DB"
+ocr memory feedback "$RULE_ID" --action confirm --reason "Matches the settlement contract" --memory-db "$DB"
+ocr review --from main --to HEAD --memory-db "$DB"
+```
+
+`sync` uses the configured model. `--provider` and `--model` override it. Discovery ties each proposed rule, its scope and conditions to quoted source lines. It reports admitted sources, rejected records and sampling limits. Use `--path` or `--at path:line` to prioritize specific evidence. For historical replay, pass the review-time cutoff to `sync --as-of` and `review --memory-as-of`. A historical cutoff requires a known last-edit time for discussion text. An unchanged extraction input can reuse its database receipt.
+
+### Explicit constraints and decisions
+
+```bash
+ocr memory learn contracts/payment.json --scope src/payments --memory-db "$DB"
+ocr memory decide src/api/charge.go --evidence-lines 18-22 --scope src/payments/charge.go \
+  --review-id PR-43 --finding "Multiply the input by 100" \
+  --reason "The incoming value is already in cents" --memory-db "$DB"
+ocr memory list --review-id PR-43 --search cents --memory-db "$DB"
+ocr review --from main --to HEAD --review-id PR-43 --memory-db "$DB"
+ocr memory revoke "$MEMORY_ID" --memory-db "$DB"
+```
+
+For a JSON Schema containing `{"properties":{"unit":{"const":"cents"}}}`,
+`learn` extracts the assertion and records the source commit, path and
+property. It also supports direct property `enum` arrays of scalars.
+Use `--property` to select one property and `--ref` to read a committed
+revision (default `HEAD`). The supplied scope is the file or directory
+governed by the schema. A decision can cite any repository evidence file, such
+as the caller, a regression test or the contract. Supply the exact reviewed
+file as its scope, the review identifier, the finding and the reason. Only
+record text suitable for the configured review model.
+
+### How review uses knowledge
+
+`list --ref <commit>` shows the state of each record. A schema constraint can be `verified`. Model-extracted rules start as `candidate`. Human confirmation and matching evidence can establish a `current` rule. A PR-local rationale is `historical` and requires a fresh check against the changed code. Records can also be changed, unavailable, conflicting, expired, rejected or superseded. A shallow checkout needs the cited commits and ancestry. Use `feedback --action reject` or `feedback --action replace --replacement <id>` with a reason to correct the knowledge. A time-limited PR decision accepts `decide --expires-at <RFC3339>`.
+
+Each review group retrieves records using paths and identifiers from its diff. For a JSON document explicitly mapped to a schema, OCR checks present property values against current `const` and `enum` constraints. When a schema changes, the reviewer also sees the previous and proposed property constraints so it can check affected consumers.
+
+If a code change edits a rule that held at the comparison base, the reviewer sees its previous meaning and the exact source lines still present in the reviewed version. This helps it trace a caller or test that depends on the old behavior. A separate assessment checks a finding's full trigger and effect when a withdrawal is proposed or a previous decision still applies to its file and review ID. Reworded findings receive the same check. An inconclusive assessment keeps the finding.
+
+The agent completes its ordinary review, including code investigation, before checking the diff and provisional findings against the retrieved knowledge. A new business finding must identify the rule, quote the affected code and give current supporting evidence. Withdrawing an existing finding requires a refutation of its specific claim at the same location. An unconfirmed interpretation needs corroboration from another current source. `--no-filter` retains the original findings. If a model request or budget prevents the extra check, the report records a warning and preserves the ordinary review.
+
+Prior dismissals remain scoped to their review ID. A moved citation can remain applicable in Go and Python. Changing the cited guard or losing its supporting evidence withdraws the old rationale.
+
+For a repeated finding about an inherited expression, the assessor can cite both sides of a one-line replacement. OCR checks the exact old line, the reported line and the disputed expression. Using only this diff evidence requires the same recorded finding. A reworded finding can be refuted with independently cited current evidence.
+
+When an imported review discussion identifies which behavior a deployment uses, OCR checks the original dated decision against the affected entry point. It compares the expected result with the old and new results for the same input. OCR adds a finding based on the agreement only when it can establish that the agreement applies and cite both the decision and the current implementation.
+
+A dated discussion attached to a repository file remains available even when the extractor derives no rule from it. The reviewer can follow an implementation named by the agreement to its current definition and cite several consecutive lines when a single line omits part of the behavior. It can also check which setting the entry point loads from the current configuration. When that evidence answers a tentative comment, an independent assessment checks the entire original comment before withdrawing it or replacing it with a confirmed finding. If an ordinary finding already diagnoses the same failure on the same lines, OCR checks both findings and keeps the original.
+
+An inferred finding can connect two functions in the same edited file. OCR checks which value the code actually returns or stores for the reported input before adding the finding. For example, a change in an intermediate amount only affects a billing percentage if that amount participates in its calculation. If either function cannot be located unambiguously, OCR records a warning and keeps the ordinary review.
+
+A deployment agreement may name an entry point while a separate file implements the calculation. If a changed call resolves to a supported local import, OCR can trace the same input through the caller, the imported code and the patch. The report cites the agreement and the implementation record. Before withdrawing an ordinary finding, OCR checks its stated condition and observable outcome.
+
+Revocation applies to subsequent runs, including imports of the same
+assertion at another commit. Changed effective evidence invalidates review
+resume. Storage is scoped by the normalized origin remote, or by the local
+Git common directory for repositories without a network origin.
 
 ## `ocr rules`
 
