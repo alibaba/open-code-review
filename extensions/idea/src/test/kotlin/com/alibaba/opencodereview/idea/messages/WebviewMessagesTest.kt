@@ -244,6 +244,7 @@ class WebviewMessagesTest {
 
     @Test
     fun `custom provider deletion and activation parse correctly`() {
+        assertEquals(WebviewToHost.DeleteCustomProvider(""), parse("""{"type":"deleteCustomProvider","name":""}"""))
         assertEquals(
             WebviewToHost.DeleteCustomProvider("my-llm"),
             parse("""{"type":"deleteCustomProvider","name":"my-llm"}"""),
