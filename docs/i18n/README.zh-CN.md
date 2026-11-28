@@ -31,6 +31,7 @@
   <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Copilot CLI" src="https://img.shields.io/badge/Copilot_CLI-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
@@ -58,13 +59,13 @@ Open Code Review 是一款 AI 驱动的代码审查 CLI 工具。它的前身是
 
 <a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> 在 Hugging Face 上探索 AACR-Bench 数据集</a>。
 
-| 指标 | 含义 | 为什么重要 |
-|------|------|-----------|
-| **F1** | 准确率与召回率的调和均值 | 综合衡量审查质量的最佳单一指标 |
-| **准确率 (Precision)** | 报告的问题中真正有效的比例 | 越高 = 误报越少，减少人工确认成本 |
-| **召回率 (Recall)** | 真实缺陷中被发现的比例 | 越高 = 漏报越少，更多问题不会遗漏 |
-| **平均耗时 (Avg Time)** | 每次审查的实际耗时 | 决定 CI 流水线的等待时间 |
-| **平均 Token (Avg Token)** | 每次审查消耗的总 token 数 | 直接影响 API 使用成本 |
+| 指标                       | 含义                       | 为什么重要                        |
+| -------------------------- | -------------------------- | --------------------------------- |
+| **F1**                     | 准确率与召回率的调和均值   | 综合衡量审查质量的最佳单一指标    |
+| **准确率 (Precision)**     | 报告的问题中真正有效的比例 | 越高 = 误报越少，减少人工确认成本 |
+| **召回率 (Recall)**        | 真实缺陷中被发现的比例     | 越高 = 漏报越少，更多问题不会遗漏 |
+| **平均耗时 (Avg Time)**    | 每次审查的实际耗时         | 决定 CI 流水线的等待时间          |
+| **平均 Token (Avg Token)** | 每次审查消耗的总 token 数  | 直接影响 API 使用成本             |
 
 ![Benchmark](../../imgs/benchmark-zh.png)
 
@@ -113,7 +114,7 @@ Open Code Review 的核心设计理念是将确定性工程与 Agent 结合，�
 
 ### Agent Skills
 
-可用于 Claude Code、Codex、Cursor、Kimi Code，以及其他支持 Agent Skills 且能执行本地命令的 Agent。两种模式都需要 **Git >= 2.41** 和 **`ocr` CLI**；只有原生模式需要配置 OCR 的模型供应商。
+可用于 Claude Code、Codex、Copilot CLI、Cursor、Kimi Code，以及其他支持 Agent Skills 且能执行本地命令的 Agent。两种模式都需要 **Git >= 2.41** 和 **`ocr` CLI**；只有原生模式需要配置 OCR 的模型供应商。
 
 #### 1. 安装 Skills
 
@@ -127,12 +128,12 @@ npx skills add alibaba/open-code-review
 
 #### 2. 选择审查模式
 
-| | 原生模式 | 委托模式 |
-|---|---|---|
-| Skill | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
-| 谁执行审查？ | OCR 专用审查 Agent 和流水线 | 当前编程 Agent，在 OCR 提供的审查流水线和围栏下执行 |
-| 模型与认证 | OCR 自身的供应商配置 | 宿主 Agent 已有的模型与认证 |
-| 适用场景 | 有可供 OCR 使用的模型端点，希望使用完整审查流水线 | 没有单独的 API key，或希望复用已有 Agent 订阅与配置 |
+|              | 原生模式                                                     | 委托模式                                                                       |
+| ------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| Skill        | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
+| 谁执行审查？ | OCR 专用审查 Agent 和流水线                                  | 当前编程 Agent，在 OCR 提供的审查流水线和围栏下执行                            |
+| 模型与认证   | OCR 自身的供应商配置                                         | 宿主 Agent 已有的模型与认证                                                    |
+| 适用场景     | 有可供 OCR 使用的模型端点，希望使用完整审查流水线            | 没有单独的 API key，或希望复用已有 Agent 订阅与配置                            |
 
 **没有单独的 key？从委托模式开始。** 它省去的是 OCR 的供应商配置，不是宿主 Agent 自身的认证、用量限制或费用。Agent 订阅不会自动成为原生模式可用的 API 凭证。委托模式下，OCR 的 CLI 和 skill 共同提供审查流水线和围栏，包括文件选择、规则解析、覆盖要求和结构化报告。宿主 Agent 在这一流程下完成分析、定位和报告，并不运行 OCR 完整的原生流水线。
 
@@ -218,6 +219,7 @@ ocr delegate rule src/main.go src/handler.go
 - 编程 Agent 集成 —— 选择你使用的平台
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) —— 安装包含评审斜杠命令的插件
   - [Codex](../../plugins/open-code-review/README.md#codex) —— 安装包含可调用评审 Skill 的插件
+  - [Copilot CLI](../../plugins/open-code-review/README.md#copilot-cli) —— 安装包含原生与委托评审 Skill 的插件
   - [Cursor](../../plugins/open-code-review/README.md#cursor) —— 安装包含可移植评审 Skill 的插件
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) —— 安装包含评审斜杠命令与 Skill 的插件
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) —— 安装原生评审工具和斜杠命令

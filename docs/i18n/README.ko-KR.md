@@ -31,6 +31,7 @@
   <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Copilot CLI" src="https://img.shields.io/badge/Copilot_CLI-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
@@ -58,13 +59,13 @@ Open Code Review는 AI 기반 코드 리뷰 CLI 도구입니다. Alibaba Group�
 
 <a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> Hugging Face에서 AACR-Bench 데이터셋 살펴보기</a>.
 
-| 지표 | 측정 내용 | 중요한 이유 |
-|------|-----------|-------------|
-| **F1** | 정밀도와 재현율의 조화 평균 | 리뷰 품질을 나타내는 최적의 단일 지표 |
-| **정밀도 (Precision)** | 보고된 이슈 중 실제 결함 비율 | 높을수록 확인할 오탐이 적음 |
-| **재현율 (Recall)** | 실제 결함 중 발견된 비율 | 높을수록 놓치는 이슈가 적음 |
-| **평균 시간 (Avg Time)** | 리뷰당 실제 소요 시간 | CI 파이프라인 대기 시간에 영향 |
-| **평균 토큰 (Avg Token)** | 리뷰당 총 토큰 소비량 | API 비용에 직접 영향 |
+| 지표                      | 측정 내용                     | 중요한 이유                           |
+| ------------------------- | ----------------------------- | ------------------------------------- |
+| **F1**                    | 정밀도와 재현율의 조화 평균   | 리뷰 품질을 나타내는 최적의 단일 지표 |
+| **정밀도 (Precision)**    | 보고된 이슈 중 실제 결함 비율 | 높을수록 확인할 오탐이 적음           |
+| **재현율 (Recall)**       | 실제 결함 중 발견된 비율      | 높을수록 놓치는 이슈가 적음           |
+| **평균 시간 (Avg Time)**  | 리뷰당 실제 소요 시간         | CI 파이프라인 대기 시간에 영향        |
+| **평균 토큰 (Avg Token)** | 리뷰당 총 토큰 소비량         | API 비용에 직접 영향                  |
 
 ![Benchmark](../../imgs/benchmark-ko.png)
 
@@ -113,7 +114,7 @@ agent의 강점은 동적 판단과 동적 context 검색이 중요한 지점에
 
 ### Agent Skills
 
-Claude Code, Codex, Cursor, Kimi Code 등 Agent Skills를 지원하고 로컬 명령을 실행할 수 있는 에이전트에서 사용할 수 있습니다. 두 모드 모두 **Git >= 2.41**과 **`ocr` CLI**가 필요하며, OCR 모델 공급자 설정은 네이티브 모드에만 필요합니다.
+Claude Code, Codex, Copilot CLI, Cursor, Kimi Code 등 Agent Skills를 지원하고 로컬 명령을 실행할 수 있는 에이전트에서 사용할 수 있습니다. 두 모드 모두 **Git >= 2.41**과 **`ocr` CLI**가 필요하며, OCR 모델 공급자 설정은 네이티브 모드에만 필요합니다.
 
 #### 1. 스킬 설치
 
@@ -127,12 +128,12 @@ npx skills add alibaba/open-code-review
 
 #### 2. 리뷰 모드 선택
 
-| | 네이티브 모드 | 위임 모드 |
-|---|---|---|
-| 스킬 | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
-| 리뷰 수행 주체 | OCR 전용 리뷰 에이전트와 파이프라인 | OCR의 리뷰 파이프라인과 가드레일을 따르는 현재 코딩 에이전트 |
-| 모델 및 인증 | OCR 자체 공급자 설정 | 호스트 에이전트의 기존 모델과 인증 |
-| 권장 상황 | OCR용 모델 엔드포인트가 있고 전체 리뷰 파이프라인을 사용하려는 경우 | 별도 API 키가 없거나 기존 에이전트 구독과 설정을 활용하려는 경우 |
+|                | 네이티브 모드                                                       | 위임 모드                                                                      |
+| -------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 스킬           | [`open-code-review`](../../skills/open-code-review/SKILL.md)        | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
+| 리뷰 수행 주체 | OCR 전용 리뷰 에이전트와 파이프라인                                 | OCR의 리뷰 파이프라인과 가드레일을 따르는 현재 코딩 에이전트                   |
+| 모델 및 인증   | OCR 자체 공급자 설정                                                | 호스트 에이전트의 기존 모델과 인증                                             |
+| 권장 상황      | OCR용 모델 엔드포인트가 있고 전체 리뷰 파이프라인을 사용하려는 경우 | 별도 API 키가 없거나 기존 에이전트 구독과 설정을 활용하려는 경우               |
 
 **별도 키가 없다면 위임 모드로 시작하세요.** OCR 공급자 설정만 생략하며, 호스트 에이전트의 인증, 사용량 제한, 비용은 그대로 적용됩니다. 에이전트 구독이 네이티브 모드의 API 인증 정보가 되는 것은 아닙니다. 위임 모드에서는 OCR의 CLI와 스킬이 함께 리뷰 파이프라인과 가드레일을 제공합니다. 여기에는 파일 선택, 규칙 해석, 커버리지 요구 사항, 구조화된 보고가 포함됩니다. 호스트 에이전트가 이 흐름에 따라 분석, 위치 지정, 보고를 수행하며 OCR의 전체 네이티브 파이프라인을 실행하지는 않습니다.
 
@@ -218,6 +219,7 @@ ocr delegate rule src/main.go src/handler.go
 - 코딩 에이전트 연동 — 사용하는 플랫폼 선택
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — 리뷰 슬래시 명령이 포함된 플러그인 설치
   - [Codex](../../plugins/open-code-review/README.md#codex) — 호출 가능한 리뷰 스킬이 포함된 플러그인 설치
+  - [Copilot CLI](../../plugins/open-code-review/README.md#copilot-cli) — 네이티브 및 위임 모드용 리뷰 스킬이 포함된 플러그인 설치
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — 이식 가능한 리뷰 스킬이 포함된 플러그인 설치
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — 리뷰 슬래시 명령과 스킬이 포함된 플러그인 설치
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — 네이티브 리뷰 도구와 슬래시 명령 설치

@@ -31,6 +31,7 @@
   <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Copilot CLI" src="https://img.shields.io/badge/Copilot_CLI-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
@@ -58,13 +59,13 @@ Une étude comparative concrète sur la révision de code, élaborée à partir 
 
 <a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> Découvrez le jeu de données AACR-Bench sur Hugging Face</a>.
 
-| Système métrique | Ce qu'il mesure | Pourquoi est-ce important ? |
-|--------|-----------------|----------------|
-| **F1** | Moyenne harmonique de la précision et du rappel | Meilleur chiffre unique pour évaluer la qualité globale des avis |
-| **Précision** | Proportion de problèmes signalés qui constituent de véritables défauts | Plus la valeur est élevée, moins il y a de fausses alertes à trier |
-| **Rappel** | Proportion de défauts réels détectés | Plus ce chiffre est élevé, moins il y a de problèmes qui échappent à la vérification |
-| **Durée moyenne** | Durée réelle par évaluation | Facteurs influant sur la latence du pipeline CI |
-| **Token moyen** | Nombre total de tokens utilisés par évaluation | A un impact direct sur le coût de l'API |
+| Système métrique  | Ce qu'il mesure                                                        | Pourquoi est-ce important ?                                                          |
+| ----------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **F1**            | Moyenne harmonique de la précision et du rappel                        | Meilleur chiffre unique pour évaluer la qualité globale des avis                     |
+| **Précision**     | Proportion de problèmes signalés qui constituent de véritables défauts | Plus la valeur est élevée, moins il y a de fausses alertes à trier                   |
+| **Rappel**        | Proportion de défauts réels détectés                                   | Plus ce chiffre est élevé, moins il y a de problèmes qui échappent à la vérification |
+| **Durée moyenne** | Durée réelle par évaluation                                            | Facteurs influant sur la latence du pipeline CI                                      |
+| **Token moyen**   | Nombre total de tokens utilisés par évaluation                         | A un impact direct sur le coût de l'API                                              |
 
 ![Benchmark](../../imgs/benchmark-en.png)
 
@@ -86,7 +87,7 @@ La philosophie de base d'Open Code Review est de combiner l'ingénierie détermi
 
 **Ingénierie déterministe — Contraintes strictes**
 
-Pour les étapes de vérification qui *ne doivent en aucun cas présenter d'erreur*, c'est la logique technique — et non le modèle de langue — qui garantit l'exactitude :
+Pour les étapes de vérification qui _ne doivent en aucun cas présenter d'erreur_, c'est la logique technique — et non le modèle de langue — qui garantit l'exactitude :
 
 - **Sélection précise des fichiers** — Permet de déterminer exactement quels fichiers doivent être examinés et lesquels doivent être filtrés, afin de s'assurer qu'aucune modification importante ne soit omise.
 - **Regroupement intelligent de fichiers** — Regroupe les fichiers associés en une seule unité de révision (par exemple, `message_en.properties` et `message_zh.properties` sont regroupés). Chaque ensemble s'exécute en tant que sous-agent dans un contexte isolé — une stratégie de « diviser pour mieux régner » qui reste stable même avec des ensembles de modifications très volumineux et prend naturellement en charge la révision simultanée.
@@ -113,7 +114,7 @@ Les points forts de l'agent sont concentrés là où ils sont les plus important
 
 ### Compétences des agents
 
-Utilisez les compétences de Claude Code, Codex, Cursor, Kimi Code ou de tout autre agent prenant en charge les compétences d'agent et capable d'exécuter des commandes locales. Les deux modes nécessitent **Git >= 2.41** et la **`ocr` CLI** ; seul le mode natif nécessite un fournisseur de modèles pour OCR.
+Utilisez les compétences de Claude Code, Codex, Copilot CLI, Cursor, Kimi Code ou de tout autre agent prenant en charge les compétences d'agent et capable d'exécuter des commandes locales. Les deux modes nécessitent **Git >= 2.41** et la **`ocr` CLI** ; seul le mode natif nécessite un fournisseur de modèles pour OCR.
 
 #### 1. Installez les compétences
 
@@ -127,12 +128,12 @@ La compétence guide votre agent pour installer `ocr` s'il n'est pas présent, s
 
 #### 2. Choisissez un mode de révision
 
-|  | Mode natif | Mode délégation |
-|---|---|---|
-| Compétence | [`open-code-review`](../../skills/open-code-review/SKILL.md) | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md) |
-| Qui procède à l'examen ? | L'agent d'examen spécialisé et le processus de traitement de l'OCR | Votre agent de codage actuel, conformément au processus de révision et aux mesures de contrôle de l'OCR |
-| Modèle et authentification | Configuration propre à l'OCR de son fournisseur | Modèle et authentification actuels de votre agent hôte |
-| Choisissez-le lorsque | Vous disposez d'un point d'accès au modèle pour l'OCR et souhaitez connaître l'intégralité de son processus de validation | Vous ne disposez pas d'une clé API distincte, ou vous souhaitez utiliser votre abonnement ou votre configuration d'agent existants |
+|                            | Mode natif                                                                                                                | Mode délégation                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Compétence                 | [`open-code-review`](../../skills/open-code-review/SKILL.md)                                                              | [`open-code-review-delegate`](../../skills/open-code-review-delegate/SKILL.md)                                                     |
+| Qui procède à l'examen ?   | L'agent d'examen spécialisé et le processus de traitement de l'OCR                                                        | Votre agent de codage actuel, conformément au processus de révision et aux mesures de contrôle de l'OCR                            |
+| Modèle et authentification | Configuration propre à l'OCR de son fournisseur                                                                           | Modèle et authentification actuels de votre agent hôte                                                                             |
+| Choisissez-le lorsque      | Vous disposez d'un point d'accès au modèle pour l'OCR et souhaitez connaître l'intégralité de son processus de validation | Vous ne disposez pas d'une clé API distincte, ou vous souhaitez utiliser votre abonnement ou votre configuration d'agent existants |
 
 **Vous ne disposez pas d’une clé distincte ? Commencez par le mode de délégation.** Ce mode permet d’éviter la configuration du fournisseur OCR, mais ne dispense pas de l’authentification propre à l’agent hôte, ni des limites d’utilisation, ni des coûts associés. Un abonnement à l’agent hôte ne constitue pas automatiquement un identifiant d’accès à l’API pour le mode natif. En mode délégation, l’interface CLI et la compétence de l’OCR fournissent conjointement le pipeline de révision et les garde-fous : sélection des fichiers, résolution des règles, exigences de couverture et rapports structurés. L’agent hôte effectue l’analyse, le positionnement et la génération de rapports au sein de ce flux de travail ; il n’exécute pas l’intégralité du pipeline natif de l’OCR.
 
@@ -218,6 +219,7 @@ La documentation complète est disponible à l'adresse **[open-codereview.ai/doc
 - Intégrations d'agents de codage — choisissez la plateforme que vous utilisez
   - [Claude Code](../../plugins/open-code-review/README.md#claude-code) — installer un plugin proposant des commandes « / » pour la révision
   - [Codex](../../plugins/open-code-review/README.md#codex) — installer un plugin proposant des fonctionnalités d'évaluation accessibles par appel
+  - [Copilot CLI](../../plugins/open-code-review/README.md#copilot-cli) — installer un plugin avec des compétences de révision en modes natif et délégué
   - [Cursor](../../plugins/open-code-review/README.md#cursor) — installer un plugin doté de fonctionnalités de révision portables
   - [Kimi Code](../../plugins/open-code-review/README.md#kimi-code) — installer un plugin proposant des commandes de révision « slash » et des compétences
   - [OpenCode](../../plugins/open-code-review/opencode/README.md) — installer des outils de révision natifs et des commandes « slash »

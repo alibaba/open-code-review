@@ -31,6 +31,7 @@
   <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Copilot CLI" src="https://img.shields.io/badge/Copilot_CLI-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Kimi Code" src="https://img.shields.io/badge/Kimi_Code-supported-blueviolet.svg" /></a>
 </p>
@@ -113,7 +114,7 @@ The agent's strengths are concentrated where they matter most — dynamic decisi
 
 ### Agent Skills
 
-Use the skills in Claude Code, Codex, Cursor, Kimi Code, or another agent that supports Agent Skills and can run local commands. Both modes require **Git >= 2.41** and the **`ocr` CLI**; only native mode requires an OCR model provider.
+Use the skills in Claude Code, Codex, Copilot CLI, Cursor, Kimi Code, or another agent that supports Agent Skills and can run local commands. Both modes require **Git >= 2.41** and the **`ocr` CLI**; only native mode requires an OCR model provider.
 
 #### 1. Install the Skills
 
@@ -218,6 +219,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
 - Coding Agent Integrations — choose the platform you use
   - [Claude Code](plugins/open-code-review/README.md#claude-code) — install a plugin with review slash commands
   - [Codex](plugins/open-code-review/README.md#codex) — install a plugin with callable review skills
+  - [Copilot CLI](plugins/open-code-review/README.md#copilot-cli) — install a plugin with native and delegated review skills
   - [Cursor](plugins/open-code-review/README.md#cursor) — install a plugin with portable review skills
   - [Kimi Code](plugins/open-code-review/README.md#kimi-code) — install a plugin with review slash commands and skills
   - [OpenCode](plugins/open-code-review/opencode/README.md) — install native review tools and slash commands
