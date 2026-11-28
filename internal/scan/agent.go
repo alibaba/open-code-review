@@ -222,6 +222,21 @@ func (a *Agent) Diffs() []model.Diff {
 	return out
 }
 
+// scanBatchPaths lists a batch's dispatchable item paths for the receipt's
+// group rollup (#2124). Binary items are excluded (selection never dispatches
+// them); empty-content items DO dispatch — only the plan phase skips them — so
+// they stay in the group.
+func scanBatchPaths(batch []model.ScanItem) []string {
+	paths := make([]string, 0, len(batch))
+	for i := range batch {
+		if batch[i].IsBinary {
+			continue
+		}
+		paths = append(paths, batch[i].Path)
+	}
+	return paths
+}
+
 // TotalTokensUsed / TotalInputTokens / ... delegate to the underlying runner.
 func (a *Agent) TotalTokensUsed() int64      { return a.runner.TotalTokensUsed() }
 func (a *Agent) TotalInputTokens() int64     { return a.runner.TotalInputTokens() }
@@ -395,6 +410,12 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// background goroutine is left leaking or writing to a finalized session.
 	a.runner.WaitBackground()
 
+	// An interrupted run (cancellation or deadline) must never finalize as a
+	// clean partial (#2124): pin the receipt's terminal status.
+	if ctx.Err() != nil {
+		a.session.MarkReceiptCancelled()
+	}
+
 	// A persistence failure is a delivery error in its own right: when the scan
 	// also failed, both facts are reported (errors.Join) rather than letting the
 	// dispatch error hide the fact that session_end never reached disk.
@@ -556,9 +577,22 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	batches := groupBatches(a.items, strategy, a.args.Template.BatchSize)
 	fmt.Fprintf(stdout.Writer(), "[ocr] scan dispatch: %d batch(es) by %s strategy\n", len(batches), strategy)
 
+	// Receipt parity (#2124): every batch is a receipt group, installed up
+	// front so a run truncated by cancellation or the budget gate leaves its
+	// undispatched batches visibly pending instead of reading complete.
+	// RecordReviewItem* hooks keep each group's rollup current.
+	for bi, batch := range batches {
+		a.session.AppendReceiptGroup(session.ReceiptGroup{
+			GroupID: fmt.Sprintf("batch-%d", bi),
+			Label:   fmt.Sprintf("batch %d (%s)", bi, strategy),
+			Files:   scanBatchPaths(batch),
+		})
+	}
+
 	var dispatched, reused int64
 	for bi, batch := range batches {
 		if err := ctx.Err(); err != nil {
+			a.session.MarkReceiptCancelled()
 			return a.args.CommentCollector.Comments(), err
 		}
 		// Snapshot the collector so we can isolate comments added by *this*

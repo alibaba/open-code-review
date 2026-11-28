@@ -213,6 +213,16 @@ ocr review --commit abc123 --resume <session-id>
 ocr review --resume <session-id>   # 工作区（不传模式参数）
 ```
 
+#### 运行回执（`<session-id>.receipt.json`）{#run-receipts}
+
+会话日志旁边会维护一份机器可读的运行回执（`ocr.session-receipt/v1`），随检查点原子化重写：
+即使进程被强杀（SIGKILL、监督超时），最后一份快照仍然可解析，包含 `session_id`、`status`
+（运行中为 `running`；结束时为 `complete` / `partial` / `failed` / `cancelled` / `skipped`）
+以及按组 / 按文件的覆盖情况。回执最多只落后日志最近一条检查点——日志记录先写入，因此以日志
+为准的恢复可能复用略多于回执显示的内容。评审的分组与结果中的 `groups[]` 一致；扫描按派发
+批次分组。删除会话（`ocr session rm`）时会连同日志一起删除回执。
+
+
 恢复逻辑是严格的。只有当本次运行评审的对象与父运行完全一致时，checkpoint 才会被复用：
 
 - 工作区评审仅在评审对象未变时才能恢复：基准 commit 与未提交变更都必须一致。

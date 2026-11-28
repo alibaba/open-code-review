@@ -223,6 +223,18 @@ ocr review --commit abc123 --resume <session-id>
 ocr review --resume <session-id>   # 워크스페이스(모드 플래그 없음)
 ```
 
+#### 실행 영수증(`<session-id>.receipt.json`) {#run-receipts}
+
+세션 저널 옆에는 기계 판독 가능한 실행 영수증(`ocr.session-receipt/v1`)이 유지되며
+체크포인트마다 원자적으로 다시 기록됩니다. 프로세스가 강제 종료(SIGKILL, 감독 타임아웃)
+되어도 마지막 스냅샷은 파싱 가능합니다: `session_id`, `status`(실행 중 `running`, 종료 시
+`complete` / `partial` / `failed` / `cancelled` / `skipped`), 그룹별·파일별 커버리지.
+영수증은 가장 최근 체크포인트만큼 저널보다 늦을 수 있습니다 — 저널 기록이 먼저 기록되므로
+저널 기반 재개는 영수증 표시보다 많이 재사용할 수 있습니다. 리뷰의 그룹은 결과의 `groups[]`와
+같고, 스캔은 디스패치 배치별로 그룹화됩니다. 세션 삭제(`ocr session rm`)는 저널과 함께
+영수증도 삭제합니다.
+
+
 이어서 하기는 의도적으로 엄격합니다. 이어받은 실행이 원래 실행과 똑같은 대상을 리뷰할
 때만 체크포인트를 재사용합니다.
 

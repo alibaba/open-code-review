@@ -58,6 +58,16 @@ type SessionHistory struct {
 	FileSessions map[string]*FileSession
 	llmFailures  int64
 
+	// Receipt state (#2124): the expected dispatch set partitioned into groups
+	// plus per-file outcomes, mirrored continuously into
+	// <session-id>.receipt.json beside the journal. A killed process leaves
+	// the last written receipt, so the caller can discover the session id and
+	// coverage without scraping the journal. receiptStatusOverride pins a
+	// terminal status (cancelled) across the Finalize rewrite.
+	receiptGroups         []ReceiptGroup
+	receiptItems          map[string]*receiptItem
+	receiptStatusOverride string
+
 	// manifest is the run's coverage accumulator, sharing the session ID as its
 	// run_id. It is only created when SessionOptions.Operation is non-empty (the
 	// review path opts in; scan stays legacy with a nil builder). It is nil for
@@ -302,6 +312,7 @@ func (sh *SessionHistory) RecordReviewItemDone(filePath, oldPath, newPath, finge
 	if p := sh.persist; p != nil {
 		p.WriteReviewItemDone(filePath, oldPath, newPath, fingerprint, comments)
 	}
+	sh.recordReceiptItem(filePath, ReceiptItemDone, "")
 }
 
 // RecordReviewItemReused records that this run reused a checkpoint from another session.
@@ -318,6 +329,7 @@ func (sh *SessionHistory) RecordReviewItemReused(filePath, oldPath, newPath, fin
 	if p := sh.persist; p != nil {
 		p.WriteReviewItemReused(filePath, oldPath, newPath, fingerprint, sourceSessionID, comments)
 	}
+	sh.recordReceiptItem(filePath, ReceiptItemReused, "")
 }
 
 // RecordResumeLineage persists the run's single resume_lineage event. A nil
@@ -345,6 +357,7 @@ func (sh *SessionHistory) RecordReviewItemFailed(filePath, oldPath, newPath, fin
 	if p := sh.persist; p != nil {
 		p.WriteReviewItemFailed(filePath, oldPath, newPath, fingerprint, errorMsg)
 	}
+	sh.recordReceiptItem(filePath, ReceiptItemFailed, errorMsg)
 }
 
 // Finalize marks the session as complete, sets the end time, and persists the
@@ -379,6 +392,7 @@ func (sh *SessionHistory) Finalize() error {
 			}
 		}
 		failures := atomic.LoadInt64(&sh.llmFailures)
+		sh.writeReceiptLocked()
 		sh.mu.Unlock()
 
 		if persistInitErr != nil {
