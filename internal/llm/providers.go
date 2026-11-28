@@ -37,7 +37,7 @@ type Provider struct {
 	ExternalAuth          bool
 	RequiresStreaming     bool
 	RejectsSamplingParams bool
-	Models                []string
+	Models                []string // Suggested IDs for the model picker
 }
 
 // After modifying the built-in provider registry, run `go generate ./internal/llm`
@@ -51,12 +51,10 @@ var registry = []Provider{
 		AuthHeader:  "x-api-key",
 		EnvVar:      "ANTHROPIC_API_KEY",
 		Models: []string{
-			"claude-opus-5",
-			"claude-sonnet-5",
-			"claude-opus-4-8",
-			"claude-opus-4-7",
-			"claude-opus-4-6",
-			"claude-sonnet-4-6",
+			"claude-fable-5-2",
+			"claude-opus-5-5",
+			"claude-sonnet-5-5",
+			"claude-haiku-5-5",
 		},
 	},
 	{
@@ -77,14 +75,12 @@ var registry = []Provider{
 		Protocol:    ProtocolAnthropicBedrock,
 		AmbientAuth: true,
 		Models: []string{
-			"us.anthropic.claude-opus-5",
-			"us.anthropic.claude-sonnet-5",
-			"us.anthropic.claude-opus-4-8",
-			"us.anthropic.claude-opus-4-7",
-			"us.anthropic.claude-sonnet-4-6",
-			"global.anthropic.claude-opus-5",
-			"global.anthropic.claude-sonnet-5",
-			"global.anthropic.claude-opus-4-8",
+			"us.anthropic.claude-opus-5-5",
+			"us.anthropic.claude-sonnet-5-5",
+			"global.anthropic.claude-fable-5-2",
+			"global.anthropic.claude-opus-5-5",
+			"global.anthropic.claude-sonnet-5-5",
+			"global.anthropic.claude-haiku-5-5",
 		},
 	},
 	{
@@ -103,10 +99,9 @@ var registry = []Provider{
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.openai.com/v1",
 		EnvVar:      "OPENAI_API_KEY",
+		// GPT-6 needs Responses for tool calls at its default reasoning settings.
 		Models: []string{
 			"gpt-5.5",
-			"gpt-5.4",
-			"gpt-5.4-mini",
 		},
 	},
 	{
@@ -116,9 +111,11 @@ var registry = []Provider{
 		BaseURL:     "https://api.openai.com/v1",
 		EnvVar:      "OPENAI_RESPONSES_API_KEY",
 		Models: []string{
-			"gpt-5.6-sol",
-			"gpt-5.6-terra",
-			"gpt-5.6-luna",
+			"gpt-6.2-astra",
+			"gpt-6.2-sol",
+			"gpt-6.1-sol",
+			"gpt-6.1-terra",
+			"gpt-6-luna",
 		},
 	},
 	{
@@ -128,11 +125,11 @@ var registry = []Provider{
 		BaseURL:     "https://openrouter.ai/api/v1",
 		EnvVar:      "OPENROUTER_API_KEY",
 		Models: []string{
-			"anthropic/claude-fable-5.1",
-			"openai/gpt-5.6-sol",
-			"anthropic/claude-opus-5",
-			"openai/gpt-6-astra",
-			"moonshotai/kimi-k3",
+			"anthropic/claude-fable-5.2",
+			"openai/gpt-6.2-sol",
+			"google/gemini-4-neon",
+			"moonshotai/kimi-k3.1-pro",
+			"deepseek/deepseek-v4.1-flash-1017",
 		},
 	},
 	{
@@ -142,16 +139,11 @@ var registry = []Provider{
 		BaseURL:     "https://api.edenai.run/v3",
 		EnvVar:      "EDENAI_API_KEY",
 		Models: []string{
-			"anthropic/claude-opus-4-5",
-			"anthropic/claude-sonnet-4-5",
-			"anthropic/claude-haiku-4-5",
-			"openai/gpt-5.1",
-			"openai/gpt-5.1-codex",
-			"google/gemini-3.1-pro-preview",
-			"mistral/devstral-medium-latest",
-			"mistral/codestral-latest",
+			"anthropic/claude-opus-5-5",
+			"openai/gpt-6.2-sol",
+			"google/gemini-4-neon",
+			"moonshot/kimi-k3.1-pro",
 			"deepseek/deepseek-v4-pro",
-			"xai/grok-4",
 		},
 	},
 	{
@@ -161,12 +153,10 @@ var registry = []Provider{
 		BaseURL:     "https://generativelanguage.googleapis.com/v1beta/openai",
 		EnvVar:      "GEMINI_API_KEY",
 		Models: []string{
-			"gemini-3-flash-preview",
-			"gemini-3.1-flash-lite",
-			"gemini-3.1-pro",
-			"gemini-3.5-flash-lite",
-			"gemini-3.5-flash",
-			"gemini-3.6-flash",
+			"gemini-4-carbon",
+			"gemini-4-neon",
+			"gemini-4-hydrogen",
+			"gemini-4-argon",
 		},
 	},
 	{
@@ -176,15 +166,11 @@ var registry = []Provider{
 		BaseURL:     "https://dashscope.aliyuncs.com/compatible-mode/v1",
 		EnvVar:      "DASHSCOPE_API_KEY",
 		Models: []string{
-			"qwen3.8-max",
-			"qwen3.7-max",
-			"qwen3.7-plus",
-			"qwen3.6-plus",
-			"qwen3.6-flash",
-			"deepseek-v4-pro",
-			"deepseek-v4-flash",
-			"kimi-k2.7-code",
-			"glm-5.2",
+			"qwen4-max",
+			"qwen3.8-flash",
+			"deepseek-v4.1-flash",
+			"kimi-k3.1-pro",
+			"glm-5.3",
 		},
 	},
 	{
@@ -194,19 +180,11 @@ var registry = []Provider{
 		BaseURL:     "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
 		EnvVar:      "DASHSCOPE_TOKENPLAN_KEY",
 		Models: []string{
-			"qwen3.8-max",
-			"qwen3.7-max",
-			"qwen3.7-plus",
-			"qwen3.6-plus",
-			"qwen3.6-flash",
-			"deepseek-v4-pro",
-			"deepseek-v4-flash",
-			"kimi-k2.7-code",
-			"kimi-k2.6",
-			"kimi-k2.5",
-			"glm-5.2",
-			"glm-5.1",
-			"glm-5",
+			"qwen4-max",
+			"qwen3.8-flash",
+			"deepseek-v4.1-flash-1017",
+			"deepseek-v4-pro-0813",
+			"glm-5.3",
 		},
 	},
 	{
@@ -217,11 +195,11 @@ var registry = []Provider{
 		EnvVar:      "ARK_API_KEY",
 		Models: []string{
 			"doubao-seed-evolving",
-			"doubao-seed-2-1-pro-260628",
+			"doubao-seed-2-1-pro-260915",
+			"doubao-seed-2-1-lite-260915",
 			"doubao-seed-2-1-turbo-260628",
-			"doubao-seed-2-0-lite-260428",
-			"doubao-seed-2-0-mini-260428",
-			"doubao-seed-2-0-pro-260215",
+			"kimi-k3-1-pro-261024",
+			"deepseek-v4-1-flash-261017",
 		},
 	},
 	{
@@ -242,16 +220,12 @@ var registry = []Provider{
 		BaseURL:     "https://tokenhub.tencentmaas.com/v1",
 		EnvVar:      "TENCENT_TOKENHUB_API_KEY",
 		Models: []string{
-			"deepseek-v4-pro",
-			"deepseek-v4-flash",
-			"glm-5.2",
-			"glm-5.1",
-			"glm-5",
-			"glm-5-turbo",
-			"kimi-k2.7-code",
-			"kimi-k2.7-code-highspeed",
-			"kimi-k2.6",
-			"minimax-m3",
+			"hy4",
+			"hy4-flash",
+			"deepseek/deepseek-flash",
+			"kimi-k3.1-pro",
+			"minimax-m3.1-flash",
+			"glm-5.3",
 		},
 	},
 	{
@@ -261,7 +235,8 @@ var registry = []Provider{
 		BaseURL:     "https://api.lkeap.cloud.tencent.com/plan/v3",
 		EnvVar:      "TENCENT_HUNYUAN_TOKENPLAN_KEY",
 		Models: []string{
-			"hy3",
+			"hy4",
+			"hy4-flash",
 		},
 	},
 	{
@@ -272,9 +247,6 @@ var registry = []Provider{
 		EnvVar:      "SPARK_API_KEY",
 		Models: []string{
 			"4.0Ultra",
-			"generalv3.5",
-			"max-32k",
-			"generalv3",
 			"pro-128k",
 			"lite",
 		},
@@ -286,11 +258,9 @@ var registry = []Provider{
 		BaseURL:     "https://api.moonshot.cn/v1",
 		EnvVar:      "MOONSHOT_API_KEY",
 		Models: []string{
+			"kimi-k3.1-pro",
+			"kimi-k3.1-pro-highspeed",
 			"kimi-k3",
-			"kimi-k2.7-code",
-			"kimi-k2.7-code-highspeed",
-			"kimi-k2.6",
-			"kimi-k2.5",
 		},
 	},
 	{
@@ -300,11 +270,9 @@ var registry = []Provider{
 		BaseURL:     "https://api.moonshot.ai/v1",
 		EnvVar:      "MOONSHOT_GLOBAL_API_KEY",
 		Models: []string{
+			"kimi-k3.1-pro",
+			"kimi-k3.1-pro-highspeed",
 			"kimi-k3",
-			"kimi-k2.7-code",
-			"kimi-k2.7-code-highspeed",
-			"kimi-k2.6",
-			"kimi-k2.5",
 		},
 	},
 	{
@@ -315,11 +283,8 @@ var registry = []Provider{
 		EnvVar:      "Z_AI_API_KEY",
 		Models: []string{
 			"glm-5.3",
-			"glm-5.2",
-			"glm-5.1",
-			"glm-5",
-			"glm-5-turbo",
-			"glm-4.7",
+			"glm-5.3-flash",
+			"glm-5.3-flashx",
 		},
 	},
 	{
@@ -329,11 +294,9 @@ var registry = []Provider{
 		BaseURL:     "https://open.bigmodel.cn/api/coding/paas/v4",
 		EnvVar:      "Z_AI_CODING_API_KEY",
 		Models: []string{
+			"glm-5.4",
 			"glm-5.3",
-			"glm-5.2",
-			"glm-5.1",
-			"glm-5-turbo",
-			"glm-4.7",
+			"glm-5.3-flash",
 		},
 	},
 	{
@@ -343,8 +306,9 @@ var registry = []Provider{
 		BaseURL:     "https://api.xiaomimimo.com/v1",
 		EnvVar:      "MIMO_API_KEY",
 		Models: []string{
-			"mimo-v2.5-pro",
-			"mimo-v2.5",
+			"mimo-v2.6-pro",
+			"mimo-v2.6-pro-ultraspeed",
+			"mimo-v2.6-flash",
 		},
 	},
 	{
@@ -376,16 +340,12 @@ var registry = []Provider{
 		BaseURL:     "https://qianfan.baidubce.com/v2",
 		EnvVar:      "QIANFAN_API_KEY",
 		Models: []string{
+			"ernie-5.5-flash-preview",
 			"ernie-5.1",
-			"ernie-5.0",
-			"ernie-x1.1",
-			"ernie-x1-turbo-32k-preview",
-			"deepseek-v4-pro",
-			"deepseek-v4-flash",
-			"glm-5.2",
-			"glm-5.1",
-			"glm-5",
-			"kimi-k2.6",
+			"ernie-light-dt-1.0",
+			"deepseek-v4.1-flash-1017",
+			"deepseek-v4-pro-0813",
+			"glm-5.3",
 		},
 	},
 	{
@@ -395,22 +355,12 @@ var registry = []Provider{
 		BaseURL:     "https://ollama.com/v1",
 		EnvVar:      "OLLAMA_API_KEY",
 		Models: []string{
-			"deepseek-v4-flash",
-			"deepseek-v4-pro",
-			"gemma4:31b",
-			"glm-5.1",
-			"glm-5.2",
-			"gpt-oss:120b",
-			"gpt-oss:20b",
-			"kimi-k2.5",
-			"kimi-k2.6",
-			"kimi-k2.7-code",
-			"minimax-m3",
-			"mistral-large-3:675b",
-			"nemotron-3-nano:30b",
-			"nemotron-3-super",
-			"nemotron-3-ultra",
-			"qwen3.5:397b",
+			"deepseek-v4.1-flash",
+			"deepseek-v4-pro:0813",
+			"kimi-k3.1-pro",
+			"glm-5.3-flash",
+			"minimax-m3.1-flash",
+			"mistral-large-4",
 		},
 	},
 	{
@@ -420,9 +370,11 @@ var registry = []Provider{
 		BaseURL:     "https://api.novita.ai/openai",
 		EnvVar:      "NOVITA_API_KEY",
 		Models: []string{
-			"moonshotai/kimi-k3",
-			"zai-org/glm-5.2",
-			"deepseek/deepseek-v4-flash-0731",
+			"deepseek/deepseek-v4.1-flash-1017",
+			"moonshotai/kimi-k3.1-pro",
+			"qwen/qwen4-max",
+			"zai-org/glm-5.3",
+			"tencent/hy4",
 		},
 	},
 	{
@@ -432,9 +384,7 @@ var registry = []Provider{
 		BaseURL:     "https://api.x.ai/v1",
 		EnvVar:      "XAI_API_KEY",
 		Models: []string{
-			"grok-4.6",
-			"grok-4.5",
-			"grok-4.3",
+			"grok-4.7",
 		},
 	},
 	{
@@ -443,19 +393,13 @@ var registry = []Provider{
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "http://localhost:4000/v1",
 		EnvVar:      "LITELLM_API_KEY",
+		// The proxy configuration determines which aliases it serves.
 		Models: []string{
-			"anthropic/claude-sonnet-4-6",
-			"anthropic/claude-opus-4-6",
-			"anthropic/claude-haiku-4-5",
-			"openai/gpt-4o",
-			"openai/gpt-5.4",
-			"openai/o3",
-			"vertex_ai/gemini-2.5-flash",
-			"vertex_ai/gemini-2.5-pro",
-			"bedrock/anthropic.claude-sonnet-4-6-v1",
-			"groq/llama-4-scout-17b-16e-instruct",
+			"anthropic/claude-sonnet-5-5",
+			"openai/gpt-5.5",
+			"vertex_ai/gemini-4-neon",
 			"mistral/mistral-large-latest",
-			"deepseek/deepseek-chat",
+			"deepseek/deepseek-flash",
 		},
 	},
 	{
@@ -465,11 +409,11 @@ var registry = []Provider{
 		BaseURL:     "https://api.siliconflow.com/v1",
 		EnvVar:      "SILICONFLOW_GLOBAL_API_KEY",
 		Models: []string{
-			"deepseek-ai/DeepSeek-V4-Pro",
-			"deepseek-ai/DeepSeek-V4-Flash",
-			"Qwen/Qwen3.6-27B",
-			"moonshotai/Kimi-K2.7-Code",
-			"zai-org/GLM-5.2",
+			"deepseek-ai/DeepSeek-V4.1-Flash",
+			"zai-org/GLM-5.3",
+			"moonshotai/Kimi-K3.1-Pro",
+			"Qwen/Qwen3.8-27B",
+			"MiniMaxAI/MiniMax-M3.1-Flash",
 		},
 	},
 	{
@@ -479,11 +423,10 @@ var registry = []Provider{
 		BaseURL:     "https://api.siliconflow.cn/v1",
 		EnvVar:      "SILICONFLOW_API_KEY",
 		Models: []string{
+			"deepseek-ai/DeepSeek-V4.1-Flash",
 			"deepseek-ai/DeepSeek-V4-Pro",
-			"deepseek-ai/DeepSeek-V4-Flash",
-			"Qwen/Qwen3.6-27B",
-			"moonshotai/Kimi-K2.7-Code",
-			"zai-org/GLM-5.2",
+			"zai-org/GLM-5.3-Flash",
+			"Qwen/Qwen3.8-27B",
 		},
 	},
 	{
@@ -492,14 +435,11 @@ var registry = []Provider{
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.mistral.ai/v1",
 		EnvVar:      "MISTRAL_API_KEY",
-		// Deliberately minimal list to keep this preset low-maintenance for
-		// alibaba/open-code-review maintainers. Users can point to any other
-		// Mistral model via `ocr config set model <name>`; the preset only
-		// seeds the picker UI. See https://docs.mistral.ai/getting-started/models/models_overview/
 		Models: []string{
-			"codestral-latest",
 			"mistral-large-latest",
 			"mistral-small-latest",
+			"ministral-14b-latest",
+			"zai-glm-5-3",
 		},
 	},
 }
